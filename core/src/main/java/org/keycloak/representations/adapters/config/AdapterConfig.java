@@ -24,21 +24,23 @@ import com.fasterxml.jackson.annotation.JsonPropertyOrder;
  * Configuration for Java based adapters
  *
  * @author <a href="mailto:bill@burkecentral.com">Bill Burke</a>
+ * @author <a href="mailto:brad.culley@spartasystems.com">Brad Culley</a>
+ * @author <a href="mailto:john.ament@spartasystems.com">John D. Ament</a>
  * @version $Revision: 1 $
  */
 @JsonPropertyOrder({"realm", "realm-public-key", "auth-server-url", "ssl-required",
         "resource", "public-client", "credentials",
         "use-resource-role-mappings",
-        "enable-cors", "cors-max-age", "cors-allowed-methods",
+        "enable-cors", "cors-max-age", "cors-allowed-methods", "cors-exposed-headers",
         "expose-token", "bearer-only", "autodetect-bearer-only",
         "connection-pool-size",
         "allow-any-hostname", "disable-trust-manager", "truststore", "truststore-password",
         "client-keystore", "client-keystore-password", "client-key-password",
         "always-refresh-token",
-        "register-node-at-startup", "register-node-period", "token-store", "principal-attribute",
+        "register-node-at-startup", "register-node-period", "token-store", "adapter-state-cookie-path", "principal-attribute",
         "proxy-url", "turn-off-change-session-id-on-login", "token-minimum-time-to-live",
         "min-time-between-jwks-requests", "public-key-cache-ttl",
-        "policy-enforcer"
+        "policy-enforcer", "ignore-oauth-query-parameter", "verify-token-audience"
 })
 public class AdapterConfig extends BaseAdapterConfig implements AdapterHttpClientConfig {
 
@@ -66,6 +68,8 @@ public class AdapterConfig extends BaseAdapterConfig implements AdapterHttpClien
     protected int registerNodePeriod = -1;
     @JsonProperty("token-store")
     protected String tokenStore;
+    @JsonProperty("adapter-state-cookie-path")
+    protected String tokenCookiePath;
     @JsonProperty("principal-attribute")
     protected String principalAttribute;
     @JsonProperty("turn-off-change-session-id-on-login")
@@ -78,6 +82,13 @@ public class AdapterConfig extends BaseAdapterConfig implements AdapterHttpClien
     protected int publicKeyCacheTtl = 86400; // 1 day
     @JsonProperty("policy-enforcer")
     protected PolicyEnforcerConfig policyEnforcerConfig;
+    // https://tools.ietf.org/html/rfc7636
+    @JsonProperty("enable-pkce")
+    protected boolean pkce = false;
+    @JsonProperty("ignore-oauth-query-parameter")
+    protected boolean ignoreOAuthQueryParameter = false;
+    @JsonProperty("verify-token-audience")
+    protected boolean verifyTokenAudience = false;
 
     /**
      * The Proxy url to use for requests to the auth-server, configurable via the adapter config property {@code proxy-url}.
@@ -188,6 +199,14 @@ public class AdapterConfig extends BaseAdapterConfig implements AdapterHttpClien
         this.tokenStore = tokenStore;
     }
 
+    public String getTokenCookiePath() {
+        return tokenCookiePath;
+    }
+
+    public void setTokenCookiePath(String tokenCookiePath) {
+        this.tokenCookiePath = tokenCookiePath;
+    }
+
     public String getPrincipalAttribute() {
         return principalAttribute;
     }
@@ -243,5 +262,30 @@ public class AdapterConfig extends BaseAdapterConfig implements AdapterHttpClien
 
     public void setPublicKeyCacheTtl(int publicKeyCacheTtl) {
         this.publicKeyCacheTtl = publicKeyCacheTtl;
+    }
+
+    // https://tools.ietf.org/html/rfc7636
+    public boolean isPkce() {
+        return pkce;
+    }
+
+    public void setPkce(boolean pkce) {
+        this.pkce = pkce;
+    }
+
+    public boolean isIgnoreOAuthQueryParameter() {
+        return ignoreOAuthQueryParameter;
+    }
+
+    public void setIgnoreOAuthQueryParameter(boolean ignoreOAuthQueryParameter) {
+        this.ignoreOAuthQueryParameter = ignoreOAuthQueryParameter;
+    }
+
+    public boolean isVerifyTokenAudience() {
+        return verifyTokenAudience;
+    }
+
+    public void setVerifyTokenAudience(boolean verifyTokenAudience) {
+        this.verifyTokenAudience = verifyTokenAudience;
     }
 }

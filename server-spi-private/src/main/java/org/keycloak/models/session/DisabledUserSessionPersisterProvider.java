@@ -18,16 +18,16 @@
 package org.keycloak.models.session;
 
 import org.keycloak.Config;
+import org.keycloak.models.AuthenticatedClientSessionModel;
 import org.keycloak.models.ClientModel;
-import org.keycloak.models.ClientSessionModel;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.KeycloakSessionFactory;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.UserModel;
 import org.keycloak.models.UserSessionModel;
 
-import java.util.Collections;
-import java.util.List;
+import java.util.Collection;
+import java.util.stream.Stream;
 
 /**
  * Persistence of userSessions is disabled . Useful just if you never need survive of userSessions/clientSessions
@@ -70,12 +70,7 @@ public class DisabledUserSessionPersisterProvider implements UserSessionPersiste
     }
 
     @Override
-    public void createClientSession(ClientSessionModel clientSession, boolean offline) {
-
-    }
-
-    @Override
-    public void updateUserSession(UserSessionModel userSession, boolean offline) {
+    public void createClientSession(AuthenticatedClientSessionModel clientSession, boolean offline) {
 
     }
 
@@ -85,7 +80,7 @@ public class DisabledUserSessionPersisterProvider implements UserSessionPersiste
     }
 
     @Override
-    public void removeClientSession(String clientSessionId, boolean offline) {
+    public void removeClientSession(String userSessionId, String clientUUID, boolean offline) {
 
     }
 
@@ -105,18 +100,19 @@ public class DisabledUserSessionPersisterProvider implements UserSessionPersiste
     }
 
     @Override
-    public void clearDetachedUserSessions() {
+    public void updateLastSessionRefreshes(RealmModel realm, int lastSessionRefresh, Collection<String> userSessionIds, boolean offline) {
 
     }
 
     @Override
-    public void updateAllTimestamps(int time) {
+    public void removeExpired(RealmModel realm) {
 
     }
 
     @Override
-    public List<UserSessionModel> loadUserSessions(int firstResult, int maxResults, boolean offline) {
-        return Collections.emptyList();
+    public Stream<UserSessionModel> loadUserSessionsStream(Integer firstResult, Integer maxResults, boolean offline,
+                                                           Integer lastCreatedOn, String lastUserSessionId) {
+        return Stream.empty();
     }
 
     @Override

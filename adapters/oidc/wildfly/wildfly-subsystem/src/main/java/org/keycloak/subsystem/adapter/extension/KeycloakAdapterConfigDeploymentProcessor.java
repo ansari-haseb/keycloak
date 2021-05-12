@@ -17,6 +17,8 @@
 
 package org.keycloak.subsystem.adapter.extension;
 
+import static org.keycloak.subsystem.adapter.extension.Elytron.isElytronEnabled;
+
 import org.jboss.as.server.deployment.DeploymentPhaseContext;
 import org.jboss.as.server.deployment.DeploymentUnit;
 import org.jboss.as.server.deployment.DeploymentUnitProcessingException;
@@ -25,7 +27,9 @@ import org.jboss.as.web.common.WarMetaData;
 import org.jboss.logging.Logger;
 import org.jboss.metadata.javaee.spec.ParamValueMetaData;
 import org.jboss.metadata.web.jboss.JBossWebMetaData;
+import org.jboss.metadata.web.spec.ListenerMetaData;
 import org.jboss.metadata.web.spec.LoginConfigMetaData;
+import org.keycloak.adapters.elytron.KeycloakConfigurationServletListener;
 import org.keycloak.subsystem.adapter.logging.KeycloakLogger;
 
 import java.util.ArrayList;
@@ -70,6 +74,8 @@ public class KeycloakAdapterConfigDeploymentProcessor implements DeploymentUnitP
         if (service.isSecureDeployment(deploymentUnit) && service.isDeploymentConfigured(deploymentUnit)) {
             addKeycloakAuthData(phaseContext, service);
         }
+
+        addConfigurationListener(phaseContext);
 
         // FYI, Undertow Extension will find deployments that have auth-method set to KEYCLOAK
 
@@ -121,9 +127,38 @@ public class KeycloakAdapterConfigDeploymentProcessor implements DeploymentUnitP
         webMetaData.setContextParams(contextParams);
     }
 
+    private void addConfigurationListener(DeploymentPhaseContext phaseContext) {
+        DeploymentUnit deploymentUnit = phaseContext.getDeploymentUnit();
+        WarMetaData warMetaData = deploymentUnit.getAttachment(WarMetaData.ATTACHMENT_KEY);
+        if (warMetaData == null) {
+            return;
+        }
+
+        JBossWebMetaData webMetaData = warMetaData.getMergedJBossWebMetaData();
+        if (webMetaData == null) {
+            webMetaData = new JBossWebMetaData();
+            warMetaData.setMergedJBossWebMetaData(webMetaData);
+        }
+
+        LoginConfigMetaData loginConfig = webMetaData.getLoginConfig();
+        if (loginConfig == null) {
+            return;
+        }
+        if (!loginConfig.getAuthMethod().equals("KEYCLOAK")) {
+            return;
+        }
+
+        if (isElytronEnabled(phaseContext)) {
+            ListenerMetaData listenerMetaData = new ListenerMetaData();
+
+            listenerMetaData.setListenerClass(KeycloakConfigurationServletListener.class.getName());
+
+            webMetaData.getListeners().add(listenerMetaData);
+        }
+    }
+
     @Override
     public void undeploy(DeploymentUnit du) {
 
     }
-
 }

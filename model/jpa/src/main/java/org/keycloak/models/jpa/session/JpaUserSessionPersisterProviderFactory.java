@@ -45,6 +45,11 @@ public class JpaUserSessionPersisterProviderFactory implements UserSessionPersis
     }
 
     @Override
+    public void postInit(KeycloakSessionFactory factory) {
+
+    }
+
+    @Override
     public void close() {
 
     }
@@ -52,5 +57,10 @@ public class JpaUserSessionPersisterProviderFactory implements UserSessionPersis
     @Override
     public String getId() {
         return ID;
+    }
+
+    @Override
+    public int order() {
+        return 100;
     }
 }

@@ -18,7 +18,7 @@ package org.keycloak.services.resources.admin;
 
 import org.jboss.logging.Logger;
 import org.jboss.resteasy.annotations.cache.NoCache;
-import org.jboss.resteasy.spi.NotFoundException;
+import javax.ws.rs.NotFoundException;
 import org.keycloak.common.ClientConnection;
 import org.keycloak.component.ComponentFactory;
 import org.keycloak.component.ComponentModel;
@@ -38,7 +38,7 @@ import org.keycloak.representations.idm.ComponentRepresentation;
 import org.keycloak.representations.idm.ComponentTypeRepresentation;
 import org.keycloak.representations.idm.ConfigPropertyRepresentation;
 import org.keycloak.services.ErrorResponse;
-import org.keycloak.services.ErrorResponseException;
+import org.keycloak.services.resources.admin.permissions.AdminPermissionEvaluator;
 
 import javax.ws.rs.BadRequestException;
 import javax.ws.rs.Consumes;
@@ -54,16 +54,13 @@ import javax.ws.rs.core.Context;
 import javax.ws.rs.core.HttpHeaders;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
-import javax.ws.rs.core.UriInfo;
-
 import java.text.MessageFormat;
 import java.util.Arrays;
-import java.util.Collections;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Properties;
-import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * @resource Component
@@ -75,7 +72,7 @@ public class ComponentResource {
 
     protected RealmModel realm;
 
-    private RealmAuth auth;
+    private AdminPermissionEvaluator auth;
 
     private AdminEventBuilder adminEvent;
 
@@ -83,67 +80,60 @@ public class ComponentResource {
     protected ClientConnection clientConnection;
 
     @Context
-    protected UriInfo uriInfo;
-
-    @Context
     protected KeycloakSession session;
 
     @Context
     protected HttpHeaders headers;
 
-    public ComponentResource(RealmModel realm, RealmAuth auth, AdminEventBuilder adminEvent) {
+    public ComponentResource(RealmModel realm, AdminPermissionEvaluator auth, AdminEventBuilder adminEvent) {
         this.auth = auth;
         this.realm = realm;
         this.adminEvent = adminEvent.resource(ResourceType.COMPONENT);
-
-        auth.init(RealmAuth.Resource.REALM);
     }
 
     @GET
     @Produces(MediaType.APPLICATION_JSON)
     @NoCache
-    public List<ComponentRepresentation> getComponents(@QueryParam("parent") String parent,
+    public Stream<ComponentRepresentation> getComponents(@QueryParam("parent") String parent,
                                                        @QueryParam("type") String type,
                                                        @QueryParam("name") String name) {
-        auth.requireView();
-        List<ComponentModel> components = Collections.EMPTY_LIST;
+        auth.realm().requireViewRealm();
+        Stream<ComponentModel> components;
         if (parent == null && type == null) {
-            components = realm.getComponents();
+            components = realm.getComponentsStream();
 
         } else if (type == null) {
-            components = realm.getComponents(parent);
+            components = realm.getComponentsStream(parent);
         } else if (parent == null) {
-            components = realm.getComponents(realm.getId(), type);
+            components = realm.getComponentsStream(realm.getId(), type);
         } else {
-            components = realm.getComponents(parent, type);
+            components = realm.getComponentsStream(parent, type);
         }
-        List<ComponentRepresentation> reps = new LinkedList<>();
-        for (ComponentModel component : components) {
-            if (name != null && !name.equals(component.getName())) continue;
-            ComponentRepresentation rep = null;
-            try {
-                rep = ModelToRepresentation.toRepresentation(session, component, false);
-            } catch (Exception e) {
-                logger.error("Failed to get component list for component model" + component.getName() + "of realm " + realm.getName());
-                rep = ModelToRepresentation.toRepresentationWithoutConfig(component);
-            }
-            reps.add(rep);
-        }
-        return reps;
+
+        return components
+                .filter(component -> Objects.isNull(name) || Objects.equals(component.getName(), name))
+                .map(component -> {
+                    try {
+                        return ModelToRepresentation.toRepresentation(session, component, false);
+                    } catch (Exception e) {
+                        logger.error("Failed to get component list for component model" + component.getName() + "of realm " + realm.getName());
+                        return ModelToRepresentation.toRepresentationWithoutConfig(component);
+                    }
+                });
     }
 
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
     public Response create(ComponentRepresentation rep) {
-        auth.requireManage();
+        auth.realm().requireManageRealm();
         try {
             ComponentModel model = RepresentationToModel.toModel(session, rep);
             if (model.getParentId() == null) model.setParentId(realm.getId());
 
             model = realm.addComponentModel(model);
 
-            adminEvent.operation(OperationType.CREATE).resourcePath(uriInfo, model.getId()).representation(StripSecretsUtils.strip(session, rep)).success();
-            return Response.created(uriInfo.getAbsolutePathBuilder().path(model.getId()).build()).build();
+            adminEvent.operation(OperationType.CREATE).resourcePath(session.getContext().getUri(), model.getId()).representation(StripSecretsUtils.strip(session, rep)).success();
+            return Response.created(session.getContext().getUri().getAbsolutePathBuilder().path(model.getId()).build()).build();
         } catch (ComponentValidationException e) {
             return localizedErrorResponse(e);
         } catch (IllegalArgumentException e) {
@@ -156,7 +146,7 @@ public class ComponentResource {
     @Produces(MediaType.APPLICATION_JSON)
     @NoCache
     public ComponentRepresentation getComponent(@PathParam("id") String id) {
-        auth.requireView();
+        auth.realm().requireViewRealm();
         ComponentModel model = realm.getComponent(id);
         if (model == null) {
             throw new NotFoundException("Could not find component");
@@ -169,14 +159,14 @@ public class ComponentResource {
     @Path("{id}")
     @Consumes(MediaType.APPLICATION_JSON)
     public Response updateComponent(@PathParam("id") String id, ComponentRepresentation rep) {
-        auth.requireManage();
+        auth.realm().requireManageRealm();
         try {
             ComponentModel model = realm.getComponent(id);
             if (model == null) {
                 throw new NotFoundException("Could not find component");
             }
             RepresentationToModel.updateComponent(session, rep, model, false);
-            adminEvent.operation(OperationType.UPDATE).resourcePath(uriInfo).representation(StripSecretsUtils.strip(session, rep)).success();
+            adminEvent.operation(OperationType.UPDATE).resourcePath(session.getContext().getUri()).representation(StripSecretsUtils.strip(session, rep)).success();
             realm.updateComponent(model);
             return Response.noContent().build();
         } catch (ComponentValidationException e) {
@@ -188,18 +178,18 @@ public class ComponentResource {
     @DELETE
     @Path("{id}")
     public void removeComponent(@PathParam("id") String id) {
-        auth.requireManage();
+        auth.realm().requireManageRealm();
         ComponentModel model = realm.getComponent(id);
         if (model == null) {
             throw new NotFoundException("Could not find component");
         }
-        adminEvent.operation(OperationType.DELETE).resourcePath(uriInfo).success();
+        adminEvent.operation(OperationType.DELETE).resourcePath(session.getContext().getUri()).success();
         realm.removeComponent(model);
 
     }
 
     private Response localizedErrorResponse(ComponentValidationException cve) {
-        Properties messages = AdminRoot.getMessages(session, realm, auth.getAuth().getToken().getLocale(), "admin-messages", "messages");
+        Properties messages = AdminRoot.getMessages(session, realm, auth.adminAuth().getToken().getLocale(), "admin-messages", "messages");
 
         Object[] localizedParameters = cve.getParameters()==null ? null : Arrays.asList(cve.getParameters()).stream().map((Object parameter) -> {
 
@@ -227,8 +217,8 @@ public class ComponentResource {
     @Path("{id}/sub-component-types")
     @Produces(MediaType.APPLICATION_JSON)
     @NoCache
-    public List<ComponentTypeRepresentation> getSubcomponentConfig(@PathParam("id") String parentId, @QueryParam("type") String subtype) {
-        auth.requireView();
+    public Stream<ComponentTypeRepresentation> getSubcomponentConfig(@PathParam("id") String parentId, @QueryParam("type") String subtype) {
+        auth.realm().requireViewRealm();
         ComponentModel parent = realm.getComponent(parentId);
         if (parent == null) {
             throw new NotFoundException("Could not find parent component");
@@ -236,41 +226,39 @@ public class ComponentResource {
         if (subtype == null) {
             throw new BadRequestException("must specify a subtype");
         }
-        Class<? extends Provider> providerClass = null;
+        Class<? extends Provider> providerClass;
         try {
             providerClass = (Class<? extends Provider>)Class.forName(subtype);
         } catch (ClassNotFoundException e) {
             throw new RuntimeException(e);
         }
-        List<ComponentTypeRepresentation> subcomponents = new LinkedList<>();
-        for (ProviderFactory factory : session.getKeycloakSessionFactory().getProviderFactories(providerClass)) {
-            ComponentTypeRepresentation rep = new ComponentTypeRepresentation();
-            rep.setId(factory.getId());
-            if (!(factory instanceof ComponentFactory)) {
-                continue;
-            }
-            ComponentFactory componentFactory = (ComponentFactory)factory;
 
-            rep.setHelpText(componentFactory.getHelpText());
-            List<ProviderConfigProperty> props = null;
-            Map<String, Object> metadata = null;
-            if (factory instanceof SubComponentFactory) {
-                props = ((SubComponentFactory)factory).getConfigProperties(realm, parent);
-                metadata = ((SubComponentFactory)factory).getTypeMetadata(realm, parent);
-
-            } else {
-                props = componentFactory.getConfigProperties();
-                metadata = componentFactory.getTypeMetadata();
-            }
-
-            List<ConfigPropertyRepresentation> propReps =  ModelToRepresentation.toRepresentation(props);
-            rep.setProperties(propReps);
-            rep.setMetadata(metadata);
-            subcomponents.add(rep);
-        }
-        return subcomponents;
+        return session.getKeycloakSessionFactory().getProviderFactoriesStream(providerClass)
+            .filter(ComponentFactory.class::isInstance)
+            .map(factory -> toComponentTypeRepresentation(factory, parent));
     }
 
+    private ComponentTypeRepresentation toComponentTypeRepresentation(ProviderFactory factory, ComponentModel parent) {
+        ComponentTypeRepresentation rep = new ComponentTypeRepresentation();
+        rep.setId(factory.getId());
 
+        ComponentFactory componentFactory = (ComponentFactory)factory;
 
+        rep.setHelpText(componentFactory.getHelpText());
+        List<ProviderConfigProperty> props;
+        Map<String, Object> metadata;
+        if (factory instanceof SubComponentFactory) {
+            props = ((SubComponentFactory)factory).getConfigProperties(realm, parent);
+            metadata = ((SubComponentFactory)factory).getTypeMetadata(realm, parent);
+
+        } else {
+            props = componentFactory.getConfigProperties();
+            metadata = componentFactory.getTypeMetadata();
+        }
+
+        List<ConfigPropertyRepresentation> propReps =  ModelToRepresentation.toRepresentation(props);
+        rep.setProperties(propReps);
+        rep.setMetadata(metadata);
+        return rep;
+    }
 }

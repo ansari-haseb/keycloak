@@ -18,7 +18,9 @@ package org.keycloak.services.resources.admin;
 
 import org.jboss.logging.Logger;
 import org.jboss.resteasy.annotations.cache.NoCache;
-import org.jboss.resteasy.spi.NotFoundException;
+
+import javax.ws.rs.NotFoundException;
+import org.keycloak.services.resources.admin.permissions.AdminPermissionEvaluator;
 import org.keycloak.events.admin.OperationType;
 import org.keycloak.events.admin.ResourceType;
 import org.keycloak.models.ClientModel;
@@ -30,23 +32,24 @@ import org.keycloak.models.RoleModel;
 import org.keycloak.models.utils.ModelToRepresentation;
 import org.keycloak.representations.idm.RoleRepresentation;
 import org.keycloak.services.ErrorResponseException;
+import org.keycloak.storage.ReadOnlyException;
 
 import javax.ws.rs.Consumes;
 import javax.ws.rs.DELETE;
+import javax.ws.rs.DefaultValue;
 import javax.ws.rs.GET;
 import javax.ws.rs.POST;
 import javax.ws.rs.Path;
 import javax.ws.rs.Produces;
+import javax.ws.rs.QueryParam;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import javax.ws.rs.core.UriInfo;
-import java.text.MessageFormat;
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.LinkedList;
 import java.util.List;
-import java.util.Properties;
-import java.util.Set;
+import java.util.function.Function;
+import java.util.function.Predicate;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * @resource Client Role Mappings
@@ -58,19 +61,26 @@ public class ClientRoleMappingsResource {
 
     protected KeycloakSession session;
     protected RealmModel realm;
-    protected RealmAuth auth;
+    protected AdminPermissionEvaluator auth;
     protected RoleMapperModel user;
     protected ClientModel client;
     protected AdminEventBuilder adminEvent;
     private UriInfo uriInfo;
+    protected AdminPermissionEvaluator.RequirePermissionCheck managePermission;
+    protected AdminPermissionEvaluator.RequirePermissionCheck viewPermission;
 
-    public ClientRoleMappingsResource(UriInfo uriInfo, KeycloakSession session, RealmModel realm, RealmAuth auth, RoleMapperModel user, ClientModel client, AdminEventBuilder adminEvent) {
+
+    public ClientRoleMappingsResource(UriInfo uriInfo, KeycloakSession session, RealmModel realm, AdminPermissionEvaluator auth,
+                                      RoleMapperModel user, ClientModel client, AdminEventBuilder adminEvent,
+                                      AdminPermissionEvaluator.RequirePermissionCheck manageCheck, AdminPermissionEvaluator.RequirePermissionCheck viewCheck ) {
         this.uriInfo = uriInfo;
         this.session = session;
         this.realm = realm;
         this.auth = auth;
         this.user = user;
         this.client = client;
+        this.managePermission = manageCheck;
+        this.viewPermission = viewCheck;
         this.adminEvent = adminEvent.resource(ResourceType.CLIENT_ROLE_MAPPING);
     }
 
@@ -82,19 +92,10 @@ public class ClientRoleMappingsResource {
     @GET
     @Produces(MediaType.APPLICATION_JSON)
     @NoCache
-    public List<RoleRepresentation> getClientRoleMappings() {
-        auth.requireView();
+    public Stream<RoleRepresentation> getClientRoleMappings() {
+        viewPermission.require();
 
-        if (user == null || client == null) {
-            throw new NotFoundException("Not found");
-        }
-
-        Set<RoleModel> mappings = user.getClientRoleMappings(client);
-        List<RoleRepresentation> mapRep = new ArrayList<RoleRepresentation>();
-        for (RoleModel roleModel : mappings) {
-            mapRep.add(ModelToRepresentation.toRepresentation(roleModel));
-        }
-        return mapRep;
+        return user.getClientRoleMappingsStream(client).map(ModelToRepresentation::toBriefRepresentation);
     }
 
     /**
@@ -102,25 +103,21 @@ public class ClientRoleMappingsResource {
      *
      * This recurses any composite roles
      *
+     * @param briefRepresentation if false, return roles with their attributes
+     *
      * @return
      */
     @Path("composite")
     @GET
     @Produces(MediaType.APPLICATION_JSON)
     @NoCache
-    public List<RoleRepresentation> getCompositeClientRoleMappings() {
-        auth.requireView();
+    public Stream<RoleRepresentation> getCompositeClientRoleMappings(@QueryParam("briefRepresentation") @DefaultValue("true") boolean briefRepresentation) {
+        viewPermission.require();
 
-        if (user == null || client == null) {
-            throw new NotFoundException("Not found");
-        }
-
-        Set<RoleModel> roles = client.getRoles();
-        List<RoleRepresentation> mapRep = new ArrayList<RoleRepresentation>();
-        for (RoleModel roleModel : roles) {
-            if (user.hasRole(roleModel)) mapRep.add(ModelToRepresentation.toRepresentation(roleModel));
-        }
-        return mapRep;
+        Stream<RoleModel> roles = client.getRolesStream();
+        Function<RoleModel, RoleRepresentation> toBriefRepresentation = briefRepresentation
+                ? ModelToRepresentation::toBriefRepresentation : ModelToRepresentation::toRepresentation;
+        return roles.filter(user::hasRole).map(toBriefRepresentation);
     }
 
     /**
@@ -132,29 +129,13 @@ public class ClientRoleMappingsResource {
     @GET
     @Produces(MediaType.APPLICATION_JSON)
     @NoCache
-    public List<RoleRepresentation> getAvailableClientRoleMappings() {
-        auth.requireView();
+    public Stream<RoleRepresentation> getAvailableClientRoleMappings() {
+        viewPermission.require();
 
-        if (user == null || client == null) {
-            throw new NotFoundException("Not found");
-        }
-
-        Set<RoleModel> available = client.getRoles();
-        return getAvailableRoles(user, available);
-    }
-
-    public static List<RoleRepresentation> getAvailableRoles(RoleMapperModel mapper, Set<RoleModel> available) {
-        Set<RoleModel> roles = new HashSet<RoleModel>();
-        for (RoleModel roleModel : available) {
-            if (mapper.hasRole(roleModel)) continue;
-            roles.add(roleModel);
-        }
-
-        List<RoleRepresentation> mappings = new ArrayList<RoleRepresentation>();
-        for (RoleModel roleModel : roles) {
-            mappings.add(ModelToRepresentation.toRepresentation(roleModel));
-        }
-        return mappings;
+        return client.getRolesStream()
+                .filter(auth.roles()::canMapRole)
+                .filter(((Predicate<RoleModel>) user::hasRole).negate())
+                .map(ModelToRepresentation::toBriefRepresentation);
     }
 
     /**
@@ -165,50 +146,44 @@ public class ClientRoleMappingsResource {
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
     public void addClientRoleMapping(List<RoleRepresentation> roles) {
-        auth.requireManage();
+        managePermission.require();
 
-        if (user == null || client == null) {
-            throw new NotFoundException("Not found");
-        }
-
-        for (RoleRepresentation role : roles) {
-            RoleModel roleModel = client.getRole(role.getName());
-            if (roleModel == null || !roleModel.getId().equals(role.getId())) {
-                throw new NotFoundException("Role not found");
+        try {
+            for (RoleRepresentation role : roles) {
+                RoleModel roleModel = client.getRole(role.getName());
+                if (roleModel == null || !roleModel.getId().equals(role.getId())) {
+                    throw new NotFoundException("Role not found");
+                }
+                auth.roles().requireMapRole(roleModel);
+                user.grantRole(roleModel);
             }
-            user.grantRole(roleModel);
+        } catch (ModelException | ReadOnlyException me) {
+            logger.warn(me.getMessage(), me);
+            throw new ErrorResponseException("invalid_request", "Could not add user role mappings!", Response.Status.BAD_REQUEST);
         }
+
         adminEvent.operation(OperationType.CREATE).resourcePath(uriInfo).representation(roles).success();
 
     }
 
     /**
-     * Delete client-level roles from user role mapping
-     *
-     * @param roles
-     */
+         * Delete client-level roles from user role mapping
+         *
+         * @param roles
+         */
     @DELETE
     @Consumes(MediaType.APPLICATION_JSON)
     public void deleteClientRoleMapping(List<RoleRepresentation> roles) {
-        auth.requireManage();
-
-        if (user == null || client == null) {
-            throw new NotFoundException("Not found");
-        }
+        managePermission.require();
 
         if (roles == null) {
-            Set<RoleModel> roleModels = user.getClientRoleMappings(client);
-            roles = new LinkedList<>();
-
-            for (RoleModel roleModel : roleModels) {
-                if (roleModel.getContainer() instanceof ClientModel) {
-                    ClientModel client = (ClientModel) roleModel.getContainer();
-                    if (!client.getId().equals(this.client.getId())) continue;
-                }
-                user.deleteRoleMapping(roleModel);
-                roles.add(ModelToRepresentation.toRepresentation(roleModel));
-            }
-
+            roles = user.getClientRoleMappingsStream(client)
+                    .peek(roleModel -> {
+                        auth.roles().requireMapRole(roleModel);
+                        user.deleteRoleMapping(roleModel);
+                    })
+                    .map(ModelToRepresentation::toBriefRepresentation)
+                    .collect(Collectors.toList());
         } else {
             for (RoleRepresentation role : roles) {
                 RoleModel roleModel = client.getRole(role.getName());
@@ -216,12 +191,12 @@ public class ClientRoleMappingsResource {
                     throw new NotFoundException("Role not found");
                 }
 
+                auth.roles().requireMapRole(roleModel);
                 try {
                     user.deleteRoleMapping(roleModel);
-                } catch (ModelException me) {
-                    Properties messages = AdminRoot.getMessages(session, realm, auth.getAuth().getToken().getLocale());
-                    throw new ErrorResponseException(me.getMessage(), MessageFormat.format(messages.getProperty(me.getMessage(), me.getMessage()), me.getParameters()),
-                            Response.Status.BAD_REQUEST);
+                } catch (ModelException | ReadOnlyException me) {
+                    logger.warn(me.getMessage(), me);
+                    throw new ErrorResponseException("invalid_request", "Could not remove user role mappings!", Response.Status.BAD_REQUEST);
                 }
             }
         }

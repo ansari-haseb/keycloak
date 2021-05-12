@@ -20,6 +20,7 @@ package org.keycloak.events.jpa;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.jboss.logging.Logger;
+import org.keycloak.common.util.Time;
 import org.keycloak.events.Event;
 import org.keycloak.events.EventQuery;
 import org.keycloak.events.EventStoreProvider;
@@ -28,10 +29,13 @@ import org.keycloak.events.admin.AdminEvent;
 import org.keycloak.events.admin.AdminEventQuery;
 import org.keycloak.events.admin.AuthDetails;
 import org.keycloak.events.admin.OperationType;
-import org.keycloak.events.admin.ResourceType;
+import org.keycloak.models.KeycloakSession;
+import org.keycloak.models.utils.KeycloakModelUtils;
 
 import javax.persistence.EntityManager;
 import java.io.IOException;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -45,10 +49,14 @@ public class JpaEventStoreProvider implements EventStoreProvider {
     };
     private static final Logger logger = Logger.getLogger(JpaEventStoreProvider.class);
 
-    private EntityManager em;
+    private final KeycloakSession session;
+    private final EntityManager em;
+    private final int maxDetailLength;
 
-    public JpaEventStoreProvider(EntityManager em) {
+    public JpaEventStoreProvider(KeycloakSession session, EntityManager em, int maxDetailLength) {
+        this.session = session;
         this.em = em;
+        this.maxDetailLength = maxDetailLength;
     }
 
     @Override
@@ -69,6 +77,37 @@ public class JpaEventStoreProvider implements EventStoreProvider {
     @Override
     public void clear(String realmId, long olderThan) {
         em.createQuery("delete from EventEntity where realmId = :realmId and time < :time").setParameter("realmId", realmId).setParameter("time", olderThan).executeUpdate();
+    }
+
+    @Override
+    public void clearExpiredEvents() {
+        // By default, realm provider is always "jpa", so we can optimize and delete all events in single SQL, assuming that realms are saved in the DB as well.
+        // Fallback to model API just with different realm provider than "jpa" (This is never the case in standard Keycloak installations)
+        int numDeleted = 0;
+        long currentTimeMillis = Time.currentTimeMillis();
+        if (KeycloakModelUtils.isRealmProviderJpa(session)) {
+
+            // Group realms by expiration times. This will be effective if different realms have same/similar event expiration times, which will probably be the case in most environments
+            List<Long> eventExpirations = em.createQuery("select distinct realm.eventsExpiration from RealmEntity realm").getResultList();
+            for (Long expiration : eventExpirations) {
+                if (expiration > 0) {
+                    int currentNumDeleted = em.createQuery("delete from EventEntity where realmId in (select realm.id from RealmEntity realm where realm.eventsExpiration = :expiration) and time < :eventTime")
+                            .setParameter("expiration", expiration)
+                            .setParameter("eventTime", currentTimeMillis - (expiration * 1000))
+                            .executeUpdate();
+                    logger.tracef("Deleted %d events for the expiration %d", currentNumDeleted, expiration);
+                    numDeleted += currentNumDeleted;
+                }
+            }
+            logger.debugf("Cleared %d expired events in all realms", numDeleted);
+        } else {
+            session.realms().getRealmsStream().forEach(realm -> {
+                if (realm.isEventsEnabled() && realm.getEventsExpiration() > 0) {
+                    long olderThan = Time.currentTimeMillis() - realm.getEventsExpiration() * 1000;
+                    clear(realm.getId(), olderThan);
+                }
+            });
+        }
     }
 
     @Override
@@ -105,7 +144,7 @@ public class JpaEventStoreProvider implements EventStoreProvider {
     public void close() {
     }
 
-    static EventEntity convertEvent(Event event) {
+    private EventEntity convertEvent(Event event) {
         EventEntity eventEntity = new EventEntity();
         eventEntity.setId(UUID.randomUUID().toString());
         eventEntity.setTime(event.getTime());
@@ -117,11 +156,29 @@ public class JpaEventStoreProvider implements EventStoreProvider {
         eventEntity.setIpAddress(event.getIpAddress());
         eventEntity.setError(event.getError());
         try {
-            eventEntity.setDetailsJson(mapper.writeValueAsString(event.getDetails()));
+            if (maxDetailLength > 0 && event.getDetails() != null) {
+                Map<String, String> result = new HashMap<>(event.getDetails());
+                result.entrySet().forEach(t -> t.setValue(trimToMaxLength(t.getValue())));
+
+                eventEntity.setDetailsJson(mapper.writeValueAsString(result));
+            } else {
+                eventEntity.setDetailsJson(mapper.writeValueAsString(event.getDetails()));
+            }
         } catch (IOException ex) {
             logger.error("Failed to write log details", ex);
         }
         return eventEntity;
+    }
+
+    private String trimToMaxLength(String detail) {
+        if (detail != null && detail.length() > maxDetailLength) {
+            // (maxDetailLength - 3) takes "..." into account
+            String result = detail.substring(0, maxDetailLength - 3).concat("...");
+            logger.warn("Detail was truncated to " + result);
+            return result;
+        } else {
+            return detail;
+        }
     }
 
     static Event convertEvent(EventEntity eventEntity) {
@@ -151,8 +208,8 @@ public class JpaEventStoreProvider implements EventStoreProvider {
         setAuthDetails(adminEventEntity, adminEvent.getAuthDetails());
         adminEventEntity.setOperationType(adminEvent.getOperationType().toString());
 
-        if (adminEvent.getResourceType() != null) {
-            adminEventEntity.setResourceType(adminEvent.getResourceType().toString());
+        if (adminEvent.getResourceTypeAsString() != null) {
+            adminEventEntity.setResourceType(adminEvent.getResourceTypeAsString());
         }
 
         adminEventEntity.setResourcePath(adminEvent.getResourcePath());
@@ -172,7 +229,7 @@ public class JpaEventStoreProvider implements EventStoreProvider {
         adminEvent.setOperationType(OperationType.valueOf(adminEventEntity.getOperationType()));
 
         if (adminEventEntity.getResourceType() != null) {
-            adminEvent.setResourceType(ResourceType.valueOf(adminEventEntity.getResourceType()));
+            adminEvent.setResourceTypeAsString(adminEventEntity.getResourceType());
         }
 
         adminEvent.setResourcePath(adminEventEntity.getResourcePath());

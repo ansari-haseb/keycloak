@@ -51,7 +51,7 @@ public class ScriptBasedAuthenticatorFactory implements AuthenticatorFactory, En
 
     static final AuthenticationExecutionModel.Requirement[] REQUIREMENT_CHOICES = {
             AuthenticationExecutionModel.Requirement.REQUIRED,
-            AuthenticationExecutionModel.Requirement.OPTIONAL,
+            AuthenticationExecutionModel.Requirement.ALTERNATIVE,
             AuthenticationExecutionModel.Requirement.DISABLED};
 
     static final ScriptBasedAuthenticator SINGLETON = new ScriptBasedAuthenticator();
@@ -146,13 +146,13 @@ public class ScriptBasedAuthenticatorFactory implements AuthenticatorFactory, En
         }
         script.setDefaultValue(scriptTemplate);
         script.setHelpText("The script used to authenticate. Scripts must at least define a function with the name 'authenticate(context)' that accepts a context (AuthenticationFlowContext) parameter.\n" +
-                "This authenticator exposes the following additional variables: 'script', 'realm', 'user', 'session', 'httpRequest', 'LOG'");
+                "This authenticator exposes the following additional variables: 'script', 'realm', 'user', 'session', 'authenticationSession', 'httpRequest', 'LOG'");
 
         return asList(name, description, script);
     }
 
     @Override
     public boolean isSupported() {
-        return Profile.isFeatureEnabled(Profile.Feature.SCRIPTS);
+        return Profile.isFeatureEnabled(Profile.Feature.SCRIPTS) && Profile.isFeatureEnabled(Profile.Feature.UPLOAD_SCRIPTS);
     }
 }

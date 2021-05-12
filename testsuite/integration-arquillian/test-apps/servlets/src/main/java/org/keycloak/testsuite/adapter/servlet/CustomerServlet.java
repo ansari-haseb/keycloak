@@ -18,7 +18,6 @@
 package org.keycloak.testsuite.adapter.servlet;
 
 import org.keycloak.KeycloakSecurityContext;
-import org.keycloak.common.util.UriUtils;
 
 import javax.servlet.ServletException;
 import javax.servlet.annotation.WebServlet;
@@ -43,65 +42,74 @@ public class CustomerServlet extends HttpServlet {
 
     @Override
     protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
-        PrintWriter pw = resp.getWriter();
-        KeycloakSecurityContext context = (KeycloakSecurityContext) req.getAttribute(KeycloakSecurityContext.class.getName());
-        if (req.getRequestURI().endsWith("logout")) {
-            resp.setStatus(200);
-            pw.println("servlet logout ok");
-            
-            //Clear principal form database-service by calling logout
-            StringBuilder result = new StringBuilder();
-            String urlBase = ServletTestUtils.getUrlBase(req);
+        try (PrintWriter pw = resp.getWriter()) {
+            KeycloakSecurityContext context = (KeycloakSecurityContext) req.getAttribute(KeycloakSecurityContext.class.getName());
+            if (req.getRequestURI().endsWith("logout")) {
+                resp.setStatus(200);
+                pw.println("<html><body>");
+                pw.println("<div id=\"customer_portal_logout\">servlet logout ok</div>");
+                pw.println("</body></html>");
 
-            URL url = new URL(urlBase + "/customer-db/");
-            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-            conn.setRequestMethod("DELETE");
-            conn.setRequestProperty(HttpHeaders.AUTHORIZATION, "Bearer " + context.getTokenString());
-            BufferedReader rd = new BufferedReader(new InputStreamReader(conn.getInputStream()));
-            String line;
-            while ((line = rd.readLine()) != null) {
-              result.append(line);
+                //Clear principal form database-service by calling logout
+                StringBuilder result = new StringBuilder();
+                String urlBase = ServletTestUtils.getUrlBase();
+
+                URL url = new URL(urlBase + "/customer-db/");
+                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                conn.setRequestMethod("DELETE");
+                conn.setRequestProperty(HttpHeaders.AUTHORIZATION, "Bearer " + context.getTokenString());
+                BufferedReader rd = new BufferedReader(new InputStreamReader(conn.getInputStream()));
+                String line;
+                while ((line = rd.readLine()) != null) {
+                    result.append(line);
+                }
+                rd.close();
+                pw.println(result.toString());
+                // Call logout before pw.flush
+                req.logout();
+                pw.flush();
+                return;
             }
-            rd.close();
-            pw.println(result.toString());
-            // Call logout before pw.flush
-            req.logout();
+
+            String urlBase = ServletTestUtils.getUrlBase();
+
+            // Decide what to call based on the URL suffix
+            String serviceUrl;
+            if (req.getRequestURI().endsWith("/call-customer-db-audience-required")) {
+                serviceUrl = urlBase + "/customer-db-audience-required/";
+            } else {
+                serviceUrl = urlBase + "/customer-db/";
+            }
+
+            String result = invokeService(serviceUrl, context);
+
+            resp.setContentType("text/html");
+            pw.println(result);
             pw.flush();
-            return;
         }
-       
+    }
 
-        //try {
+    private String invokeService(String serviceUrl, KeycloakSecurityContext context) throws IOException {
         StringBuilder result = new StringBuilder();
-        String urlBase = ServletTestUtils.getUrlBase(req);
 
-        URL url = new URL(urlBase + "/customer-db/");
+        URL url = new URL(serviceUrl);
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
         conn.setRequestMethod("GET");
         conn.setRequestProperty(HttpHeaders.AUTHORIZATION, "Bearer " + context.getTokenString());
+
+        if (conn.getResponseCode() != 200) {
+            conn.getErrorStream().close();
+            return "Service returned: " + conn.getResponseCode();
+        }
+
         BufferedReader rd = new BufferedReader(new InputStreamReader(conn.getInputStream()));
         String line;
         while ((line = rd.readLine()) != null) {
             result.append(line);
         }
         rd.close();
-        resp.setContentType("text/html");
-        pw.println(result.toString());
-        pw.flush();
-//
-//            Response response = target.request().get();
-//            if (response.getStatus() != 401) { // assert response status == 401
-//                throw new AssertionError("Response status code is not 401.");
-//            }
-//            response.close();
-//            String html = target.request()
-//                                .header(HttpHeaders.AUTHORIZATION, "Bearer " + context.getTokenString())
-//                                .get(String.class);
-//            pw.println(html);
-//            pw.flush();
-//        } finally {
-//            client.close();
-//        }
+
+        return result.toString();
     }
 
 }

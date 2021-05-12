@@ -17,20 +17,19 @@
 
 package org.keycloak.protocol.oidc.mappers;
 
-import org.keycloak.models.ClientSessionModel;
-import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.ProtocolMapperModel;
 import org.keycloak.models.UserModel;
 import org.keycloak.models.UserSessionModel;
 import org.keycloak.protocol.oidc.OIDCLoginProtocol;
 import org.keycloak.provider.ProviderConfigProperty;
-import org.keycloak.representations.AccessToken;
 import org.keycloak.representations.IDToken;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * Set the 'name' claim to be first + last name.
@@ -40,7 +39,7 @@ import java.util.Map;
  */
 public class FullNameMapper extends AbstractOIDCProtocolMapper implements OIDCAccessTokenMapper, OIDCIDTokenMapper, UserInfoTokenMapper {
 
-    private static final List<ProviderConfigProperty> configProperties = new ArrayList<ProviderConfigProperty>();
+    private static final List<ProviderConfigProperty> configProperties = new ArrayList<>();
 
     static {
         OIDCAttributeMapperHelper.addIncludeInTokensConfig(configProperties, FullNameMapper.class);
@@ -76,23 +75,23 @@ public class FullNameMapper extends AbstractOIDCProtocolMapper implements OIDCAc
 
     protected void setClaim(IDToken token, ProtocolMapperModel mappingModel, UserSessionModel userSession) {
         UserModel user = userSession.getUser();
-        String first = user.getFirstName() == null ? "" : user.getFirstName() + " ";
-        String last = user.getLastName() == null ? "" : user.getLastName();
-        token.getOtherClaims().put("name", first + last);
+        List<String> parts = new LinkedList<>();
+        Optional.ofNullable(user.getFirstName()).filter(s -> !s.isEmpty()).ifPresent(parts::add);
+        Optional.ofNullable(user.getLastName()).filter(s -> !s.isEmpty()).ifPresent(parts::add);
+        if (!parts.isEmpty()) {
+            token.getOtherClaims().put("name", String.join(" ", parts));
+        }
     }
 
-    public static ProtocolMapperModel create(String name,
-                                                        boolean consentRequired, String consentText,
-                                                        boolean accessToken, boolean idToken) {
+    public static ProtocolMapperModel create(String name, boolean accessToken, boolean idToken, boolean userInfo) {
         ProtocolMapperModel mapper = new ProtocolMapperModel();
         mapper.setName(name);
         mapper.setProtocolMapper(PROVIDER_ID);
         mapper.setProtocol(OIDCLoginProtocol.LOGIN_PROTOCOL);
-        mapper.setConsentRequired(consentRequired);
-        mapper.setConsentText(consentText);
-        Map<String, String> config = new HashMap<String, String>();
+        Map<String, String> config = new HashMap<>();
         if (accessToken) config.put(OIDCAttributeMapperHelper.INCLUDE_IN_ACCESS_TOKEN, "true");
         if (idToken) config.put(OIDCAttributeMapperHelper.INCLUDE_IN_ID_TOKEN, "true");
+        if (userInfo) config.put(OIDCAttributeMapperHelper.INCLUDE_IN_USERINFO, "true");
         mapper.setConfig(config);
         return mapper;
     }

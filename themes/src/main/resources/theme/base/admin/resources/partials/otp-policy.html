@@ -44,7 +44,7 @@
         <div class="form-group">
             <label class="col-md-2 control-label" for="lookAhead">{{:: 'look-ahead-window' | translate}}</label>
             <div class="col-md-6">
-                <input class="form-control" type="number" required min="1" max="120" id="lookAhead" name="lookAhead" data-ng-model="realm.otpPolicyLookAheadWindow" autofocus>
+                <input class="form-control" type="number" required min="0" max="120" id="lookAhead" name="lookAhead" data-ng-model="realm.otpPolicyLookAheadWindow" autofocus>
             </div>
             <kc-tooltip>{{:: 'otp.look-ahead-window.tooltip' | translate}}</kc-tooltip>
         </div>
@@ -63,6 +63,14 @@
                 <input class="form-control" type="number" data-ng-required="realm.otpPolicyType == 'totp'" min="1" max="120" id="period" name="period" data-ng-model="realm.otpPolicyPeriod">
             </div>
             <kc-tooltip>{{:: 'otp-token-period.tooltip' | translate}}</kc-tooltip>
+        </div>
+
+        <div class="form-group">
+            <label class="col-md-2 control-label">{{:: 'otp-supported-applications' | translate}}</label>
+            <div class="col-md-6">
+                {{realm.otpSupportedApplications.join(', ')}}
+            </div>
+            <kc-tooltip>{{:: 'otp-supported-applications.tooltip' | translate}}</kc-tooltip>
         </div>
 
 

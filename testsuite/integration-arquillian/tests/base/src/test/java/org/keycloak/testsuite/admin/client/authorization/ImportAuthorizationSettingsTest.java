@@ -28,6 +28,7 @@ import org.keycloak.admin.client.resource.ClientResource;
 import org.keycloak.representations.idm.ClientRepresentation;
 import org.keycloak.representations.idm.RoleRepresentation;
 import org.keycloak.representations.idm.authorization.ResourceServerRepresentation;
+import org.keycloak.testsuite.util.UserBuilder;
 import org.keycloak.util.JsonSerialization;
 
 /**
@@ -43,26 +44,13 @@ public class ImportAuthorizationSettingsTest extends AbstractAuthorizationTest {
         RoleRepresentation role = new RoleRepresentation();
         role.setName("admin");
         clientResource.roles().create(role);
-    }
 
-    @After
-    public void onAfterAuthzTests() {
-        ClientResource clientResource = getClientResource();
-
-        // Needed to disable authz first. TODO: Looks like a bug. Check later...
-        ClientRepresentation client = clientResource.toRepresentation();
-        client.setAuthorizationServicesEnabled(false);
-        clientResource.update(client);
-
-        getClientResource().remove();
+        testRealmResource().users().create(UserBuilder.create().username("alice").build());
     }
 
     @Test
     public void testImportUnorderedSettings() throws Exception {
         ClientResource clientResource = getClientResource();
-
-        enableAuthorizationServices();
-
         ResourceServerRepresentation toImport = JsonSerialization.readValue(getClass().getResourceAsStream("/authorization-test/import-authorization-unordered-settings.json"), ResourceServerRepresentation.class);
 
         realmsResouce().realm(getRealmId()).roles().create(new RoleRepresentation("user", null, false));

@@ -18,22 +18,66 @@
 package org.keycloak.testsuite;
 
 import org.junit.Assume;
+import org.keycloak.admin.client.Keycloak;
 import org.keycloak.common.Profile;
+import org.keycloak.representations.info.ProfileInfoRepresentation;
+import org.keycloak.testsuite.util.AdminClientUtil;
+
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 
 /**
  * @author <a href="mailto:sthorger@redhat.com">Stian Thorgersen</a>
  */
 public class ProfileAssume {
 
+    private static Set<String> disabledFeatures;
+    private static String profile;
+
+    private static void updateProfile() {
+        String host = System.getProperty("auth.server.host", "localhost");
+        String port = System.getProperty("auth.server.http.port", "8180");
+        boolean adapterCompatTesting = Boolean.parseBoolean(System.getProperty("testsuite.adapter.compat.testing"));
+
+        String authServerContextRoot = "http://" + host + ":" + port;
+        try (Keycloak adminClient = AdminClientUtil.createAdminClient(adapterCompatTesting, authServerContextRoot)) {
+            ProfileInfoRepresentation profileInfo = adminClient.serverInfo().getInfo().getProfileInfo();
+            profile = profileInfo.getName();
+            List<String> disabled = profileInfo.getDisabledFeatures();
+            disabledFeatures = Collections.unmodifiableSet(new HashSet<>(disabled));
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to obtain profile / features info from serverinfo endpoint of " + authServerContextRoot, e);
+        }
+    }
+
+    public static void assumeFeatureEnabled(Profile.Feature feature) {
+        updateProfile();
+        Assume.assumeTrue("Ignoring test as feature " + feature.name() + " is not enabled", isFeatureEnabled(feature));
+    }
+
+    public static void assumeFeatureDisabled(Profile.Feature feature) {
+        Assume.assumeTrue("Ignoring test as feature " + feature.name() + " is disabled", !isFeatureEnabled(feature));
+    }
+
     public static void assumePreview() {
-        Assume.assumeTrue("Ignoring test as community/preview profile is not enabled", !Profile.getName().equals("product"));
+        updateProfile();
+        Assume.assumeTrue("Ignoring test as community/preview profile is not enabled", !profile.equals("product"));
     }
 
     public static void assumePreviewDisabled() {
-        Assume.assumeFalse("Ignoring test as community/preview profile is enabled", !Profile.getName().equals("product"));
+        updateProfile();
+        Assume.assumeFalse("Ignoring test as community/preview profile is enabled", !profile.equals("product"));
     }
 
     public static void assumeCommunity() {
-        Assume.assumeTrue("Ignoring test as community profile is not enabled", Profile.getName().equals("community"));
+        updateProfile();
+        Assume.assumeTrue("Ignoring test as community profile is not enabled", profile.equals("community"));
+    }
+
+    public static boolean isFeatureEnabled(Profile.Feature feature) {
+        updateProfile();
+        return !disabledFeatures.contains(feature.name());
     }
 }

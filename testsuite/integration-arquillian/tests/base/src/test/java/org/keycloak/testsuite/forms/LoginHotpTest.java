@@ -24,6 +24,7 @@ import org.junit.Test;
 import org.keycloak.events.Details;
 import org.keycloak.models.OTPPolicy;
 import org.keycloak.models.UserCredentialModel;
+import org.keycloak.models.credential.OTPCredentialModel;
 import org.keycloak.models.utils.HmacOTP;
 import org.keycloak.representations.idm.RealmRepresentation;
 import org.keycloak.representations.idm.UserRepresentation;
@@ -49,9 +50,10 @@ public class LoginHotpTest extends AbstractTestRealmKeycloakTest {
 
     @Override
     public void configureTestRealm(RealmRepresentation testRealm) {
-        testRealm.setOtpPolicyType(UserCredentialModel.HOTP);
+        testRealm.setOtpPolicyType(OTPCredentialModel.HOTP);
         testRealm.setOtpPolicyAlgorithm(HmacOTP.DEFAULT_ALGORITHM);
         testRealm.setOtpPolicyLookAheadWindow(2);
+        testRealm.setOtpPolicyDigits(6);
         UserRepresentation user = RealmRepUtil.findUser(testRealm, "test-user@localhost");
         UserBuilder.edit(user)
                    .hotpSecret("hotpSecret")
@@ -103,7 +105,7 @@ public class LoginHotpTest extends AbstractTestRealmKeycloakTest {
 
         loginTotpPage.login("123456");
         loginTotpPage.assertCurrent();
-        Assert.assertEquals("Invalid authenticator code.", loginPage.getError());
+        Assert.assertEquals("Invalid authenticator code.", loginTotpPage.getInputError());
 
         //loginPage.assertCurrent();  // Invalid authenticator code.
         //Assert.assertEquals("Invalid username or password.", loginPage.getError());
@@ -122,7 +124,7 @@ public class LoginHotpTest extends AbstractTestRealmKeycloakTest {
 
         loginTotpPage.login(null);
         loginTotpPage.assertCurrent();
-        Assert.assertEquals("Invalid authenticator code.", loginPage.getError());
+        Assert.assertEquals("Invalid authenticator code.", loginTotpPage.getInputError());
 
         //loginPage.assertCurrent();  // Invalid authenticator code.
         //Assert.assertEquals("Invalid username or password.", loginPage.getError());
@@ -141,6 +143,8 @@ public class LoginHotpTest extends AbstractTestRealmKeycloakTest {
 
         loginTotpPage.login(otp.generateHOTP("hotpSecret", counter++));
 
+        appPage.assertCurrent();
+
         Assert.assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
 
         events.expectLogin().assertEvent();
@@ -153,7 +157,7 @@ public class LoginHotpTest extends AbstractTestRealmKeycloakTest {
 
         Assert.assertTrue(loginPage.isCurrent());
 
-        Assert.assertEquals("Invalid username or password.", loginPage.getError());
+        Assert.assertEquals("Invalid username or password.", loginPage.getInputError());
 
         events.expectLogin().error("invalid_user_credentials").session((String) null)
                 .removeDetail(Details.CONSENT)

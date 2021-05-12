@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Red Hat, Inc. and/or its affiliates
+ * Copyright 2020 Red Hat, Inc. and/or its affiliates
  * and other contributors as indicated by the @author tags.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -37,7 +37,7 @@ import org.jboss.modules.ModuleLoader;
  */
 public abstract class KeycloakDependencyProcessor implements DeploymentUnitProcessor {
 
-    private static final ModuleIdentifier KEYCLOAK_JBOSS_CORE_ADAPTER = ModuleIdentifier.create("org.keycloak.keycloak-jboss-adapter-core");
+    private static final ModuleIdentifier KEYCLOAK_JBOSS_CORE_ADAPTER = KeycloakSubsystemDefinition.KEYCLOAK_JBOSS_CORE_ADAPTER;
     private static final ModuleIdentifier KEYCLOAK_CORE_ADAPTER = ModuleIdentifier.create("org.keycloak.keycloak-adapter-core");
     private static final ModuleIdentifier KEYCLOAK_CORE = ModuleIdentifier.create("org.keycloak.keycloak-core");
     private static final ModuleIdentifier KEYCLOAK_COMMON = ModuleIdentifier.create("org.keycloak.keycloak-common");
@@ -63,7 +63,7 @@ public abstract class KeycloakDependencyProcessor implements DeploymentUnitProce
         final ModuleSpecification moduleSpecification = deploymentUnit.getAttachment(Attachments.MODULE_SPECIFICATION);
         final ModuleLoader moduleLoader = Module.getBootModuleLoader();
         addCommonModules(moduleSpecification, moduleLoader);
-        addPlatformSpecificModules(moduleSpecification, moduleLoader);
+        addPlatformSpecificModules(phaseContext, moduleSpecification, moduleLoader);
     }
     
     private void addCommonModules(ModuleSpecification moduleSpecification, ModuleLoader moduleLoader) {
@@ -74,7 +74,7 @@ public abstract class KeycloakDependencyProcessor implements DeploymentUnitProce
         moduleSpecification.addSystemDependency(new ModuleDependency(moduleLoader, KEYCLOAK_COMMON, false, false, false, false));
     }
 
-    abstract protected void addPlatformSpecificModules(ModuleSpecification moduleSpecification, ModuleLoader moduleLoader);
+    abstract protected void addPlatformSpecificModules(DeploymentPhaseContext phaseContext, ModuleSpecification moduleSpecification, ModuleLoader moduleLoader);
 
     @Override
     public void undeploy(DeploymentUnit du) {

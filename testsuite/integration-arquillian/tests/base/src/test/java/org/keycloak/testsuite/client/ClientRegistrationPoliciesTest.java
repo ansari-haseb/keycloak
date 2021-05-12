@@ -24,8 +24,9 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 import org.junit.After;
-import org.junit.Before;
 import org.junit.Test;
+import org.keycloak.OAuth2Constants;
+import org.keycloak.admin.client.resource.ClientResource;
 import org.keycloak.admin.client.resource.RealmResource;
 import org.keycloak.client.registration.Auth;
 import org.keycloak.client.registration.ClientRegistrationException;
@@ -41,7 +42,7 @@ import org.keycloak.protocol.saml.mappers.UserPropertyAttributeStatementMapper;
 import org.keycloak.representations.idm.ClientInitialAccessCreatePresentation;
 import org.keycloak.representations.idm.ClientInitialAccessPresentation;
 import org.keycloak.representations.idm.ClientRepresentation;
-import org.keycloak.representations.idm.ClientTemplateRepresentation;
+import org.keycloak.representations.idm.ClientScopeRepresentation;
 import org.keycloak.representations.idm.ComponentRepresentation;
 import org.keycloak.representations.idm.ComponentTypeRepresentation;
 import org.keycloak.representations.idm.ConfigPropertyRepresentation;
@@ -53,17 +54,19 @@ import org.keycloak.services.clientregistration.policy.ClientRegistrationPolicy;
 import org.keycloak.services.clientregistration.policy.ClientRegistrationPolicyManager;
 import org.keycloak.services.clientregistration.policy.RegistrationAuth;
 import org.keycloak.services.clientregistration.policy.impl.ClientDisabledClientRegistrationPolicyFactory;
-import org.keycloak.services.clientregistration.policy.impl.ClientTemplatesClientRegistrationPolicyFactory;
+import org.keycloak.services.clientregistration.policy.impl.ClientScopesClientRegistrationPolicyFactory;
 import org.keycloak.services.clientregistration.policy.impl.MaxClientsClientRegistrationPolicyFactory;
 import org.keycloak.services.clientregistration.policy.impl.ProtocolMappersClientRegistrationPolicyFactory;
 import org.keycloak.services.clientregistration.policy.impl.TrustedHostClientRegistrationPolicyFactory;
 import org.keycloak.testsuite.Assert;
 import org.keycloak.testsuite.admin.ApiUtil;
+import org.keycloak.testsuite.arquillian.annotation.AuthServerContainerExclude;
 import org.keycloak.util.JsonSerialization;
 
 import javax.ws.rs.core.Response;
 
 import static org.junit.Assert.assertTrue;
+import org.keycloak.testsuite.arquillian.annotation.AuthServerContainerExclude.AuthServer;
 
 /**
  * @author <a href="mailto:mposolda@redhat.com">Marek Posolda</a>
@@ -82,6 +85,7 @@ public class ClientRegistrationPoliciesTest extends AbstractClientRegistrationTe
     }
 
     @After
+    @Override
     public void after() throws Exception {
         super.after();
 
@@ -174,6 +178,7 @@ public class ClientRegistrationPoliciesTest extends AbstractClientRegistrationTe
 
 
     @Test
+    @AuthServerContainerExclude(AuthServer.REMOTE) // We would need to do domain name -> ip address to set trusted host
     public void testAnonCreateWithTrustedHost() throws Exception {
         // Failed to create client (untrusted host)
         OIDCClientRepresentation client = createRepOidc("http://root", "http://redirect");
@@ -198,6 +203,7 @@ public class ClientRegistrationPoliciesTest extends AbstractClientRegistrationTe
 
 
     @Test
+    @AuthServerContainerExclude(AuthServer.REMOTE) // We would need to do domain name -> ip address to set trusted host
     public void testAnonUpdateWithTrustedHost() throws Exception {
         setTrustedHost("localhost");
         OIDCClientRepresentation client = create();
@@ -239,6 +245,7 @@ public class ClientRegistrationPoliciesTest extends AbstractClientRegistrationTe
 
 
     @Test
+    @AuthServerContainerExclude(AuthServer.REMOTE) // We would need to do domain name -> ip address to set trusted host
     public void testAnonConsentRequired() throws Exception {
         setTrustedHost("localhost");
         OIDCClientRepresentation client = create();
@@ -259,6 +266,7 @@ public class ClientRegistrationPoliciesTest extends AbstractClientRegistrationTe
 
 
     @Test
+    @AuthServerContainerExclude(AuthServer.REMOTE) // We would need to do domain name -> ip address to set trusted host
     public void testAnonFullScopeAllowed() throws Exception {
         setTrustedHost("localhost");
         OIDCClientRepresentation client = create();
@@ -279,6 +287,7 @@ public class ClientRegistrationPoliciesTest extends AbstractClientRegistrationTe
 
 
     @Test
+    @AuthServerContainerExclude(AuthServer.REMOTE) // We would need to do domain name -> ip address to set trusted host
     public void testClientDisabledPolicy() throws Exception {
         setTrustedHost("localhost");
 
@@ -319,6 +328,7 @@ public class ClientRegistrationPoliciesTest extends AbstractClientRegistrationTe
 
 
     @Test
+    @AuthServerContainerExclude(AuthServer.REMOTE) // We would need to do domain name -> ip address to set trusted host
     public void testMaxClientsPolicy() throws Exception {
         setTrustedHost("localhost");
 
@@ -361,38 +371,44 @@ public class ClientRegistrationPoliciesTest extends AbstractClientRegistrationTe
                 UserPropertyMapper.PROVIDER_ID, HardcodedRole.PROVIDER_ID);
         availableMappers.containsAll(someExpectedMappers);
 
-        // test that clientTemplate provider doesn't contain any client templates yet
-        ComponentTypeRepresentation clientTemplateRep = providersMap.get(ClientTemplatesClientRegistrationPolicyFactory.PROVIDER_ID);
-        List<String> clientTemplates = getProviderConfigProperty(clientTemplateRep, ClientTemplatesClientRegistrationPolicyFactory.ALLOWED_CLIENT_TEMPLATES);
-        Assert.assertTrue(clientTemplates.isEmpty());
+        // test that clientScope provider contains just the default client scopes
+        ComponentTypeRepresentation clientScopeRep = providersMap.get(ClientScopesClientRegistrationPolicyFactory.PROVIDER_ID);
+        List<String> clientScopes = getProviderConfigProperty(clientScopeRep, ClientScopesClientRegistrationPolicyFactory.ALLOWED_CLIENT_SCOPES);
+        Assert.assertFalse(clientScopes.isEmpty());
+        Assert.assertTrue(clientScopes.contains(OAuth2Constants.SCOPE_PROFILE));
+        Assert.assertFalse(clientScopes.contains("foo"));
+        Assert.assertFalse(clientScopes.contains("bar"));
 
-        // Add some clientTemplates
-        ClientTemplateRepresentation clientTemplate = new ClientTemplateRepresentation();
-        clientTemplate.setName("foo");
-        Response response = realmResource().clientTemplates().create(clientTemplate);
-        String fooTemplateId = ApiUtil.getCreatedId(response);
+        // Add some clientScopes
+        ClientScopeRepresentation clientScope = new ClientScopeRepresentation();
+        clientScope.setName("foo");
+        clientScope.setProtocol(OIDCLoginProtocol.LOGIN_PROTOCOL);
+        Response response = realmResource().clientScopes().create(clientScope);
+        String fooScopeId = ApiUtil.getCreatedId(response);
         response.close();
 
-        clientTemplate = new ClientTemplateRepresentation();
-        clientTemplate.setName("bar");
-        response = realmResource().clientTemplates().create(clientTemplate);
-        String barTemplateId = ApiUtil.getCreatedId(response);
+        clientScope = new ClientScopeRepresentation();
+        clientScope.setName("bar");
+        clientScope.setProtocol(OIDCLoginProtocol.LOGIN_PROTOCOL);
+        response = realmResource().clientScopes().create(clientScope);
+        String barScopeId = ApiUtil.getCreatedId(response);
         response.close();
 
-        // send request again and test that clientTemplate provider contains added client templates
+        // send request again and test that clientScope provider contains added client scopes
         reps = realmResource().clientRegistrationPolicy().getProviders();
-        clientTemplateRep = reps.stream().filter((ComponentTypeRepresentation rep1) -> {
+        clientScopeRep = reps.stream().filter((ComponentTypeRepresentation rep1) -> {
 
-            return rep1.getId().equals(ClientTemplatesClientRegistrationPolicyFactory.PROVIDER_ID);
+            return rep1.getId().equals(ClientScopesClientRegistrationPolicyFactory.PROVIDER_ID);
 
         }).findFirst().get();
 
-        clientTemplates = getProviderConfigProperty(clientTemplateRep, ClientTemplatesClientRegistrationPolicyFactory.ALLOWED_CLIENT_TEMPLATES);
-        Assert.assertNames(clientTemplates, "foo", "bar");
+        clientScopes = getProviderConfigProperty(clientScopeRep, ClientScopesClientRegistrationPolicyFactory.ALLOWED_CLIENT_SCOPES);
+        Assert.assertTrue(clientScopes.contains("foo"));
+        Assert.assertTrue(clientScopes.contains("bar"));
 
-        // Revert client templates
-        realmResource().clientTemplates().get(fooTemplateId).remove();
-        realmResource().clientTemplates().get(barTemplateId).remove();
+        // Revert client scopes
+        realmResource().clientScopes().get(fooScopeId).remove();
+        realmResource().clientScopes().get(barScopeId).remove();
     }
 
     private List<String> getProviderConfigProperty(ComponentTypeRepresentation provider, String expectedConfigPropName) {
@@ -415,78 +431,82 @@ public class ClientRegistrationPoliciesTest extends AbstractClientRegistrationTe
 
 
     @Test
-    public void testClientTemplatesPolicy() throws Exception {
+    @AuthServerContainerExclude(AuthServer.REMOTE) // We would need to do domain name -> ip address to set trusted host
+    public void testClientScopesPolicy() throws Exception {
         setTrustedHost("localhost");
 
-        // Add some clientTemplate through Admin REST
-        ClientTemplateRepresentation clientTemplate = new ClientTemplateRepresentation();
-        clientTemplate.setName("foo");
-        Response response = realmResource().clientTemplates().create(clientTemplate);
-        String clientTemplateId = ApiUtil.getCreatedId(response);
+        // Add some clientScope through Admin REST
+        ClientScopeRepresentation clientScope = new ClientScopeRepresentation();
+        clientScope.setName("foo");
+        clientScope.setProtocol(OIDCLoginProtocol.LOGIN_PROTOCOL);
+        Response response = realmResource().clientScopes().create(clientScope);
+        String clientScopeId = ApiUtil.getCreatedId(response);
         response.close();
 
-        // I can't register new client with this template
+        // I can't register new client with this scope
         ClientRepresentation clientRep = createRep("test-app");
-        clientRep.setClientTemplate("foo");
-        assertFail(ClientRegOp.CREATE, clientRep, 403, "Not permitted to use specified clientTemplate");
+        clientRep.setDefaultClientScopes(Collections.singletonList("foo"));
+        assertFail(ClientRegOp.CREATE, clientRep, 403, "Not permitted to use specified clientScope");
 
-        // Register client without template - should success
-        clientRep.setClientTemplate(null);
+        // Register client without scope - should success
+        clientRep.setDefaultClientScopes(null);
         ClientRepresentation registeredClient = reg.create(clientRep);
         reg.auth(Auth.token(registeredClient));
 
-        // Try to update client with template - should fail
-        registeredClient.setClientTemplate("foo");
-        assertFail(ClientRegOp.UPDATE, registeredClient, 403, "Not permitted to use specified clientTemplate");
+        // Try to update client with scope - should fail
+        registeredClient.setDefaultClientScopes(Collections.singletonList("foo"));
+        assertFail(ClientRegOp.UPDATE, registeredClient, 403, "Not permitted to use specified clientScope");
 
-        // Update client with the clientTemplate via Admin REST
-        ClientRepresentation client = ApiUtil.findClientByClientId(realmResource(), "test-app").toRepresentation();
-        client.setClientTemplate("foo");
-        realmResource().clients().get(client.getId()).update(client);
+        // Update client with the clientScope via Admin REST
+        ClientResource client = ApiUtil.findClientByClientId(realmResource(), "test-app");
+        client.addDefaultClientScope(clientScopeId);
 
-        // Now the update via clientRegistration is permitted too as template was already set
+        // Now the update via clientRegistration is permitted too as scope was already set
         reg.update(registeredClient);
 
-        // Revert client template
-        realmResource().clients().get(client.getId()).remove();
-        realmResource().clientTemplates().get(clientTemplateId).remove();
+        // Revert client scope
+        realmResource().clients().get(client.toRepresentation().getId()).remove();
+        realmResource().clientScopes().get(clientScopeId).remove();
     }
 
 
     @Test
-    public void testClientTemplatesPolicyWithPermittedTemplate() throws Exception {
+    @AuthServerContainerExclude(AuthServer.REMOTE) // We would need to do domain name -> ip address to set trusted host
+    public void testClientScopesPolicyWithPermittedScope() throws Exception {
         setTrustedHost("localhost");
 
-        // Add some clientTemplate through Admin REST
-        ClientTemplateRepresentation clientTemplate = new ClientTemplateRepresentation();
-        clientTemplate.setName("foo");
-        Response response = realmResource().clientTemplates().create(clientTemplate);
-        String clientTemplateId = ApiUtil.getCreatedId(response);
+        // Add some clientScope through Admin REST
+        ClientScopeRepresentation clientScope = new ClientScopeRepresentation();
+        clientScope.setName("foo");
+        clientScope.setProtocol(OIDCLoginProtocol.LOGIN_PROTOCOL);
+        Response response = realmResource().clientScopes().create(clientScope);
+        String clientScopeId = ApiUtil.getCreatedId(response);
         response.close();
 
-        // I can't register new client with this template
+        // I can't register new client with this scope
         ClientRepresentation clientRep = createRep("test-app");
-        clientRep.setClientTemplate("foo");
-        assertFail(ClientRegOp.CREATE, clientRep, 403, "Not permitted to use specified clientTemplate");
+        clientRep.setDefaultClientScopes(Collections.singletonList("foo"));
+        assertFail(ClientRegOp.CREATE, clientRep, 403, "Not permitted to use specified clientScope");
 
-        // Update the policy to allow the "foo" template
-        ComponentRepresentation clientTemplatesPolicyRep = findPolicyByProviderAndAuth(ClientTemplatesClientRegistrationPolicyFactory.PROVIDER_ID, getPolicyAnon());
-        clientTemplatesPolicyRep.getConfig().putSingle(ClientTemplatesClientRegistrationPolicyFactory.ALLOWED_CLIENT_TEMPLATES, "foo");
-        realmResource().components().component(clientTemplatesPolicyRep.getId()).update(clientTemplatesPolicyRep);
+        // Update the policy to allow the "foo" scope
+        ComponentRepresentation clientScopesPolicyRep = findPolicyByProviderAndAuth(ClientScopesClientRegistrationPolicyFactory.PROVIDER_ID, getPolicyAnon());
+        clientScopesPolicyRep.getConfig().putSingle(ClientScopesClientRegistrationPolicyFactory.ALLOWED_CLIENT_SCOPES, "foo");
+        realmResource().components().component(clientScopesPolicyRep.getId()).update(clientScopesPolicyRep);
 
         // Check that I can register client now
         ClientRepresentation registeredClient = reg.create(clientRep);
         Assert.assertNotNull(registeredClient.getRegistrationAccessToken());
 
-        // Revert client template
+        // Revert client scope
         ApiUtil.findClientResourceByClientId(realmResource(), "test-app").remove();
-        realmResource().clientTemplates().get(clientTemplateId).remove();
+        realmResource().clientScopes().get(clientScopeId).remove();
     }
 
 
     // PROTOCOL MAPPERS
 
     @Test
+    @AuthServerContainerExclude(AuthServer.REMOTE) // We would need to do domain name -> ip address to set trusted host
     public void testProtocolMappersCreate() throws Exception {
         setTrustedHost("localhost");
 
@@ -527,14 +547,13 @@ public class ClientRegistrationPoliciesTest extends AbstractClientRegistrationTe
         protocolMapper.setName("Hardcoded foo role");
         protocolMapper.setProtocolMapper(HardcodedRole.PROVIDER_ID);
         protocolMapper.setProtocol(OIDCLoginProtocol.LOGIN_PROTOCOL);
-        protocolMapper.setConsentRequired(false);
-        protocolMapper.setConsentText(null);
         protocolMapper.getConfig().put(HardcodedRole.ROLE_CONFIG, "foo-role");
         return protocolMapper;
     }
 
 
     @Test
+    @AuthServerContainerExclude(AuthServer.REMOTE) // We would need to do domain name -> ip address to set trusted host
     public void testProtocolMappersUpdate() throws Exception {
         setTrustedHost("localhost");
 
@@ -543,8 +562,6 @@ public class ClientRegistrationPoliciesTest extends AbstractClientRegistrationTe
         protocolMapper.setName("Full name");
         protocolMapper.setProtocolMapper(FullNameMapper.PROVIDER_ID);
         protocolMapper.setProtocol(OIDCLoginProtocol.LOGIN_PROTOCOL);
-        protocolMapper.setConsentRequired(true);
-        protocolMapper.setConsentText("Full name");
 
         ClientRepresentation clientRep = createRep("test-app");
         clientRep.setProtocolMappers(Collections.singletonList(protocolMapper));
@@ -572,40 +589,23 @@ public class ClientRegistrationPoliciesTest extends AbstractClientRegistrationTe
 
 
     @Test
+    @AuthServerContainerExclude(AuthServer.REMOTE) // We would need to do domain name -> ip address to set trusted host
     public void testProtocolMappersConsentRequired() throws Exception {
         setTrustedHost("localhost");
 
-        // Register client and assert it has builtin protocol mappers
+        // Register client and assert it doesn't have builtin protocol mappers
         ClientRepresentation clientRep = createRep("test-app");
         ClientRepresentation registeredClient = reg.create(clientRep);
 
-        long usernamePropMappersCount = registeredClient.getProtocolMappers().stream().filter((ProtocolMapperRepresentation protocolMapper) -> {
-            return protocolMapper.getProtocolMapper().equals(UserPropertyMapper.PROVIDER_ID);
-        }).count();
-        Assert.assertTrue(usernamePropMappersCount > 0);
-
-        // Remove USernamePropertyMapper from the policy configuration
-        ComponentRepresentation protocolMapperPolicyRep = findPolicyByProviderAndAuth(ProtocolMappersClientRegistrationPolicyFactory.PROVIDER_ID, getPolicyAnon());
-        protocolMapperPolicyRep.getConfig().getList(ProtocolMappersClientRegistrationPolicyFactory.ALLOWED_PROTOCOL_MAPPER_TYPES).remove(UserPropertyMapper.PROVIDER_ID);
-        realmResource().components().component(protocolMapperPolicyRep.getId()).update(protocolMapperPolicyRep);
-
-        // Register another client. Assert it doesn't have builtin mappers anymore
-        clientRep = createRep("test-app-2");
-        registeredClient = reg.create(clientRep);
-
-        usernamePropMappersCount = registeredClient.getProtocolMappers().stream().filter((ProtocolMapperRepresentation protocolMapper) -> {
-            return protocolMapper.getProtocolMapper().equals(UserPropertyMapper.PROVIDER_ID);
-        }).count();
-        Assert.assertEquals(0, usernamePropMappersCount);
+        Assert.assertNull(registeredClient.getProtocolMappers());
 
         // Revert
         ApiUtil.findClientResourceByClientId(realmResource(), "test-app").remove();
-        protocolMapperPolicyRep.getConfig().getList(ProtocolMappersClientRegistrationPolicyFactory.ALLOWED_PROTOCOL_MAPPER_TYPES).add(UserPropertyMapper.PROVIDER_ID);
-        realmResource().components().component(protocolMapperPolicyRep.getId()).update(protocolMapperPolicyRep);
     }
 
 
     @Test
+    @AuthServerContainerExclude(AuthServer.REMOTE) // We would need to do domain name -> ip address to set trusted host
     public void testProtocolMappersRemoveBuiltins() throws Exception {
         setTrustedHost("localhost");
 
@@ -622,8 +622,6 @@ public class ClientRegistrationPoliciesTest extends AbstractClientRegistrationTe
 
         Assert.assertEquals(1, registeredClient.getProtocolMappers().size());
         ProtocolMapperRepresentation hardcodedMapper = registeredClient.getProtocolMappers().get(0);
-        Assert.assertTrue(hardcodedMapper.isConsentRequired());
-        Assert.assertEquals("Hardcoded foo role", hardcodedMapper.getConsentText());
 
         // Revert
         ApiUtil.findClientResourceByClientId(realmResource(), "test-app").remove();

@@ -25,6 +25,8 @@ import java.util.Map;
  */
 public class AuthorizationEndpointRequest {
 
+    String invalidRequestMessage;
+
     String clientId;
     String redirectUriParam;
     String responseType;
@@ -32,11 +34,25 @@ public class AuthorizationEndpointRequest {
     String state;
     String scope;
     String loginHint;
+    String display;
     String prompt;
     String nonce;
     Integer maxAge;
     String idpHint;
+    String action;
+    String claims;
+    String uiLocales;
     Map<String, String> additionalReqParams = new HashMap<>();
+
+    // https://tools.ietf.org/html/rfc7636#section-6.1
+    String codeChallenge;
+    String codeChallengeMethod;
+
+    String acr;
+
+    public String getAcr() {
+        return acr;
+    }
 
     public String getClientId() {
         return clientId;
@@ -82,7 +98,37 @@ public class AuthorizationEndpointRequest {
         return idpHint;
     }
 
+    public String getAction() {
+        return action;
+    }
+
+    public String getClaims() {
+        return claims;
+    }
+
     public Map<String, String> getAdditionalReqParams() {
         return additionalReqParams;
+    }
+
+    // https://tools.ietf.org/html/rfc7636#section-6.1
+    public String getCodeChallenge() {
+        return codeChallenge;
+    }
+
+    // https://tools.ietf.org/html/rfc7636#section-6.1
+    public String getCodeChallengeMethod() {
+        return codeChallengeMethod;
+    }
+
+    public String getDisplay() {
+        return display;
+    }
+
+    public String getInvalidRequestMessage() {
+        return invalidRequestMessage;
+    }
+
+    public String getUiLocales() {
+        return uiLocales;
     }
 }

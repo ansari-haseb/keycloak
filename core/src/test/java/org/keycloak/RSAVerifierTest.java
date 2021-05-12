@@ -18,22 +18,35 @@
 package org.keycloak;
 
 import junit.framework.Assert;
+import org.bouncycastle.asn1.x500.X500Name;
+import org.bouncycastle.asn1.x509.AlgorithmIdentifier;
+import org.bouncycastle.asn1.x509.SubjectPublicKeyInfo;
+import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter;
+import org.bouncycastle.cert.X509CertificateHolder;
+import org.bouncycastle.cert.X509v1CertificateBuilder;
+import org.bouncycastle.crypto.util.PrivateKeyFactory;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
-import org.bouncycastle.openssl.PEMWriter;
-import org.bouncycastle.x509.X509V1CertificateGenerator;
+import org.bouncycastle.openssl.jcajce.JcaPEMWriter;
+import org.bouncycastle.operator.bc.BcRSAContentSignerBuilder;
+import org.bouncycastle.operator.ContentSigner;
+import org.bouncycastle.operator.DefaultDigestAlgorithmIdentifierFinder;
+import org.bouncycastle.operator.DefaultSignatureAlgorithmIdentifierFinder;
+import org.bouncycastle.operator.OperatorCreationException;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
-import org.keycloak.common.VerificationException;
 import org.keycloak.common.util.Time;
+import org.keycloak.common.VerificationException;
 import org.keycloak.jose.jws.JWSBuilder;
 import org.keycloak.representations.AccessToken;
+import org.keycloak.util.JsonSerialization;
 import org.keycloak.util.TokenUtil;
 
-import javax.security.auth.x500.X500Principal;
 import java.io.IOException;
 import java.io.StringWriter;
 import java.math.BigInteger;
+import java.security.cert.CertificateException;
+import java.security.cert.X509Certificate;
 import java.security.InvalidKeyException;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
@@ -42,8 +55,8 @@ import java.security.NoSuchProviderException;
 import java.security.PublicKey;
 import java.security.Security;
 import java.security.SignatureException;
-import java.security.cert.X509Certificate;
 import java.util.Date;
+import javax.security.auth.x500.X500Principal;
 
 /**
  * @author <a href="mailto:bill@burkecentral.com">Bill Burke</a>
@@ -61,24 +74,43 @@ public class RSAVerifierTest {
         if (Security.getProvider("BC") == null) Security.addProvider(new BouncyCastleProvider());
     }
 
-    public static X509Certificate generateTestCertificate(String subject, String issuer, KeyPair pair) throws InvalidKeyException,
-            NoSuchProviderException, SignatureException {
+    public static X509Certificate generateTestCertificate(String subject, String issuer, KeyPair pair)
+        throws CertificateException, InvalidKeyException, IOException,
+               NoSuchProviderException, OperatorCreationException,
+               SignatureException
+    {
+        X500Name issuerDN = new X500Name("CN=" + issuer);
+        BigInteger serialNumber = BigInteger.valueOf(System.currentTimeMillis());
+        Date notBefore = new Date(System.currentTimeMillis() - 10000);
+        Date notAfter = new Date(System.currentTimeMillis() + 10000);
+        X500Name subjectDN = new X500Name("CN=" + subject);
+        SubjectPublicKeyInfo subjectPublicKeyInfo = SubjectPublicKeyInfo
+            .getInstance(pair.getPublic().getEncoded());
 
-        X509V1CertificateGenerator certGen = new X509V1CertificateGenerator();
+        X509v1CertificateBuilder builder = new X509v1CertificateBuilder(
+            issuerDN, serialNumber, notBefore, notAfter, subjectDN, subjectPublicKeyInfo
+        );
 
-        certGen.setSerialNumber(BigInteger.valueOf(System.currentTimeMillis()));
-        certGen.setIssuerDN(new X500Principal(issuer));
-        certGen.setNotBefore(new Date(System.currentTimeMillis() - 10000));
-        certGen.setNotAfter(new Date(System.currentTimeMillis() + 10000));
-        certGen.setSubjectDN(new X500Principal(subject));
-        certGen.setPublicKey(pair.getPublic());
-        certGen.setSignatureAlgorithm("SHA256WithRSAEncryption");
+        AlgorithmIdentifier sigAlgId = new DefaultSignatureAlgorithmIdentifierFinder()
+            .find("SHA256WithRSAEncryption");
 
-        return certGen.generateX509Certificate(pair.getPrivate(), "BC");
+        AlgorithmIdentifier digAlgId = new DefaultDigestAlgorithmIdentifierFinder()
+            .find(sigAlgId);
+
+        ContentSigner signer = new BcRSAContentSignerBuilder(sigAlgId, digAlgId)
+            .build(PrivateKeyFactory.createKey(pair.getPrivate().getEncoded()));
+
+        X509CertificateHolder holder = builder.build(signer);
+
+        return new JcaX509CertificateConverter().getCertificate(holder);
     }
 
     @BeforeClass
-    public static void setupCerts() throws NoSuchAlgorithmException, InvalidKeyException, NoSuchProviderException, SignatureException {
+    public static void setupCerts()
+        throws CertificateException, InvalidKeyException, IOException,
+               NoSuchAlgorithmException, NoSuchProviderException,
+               OperatorCreationException, SignatureException
+    {
         badPair = KeyPairGenerator.getInstance("RSA").generateKeyPair();
         idpPair = KeyPairGenerator.getInstance("RSA").generateKeyPair();
         idpCertificates = new X509Certificate[]{generateTestCertificate("CN=IDP", "CN=IDP", idpPair)};
@@ -97,10 +129,10 @@ public class RSAVerifierTest {
     }
 
     @Test
-    public void testPemWriter() throws Exception {
+    public void testPemWriter() {
         PublicKey realmPublicKey = idpPair.getPublic();
         StringWriter sw = new StringWriter();
-        PEMWriter writer = new PEMWriter(sw);
+        JcaPEMWriter writer = new JcaPEMWriter(sw);
         try {
             writer.writeObject(realmPublicKey);
             writer.flush();
@@ -126,32 +158,32 @@ public class RSAVerifierTest {
         return RSATokenVerifier.verifyToken(encoded, idpPair.getPublic(), "http://localhost:8080/auth/realm");
     }
 
-   /*
-   @Test
+
+   // @Test
    public void testSpeed() throws Exception
    {
-
-      byte[] tokenBytes = JsonSerialization.toByteArray(token, false);
-
-      String encoded = new JWSBuilder()
-              .content(tokenBytes)
-              .rsa256(idpPair.getPrivate());
+       // Took 44 seconds with 50000 iterations
+      byte[] tokenBytes = JsonSerialization.writeValueAsBytes(token);
 
       long start = System.currentTimeMillis();
-      int count = 10000;
+      int count = 50000;
       for (int i = 0; i < count; i++)
       {
-         SkeletonKeyTokenVerification v = RSATokenVerifier.verify(null, encoded, metadata);
+          String encoded = new JWSBuilder()
+                  .content(tokenBytes)
+                  .rsa256(idpPair.getPrivate());
+
+          verifySkeletonKeyToken(encoded);
 
       }
       long end = System.currentTimeMillis() - start;
-      System.out.println("rate: " + ((double)end/(double)count));
+      System.out.println("took: " + end);
    }
-   */
+
 
 
     @Test
-    public void testBadSignature() throws Exception {
+    public void testBadSignature() {
 
         String encoded = new JWSBuilder()
                 .jsonContent(token)
@@ -182,7 +214,7 @@ public class RSAVerifierTest {
     }
 
     @Test
-    public void testNotBeforeBad() throws Exception {
+    public void testNotBeforeBad() {
         token.notBefore(Time.currentTime() + 100);
 
         String encoded = new JWSBuilder()
@@ -215,7 +247,7 @@ public class RSAVerifierTest {
     }
 
     @Test
-    public void testExpirationBad() throws Exception {
+    public void testExpirationBad() {
         token.expiration(Time.currentTime() - 100);
 
         String encoded = new JWSBuilder()
@@ -231,21 +263,60 @@ public class RSAVerifierTest {
     }
 
     @Test
-    public void testTokenAuth() throws Exception {
+    public void testTokenAuth() {
         token = new AccessToken();
         token.subject("CN=Client")
-                .issuer("domain")
+                .issuer("http://localhost:8080/auth/realms/demo")
                 .addAccess("service").addRole("admin").verifyCaller(true);
+        token.setEmail("bill@jboss.org");
 
         String encoded = new JWSBuilder()
                 .jsonContent(token)
                 .rsa256(idpPair.getPrivate());
 
+        System.out.println("token size: " + encoded.length());
+
         AccessToken v = null;
         try {
             v = verifySkeletonKeyToken(encoded);
+            Assert.fail();
         } catch (VerificationException ignored) {
         }
+    }
+
+    @Test
+    public void testAudience() throws Exception {
+        token.addAudience("my-app");
+        token.addAudience("your-app");
+
+        String encoded = new JWSBuilder()
+                .jsonContent(token)
+                .rsa256(idpPair.getPrivate());
+
+        verifyAudience(encoded, "my-app");
+        verifyAudience(encoded, "your-app");
+
+        try {
+            verifyAudience(encoded, "other-app");
+            Assert.fail();
+        } catch (VerificationException ignored) {
+            System.out.println(ignored.getMessage());
+        }
+
+        try {
+            verifyAudience(encoded, null);
+            Assert.fail();
+        } catch (VerificationException ignored) {
+            System.out.println(ignored.getMessage());
+        }
+    }
+
+    private void verifyAudience(String encodedToken, String expectedAudience) throws VerificationException {
+        TokenVerifier.create(encodedToken, AccessToken.class)
+                .publicKey(idpPair.getPublic())
+                .realmUrl("http://localhost:8080/auth/realm")
+                .audience(expectedAudience)
+                .verify();
     }
 
 

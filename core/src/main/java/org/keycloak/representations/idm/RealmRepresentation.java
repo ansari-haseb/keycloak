@@ -21,6 +21,7 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 import org.keycloak.common.util.MultivaluedHashMap;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
@@ -37,15 +38,30 @@ public class RealmRepresentation {
     protected String displayName;
     protected String displayNameHtml;
     protected Integer notBefore;
+    protected String defaultSignatureAlgorithm;
     protected Boolean revokeRefreshToken;
+    protected Integer refreshTokenMaxReuse;
     protected Integer accessTokenLifespan;
     protected Integer accessTokenLifespanForImplicitFlow;
     protected Integer ssoSessionIdleTimeout;
     protected Integer ssoSessionMaxLifespan;
+    protected Integer ssoSessionIdleTimeoutRememberMe;
+    protected Integer ssoSessionMaxLifespanRememberMe;
     protected Integer offlineSessionIdleTimeout;
+    // KEYCLOAK-7688 Offline Session Max for Offline Token
+    protected Boolean offlineSessionMaxLifespanEnabled;
+    protected Integer offlineSessionMaxLifespan;
+    protected Integer clientSessionIdleTimeout;
+    protected Integer clientSessionMaxLifespan;
+    protected Integer clientOfflineSessionIdleTimeout;
+    protected Integer clientOfflineSessionMaxLifespan;
     protected Integer accessCodeLifespan;
     protected Integer accessCodeLifespanUserAction;
     protected Integer accessCodeLifespanLogin;
+    protected Integer actionTokenGeneratedByAdminLifespan;
+    protected Integer actionTokenGeneratedByUserLifespan;
+    protected Integer oauth2DeviceCodeLifespan;
+    protected Integer oauth2DevicePollingInterval;
     protected Boolean enabled;
     protected String sslRequired;
     @Deprecated
@@ -66,6 +82,7 @@ public class RealmRepresentation {
 
     //--- brute force settings
     protected Boolean bruteForceProtected;
+    protected Boolean permanentLockout;
     protected Integer maxFailureWaitSeconds;
     protected Integer minimumQuickLoginWaitSeconds;
     protected Integer waitIncrementSeconds;
@@ -84,7 +101,9 @@ public class RealmRepresentation {
     protected String codeSecret;
     protected RolesRepresentation roles;
     protected List<GroupRepresentation> groups;
+    @Deprecated
     protected List<String> defaultRoles;
+    protected RoleRepresentation defaultRole;
     protected List<String> defaultGroups;
     @Deprecated
     protected Set<String> requiredCredentials;
@@ -95,13 +114,47 @@ public class RealmRepresentation {
     protected Integer otpPolicyDigits;
     protected Integer otpPolicyLookAheadWindow;
     protected Integer otpPolicyPeriod;
+    protected List<String> otpSupportedApplications;
+
+    // WebAuthn 2-factor properties below
+
+    protected String webAuthnPolicyRpEntityName;
+    protected List<String> webAuthnPolicySignatureAlgorithms;
+    protected String webAuthnPolicyRpId;
+    protected String webAuthnPolicyAttestationConveyancePreference;
+    protected String webAuthnPolicyAuthenticatorAttachment;
+    protected String webAuthnPolicyRequireResidentKey;
+    protected String webAuthnPolicyUserVerificationRequirement;
+    protected Integer webAuthnPolicyCreateTimeout;
+    protected Boolean webAuthnPolicyAvoidSameAuthenticatorRegister;
+    protected List<String> webAuthnPolicyAcceptableAaguids;
+
+    // WebAuthn passwordless properties below
+
+    protected String webAuthnPolicyPasswordlessRpEntityName;
+    protected List<String> webAuthnPolicyPasswordlessSignatureAlgorithms;
+    protected String webAuthnPolicyPasswordlessRpId;
+    protected String webAuthnPolicyPasswordlessAttestationConveyancePreference;
+    protected String webAuthnPolicyPasswordlessAuthenticatorAttachment;
+    protected String webAuthnPolicyPasswordlessRequireResidentKey;
+    protected String webAuthnPolicyPasswordlessUserVerificationRequirement;
+    protected Integer webAuthnPolicyPasswordlessCreateTimeout;
+    protected Boolean webAuthnPolicyPasswordlessAvoidSameAuthenticatorRegister;
+    protected List<String> webAuthnPolicyPasswordlessAcceptableAaguids;
+
+    // Client Policies/Profiles
+
+    protected ClientProfilesRepresentation clientProfiles;
+    protected ClientPoliciesRepresentation clientPolicies;
 
     protected List<UserRepresentation> users;
     protected List<UserRepresentation> federatedUsers;
     protected List<ScopeMappingRepresentation> scopeMappings;
     protected Map<String, List<ScopeMappingRepresentation>> clientScopeMappings;
     protected List<ClientRepresentation> clients;
-    protected List<ClientTemplateRepresentation> clientTemplates;
+    protected List<ClientScopeRepresentation> clientScopes;
+    protected List<String> defaultDefaultClientScopes;
+    protected List<String> defaultOptionalClientScopes;
     protected Map<String, String> browserSecurityHeaders;
     protected Map<String, String> smtpServer;
     protected List<UserFederationProviderRepresentation> userFederationProviders;
@@ -134,10 +187,13 @@ public class RealmRepresentation {
     protected String directGrantFlow;
     protected String resetCredentialsFlow;
     protected String clientAuthenticationFlow;
+    protected String dockerAuthenticationFlow;
 
     protected Map<String, String> attributes;
 
     protected String keycloakVersion;
+
+    protected Boolean userManagedAccessAllowed;
 
     @Deprecated
     protected Boolean social;
@@ -151,6 +207,8 @@ public class RealmRepresentation {
     protected List<ApplicationRepresentation> applications;
     @Deprecated
     protected List<OAuthClientRepresentation> oauthClients;
+    @Deprecated
+    protected List<ClientTemplateRepresentation> clientTemplates;
 
     public String getId() {
         return id;
@@ -199,7 +257,7 @@ public class RealmRepresentation {
     public UserRepresentation user(String username) {
         UserRepresentation user = new UserRepresentation();
         user.setUsername(username);
-        if (users == null) users = new ArrayList<UserRepresentation>();
+        if (users == null) users = new ArrayList<>();
         users.add(user);
         return user;
     }
@@ -228,12 +286,28 @@ public class RealmRepresentation {
         this.sslRequired = sslRequired;
     }
 
+    public String getDefaultSignatureAlgorithm() {
+        return defaultSignatureAlgorithm;
+    }
+
+    public void setDefaultSignatureAlgorithm(String defaultSignatureAlgorithm) {
+        this.defaultSignatureAlgorithm = defaultSignatureAlgorithm;
+    }
+
     public Boolean getRevokeRefreshToken() {
         return revokeRefreshToken;
     }
 
     public void setRevokeRefreshToken(Boolean revokeRefreshToken) {
         this.revokeRefreshToken = revokeRefreshToken;
+    }
+
+    public Integer getRefreshTokenMaxReuse() {
+        return refreshTokenMaxReuse;
+    }
+
+    public void setRefreshTokenMaxReuse(Integer refreshTokenMaxReuse) {
+        this.refreshTokenMaxReuse = refreshTokenMaxReuse;
     }
 
     public Integer getAccessTokenLifespan() {
@@ -268,12 +342,77 @@ public class RealmRepresentation {
         this.ssoSessionMaxLifespan = ssoSessionMaxLifespan;
     }
 
+    public Integer getSsoSessionMaxLifespanRememberMe() {
+        return ssoSessionMaxLifespanRememberMe;
+    }
+
+    public void setSsoSessionMaxLifespanRememberMe(Integer ssoSessionMaxLifespanRememberMe) {
+        this.ssoSessionMaxLifespanRememberMe = ssoSessionMaxLifespanRememberMe;
+    }
+
+    public Integer getSsoSessionIdleTimeoutRememberMe() {
+        return ssoSessionIdleTimeoutRememberMe;
+    }
+
+    public void setSsoSessionIdleTimeoutRememberMe(Integer ssoSessionIdleTimeoutRememberMe) {
+        this.ssoSessionIdleTimeoutRememberMe = ssoSessionIdleTimeoutRememberMe;
+    }
+
     public Integer getOfflineSessionIdleTimeout() {
         return offlineSessionIdleTimeout;
     }
 
     public void setOfflineSessionIdleTimeout(Integer offlineSessionIdleTimeout) {
         this.offlineSessionIdleTimeout = offlineSessionIdleTimeout;
+    }
+
+    // KEYCLOAK-7688 Offline Session Max for Offline Token
+    public Boolean getOfflineSessionMaxLifespanEnabled() {
+        return offlineSessionMaxLifespanEnabled;
+    }
+
+    public void setOfflineSessionMaxLifespanEnabled(Boolean offlineSessionMaxLifespanEnabled) {
+        this.offlineSessionMaxLifespanEnabled = offlineSessionMaxLifespanEnabled;
+    }
+
+    public Integer getOfflineSessionMaxLifespan() {
+        return offlineSessionMaxLifespan;
+    }
+
+    public void setOfflineSessionMaxLifespan(Integer offlineSessionMaxLifespan) {
+        this.offlineSessionMaxLifespan = offlineSessionMaxLifespan;
+    }
+
+    public Integer getClientSessionIdleTimeout() {
+        return clientSessionIdleTimeout;
+    }
+
+    public void setClientSessionIdleTimeout(Integer clientSessionIdleTimeout) {
+        this.clientSessionIdleTimeout = clientSessionIdleTimeout;
+    }
+
+    public Integer getClientSessionMaxLifespan() {
+        return clientSessionMaxLifespan;
+    }
+
+    public void setClientSessionMaxLifespan(Integer clientSessionMaxLifespan) {
+        this.clientSessionMaxLifespan = clientSessionMaxLifespan;
+    }
+
+    public Integer getClientOfflineSessionIdleTimeout() {
+        return clientOfflineSessionIdleTimeout;
+    }
+
+    public void setClientOfflineSessionIdleTimeout(Integer clientOfflineSessionIdleTimeout) {
+        this.clientOfflineSessionIdleTimeout = clientOfflineSessionIdleTimeout;
+    }
+
+    public Integer getClientOfflineSessionMaxLifespan() {
+        return clientOfflineSessionMaxLifespan;
+    }
+
+    public void setClientOfflineSessionMaxLifespan(Integer clientOfflineSessionMaxLifespan) {
+        this.clientOfflineSessionMaxLifespan = clientOfflineSessionMaxLifespan;
     }
 
     public List<ScopeMappingRepresentation> getScopeMappings() {
@@ -283,15 +422,15 @@ public class RealmRepresentation {
     public ScopeMappingRepresentation clientScopeMapping(String clientName) {
         ScopeMappingRepresentation mapping = new ScopeMappingRepresentation();
         mapping.setClient(clientName);
-        if (scopeMappings == null) scopeMappings = new ArrayList<ScopeMappingRepresentation>();
+        if (scopeMappings == null) scopeMappings = new ArrayList<>();
         scopeMappings.add(mapping);
         return mapping;
     }
 
-    public ScopeMappingRepresentation clientTemplateScopeMapping(String clientTemplateName) {
+    public ScopeMappingRepresentation clientScopeScopeMapping(String clientScopeName) {
         ScopeMappingRepresentation mapping = new ScopeMappingRepresentation();
-        mapping.setClientTemplate(clientTemplateName);
-        if (scopeMappings == null) scopeMappings = new ArrayList<ScopeMappingRepresentation>();
+        mapping.setClientScope(clientScopeName);
+        if (scopeMappings == null) scopeMappings = new ArrayList<>();
         scopeMappings.add(mapping);
         return mapping;
     }
@@ -337,12 +476,54 @@ public class RealmRepresentation {
         this.accessCodeLifespanLogin = accessCodeLifespanLogin;
     }
 
+    public Integer getActionTokenGeneratedByAdminLifespan() {
+        return actionTokenGeneratedByAdminLifespan;
+    }
+
+    public void setActionTokenGeneratedByAdminLifespan(Integer actionTokenGeneratedByAdminLifespan) {
+        this.actionTokenGeneratedByAdminLifespan = actionTokenGeneratedByAdminLifespan;
+    }
+
+    public void setOAuth2DeviceCodeLifespan(Integer oauth2DeviceCodeLifespan) {
+        this.oauth2DeviceCodeLifespan = oauth2DeviceCodeLifespan;
+    }
+
+    public Integer getOAuth2DeviceCodeLifespan() {
+        return oauth2DeviceCodeLifespan;
+    }
+
+    public void setOAuth2DevicePollingInterval(Integer oauth2DevicePollingInterval) {
+        this.oauth2DevicePollingInterval = oauth2DevicePollingInterval;
+    }
+
+    public Integer getOAuth2DevicePollingInterval() {
+        return oauth2DevicePollingInterval;
+    }
+
+    public Integer getActionTokenGeneratedByUserLifespan() {
+        return actionTokenGeneratedByUserLifespan;
+    }
+
+    public void setActionTokenGeneratedByUserLifespan(Integer actionTokenGeneratedByUserLifespan) {
+        this.actionTokenGeneratedByUserLifespan = actionTokenGeneratedByUserLifespan;
+    }
+
+    @Deprecated
     public List<String> getDefaultRoles() {
         return defaultRoles;
     }
 
+    @Deprecated
     public void setDefaultRoles(List<String> defaultRoles) {
         this.defaultRoles = defaultRoles;
+    }
+
+    public RoleRepresentation getDefaultRole() {
+        return defaultRole;
+    }
+
+    public void setDefaultRole(RoleRepresentation defaultRole) {
+        this.defaultRole = defaultRole;
     }
 
     public List<String> getDefaultGroups() {
@@ -556,6 +737,14 @@ public class RealmRepresentation {
 
     public void setBruteForceProtected(Boolean bruteForceProtected) {
         this.bruteForceProtected = bruteForceProtected;
+    }
+
+    public Boolean isPermanentLockout() {
+        return permanentLockout;
+    }
+
+    public void setPermanentLockout(Boolean permanentLockout) {
+        this.permanentLockout = permanentLockout;
     }
 
     public Integer getMaxFailureWaitSeconds() {
@@ -817,6 +1006,197 @@ public class RealmRepresentation {
         this.otpPolicyPeriod = otpPolicyPeriod;
     }
 
+    public List<String> getOtpSupportedApplications() {
+        return otpSupportedApplications;
+    }
+
+    public void setOtpSupportedApplications(List<String> otpSupportedApplications) {
+        this.otpSupportedApplications = otpSupportedApplications;
+    }
+
+    // WebAuthn 2-factor properties below
+
+    public String getWebAuthnPolicyRpEntityName() {
+        return webAuthnPolicyRpEntityName;
+    }
+
+    public void setWebAuthnPolicyRpEntityName(String webAuthnPolicyRpEntityName) {
+        this.webAuthnPolicyRpEntityName = webAuthnPolicyRpEntityName;
+    }
+
+    public List<String> getWebAuthnPolicySignatureAlgorithms() {
+        return webAuthnPolicySignatureAlgorithms;
+    }
+
+    public void setWebAuthnPolicySignatureAlgorithms(List<String> webAuthnPolicySignatureAlgorithms) {
+        this.webAuthnPolicySignatureAlgorithms = webAuthnPolicySignatureAlgorithms;
+    }
+
+    public String getWebAuthnPolicyRpId() {
+        return webAuthnPolicyRpId;
+    }
+
+    public void setWebAuthnPolicyRpId(String webAuthnPolicyRpId) {
+        this.webAuthnPolicyRpId = webAuthnPolicyRpId;
+    }
+
+    public String getWebAuthnPolicyAttestationConveyancePreference() {
+        return webAuthnPolicyAttestationConveyancePreference;
+    }
+
+    public void setWebAuthnPolicyAttestationConveyancePreference(String webAuthnPolicyAttestationConveyancePreference) {
+        this.webAuthnPolicyAttestationConveyancePreference = webAuthnPolicyAttestationConveyancePreference;
+    }
+
+    public String getWebAuthnPolicyAuthenticatorAttachment() {
+        return webAuthnPolicyAuthenticatorAttachment;
+    }
+
+    public void setWebAuthnPolicyAuthenticatorAttachment(String webAuthnPolicyAuthenticatorAttachment) {
+        this.webAuthnPolicyAuthenticatorAttachment = webAuthnPolicyAuthenticatorAttachment;
+    }
+
+    public String getWebAuthnPolicyRequireResidentKey() {
+        return webAuthnPolicyRequireResidentKey;
+    }
+
+    public void setWebAuthnPolicyRequireResidentKey(String webAuthnPolicyRequireResidentKey) {
+        this.webAuthnPolicyRequireResidentKey = webAuthnPolicyRequireResidentKey;
+    }
+
+    public String getWebAuthnPolicyUserVerificationRequirement() {
+        return webAuthnPolicyUserVerificationRequirement;
+    }
+
+    public void setWebAuthnPolicyUserVerificationRequirement(String webAuthnPolicyUserVerificationRequirement) {
+        this.webAuthnPolicyUserVerificationRequirement = webAuthnPolicyUserVerificationRequirement;
+    }
+
+    public Integer getWebAuthnPolicyCreateTimeout() {
+        return webAuthnPolicyCreateTimeout;
+    }
+
+    public void setWebAuthnPolicyCreateTimeout(Integer webAuthnPolicyCreateTimeout) {
+        this.webAuthnPolicyCreateTimeout = webAuthnPolicyCreateTimeout;
+    }
+
+    public Boolean isWebAuthnPolicyAvoidSameAuthenticatorRegister() {
+        return webAuthnPolicyAvoidSameAuthenticatorRegister;
+    }
+
+    public void setWebAuthnPolicyAvoidSameAuthenticatorRegister(Boolean webAuthnPolicyAvoidSameAuthenticatorRegister) {
+        this.webAuthnPolicyAvoidSameAuthenticatorRegister = webAuthnPolicyAvoidSameAuthenticatorRegister;
+    }
+
+    public List<String> getWebAuthnPolicyAcceptableAaguids() {
+        return webAuthnPolicyAcceptableAaguids;
+    }
+
+    public void setWebAuthnPolicyAcceptableAaguids(List<String> webAuthnPolicyAcceptableAaguids) {
+        this.webAuthnPolicyAcceptableAaguids = webAuthnPolicyAcceptableAaguids;
+    }
+
+    // WebAuthn passwordless properties below
+
+
+    public String getWebAuthnPolicyPasswordlessRpEntityName() {
+        return webAuthnPolicyPasswordlessRpEntityName;
+    }
+
+    public void setWebAuthnPolicyPasswordlessRpEntityName(String webAuthnPolicyPasswordlessRpEntityName) {
+        this.webAuthnPolicyPasswordlessRpEntityName = webAuthnPolicyPasswordlessRpEntityName;
+    }
+
+    public List<String> getWebAuthnPolicyPasswordlessSignatureAlgorithms() {
+        return webAuthnPolicyPasswordlessSignatureAlgorithms;
+    }
+
+    public void setWebAuthnPolicyPasswordlessSignatureAlgorithms(List<String> webAuthnPolicyPasswordlessSignatureAlgorithms) {
+        this.webAuthnPolicyPasswordlessSignatureAlgorithms = webAuthnPolicyPasswordlessSignatureAlgorithms;
+    }
+
+    public String getWebAuthnPolicyPasswordlessRpId() {
+        return webAuthnPolicyPasswordlessRpId;
+    }
+
+    public void setWebAuthnPolicyPasswordlessRpId(String webAuthnPolicyPasswordlessRpId) {
+        this.webAuthnPolicyPasswordlessRpId = webAuthnPolicyPasswordlessRpId;
+    }
+
+    public String getWebAuthnPolicyPasswordlessAttestationConveyancePreference() {
+        return webAuthnPolicyPasswordlessAttestationConveyancePreference;
+    }
+
+    public void setWebAuthnPolicyPasswordlessAttestationConveyancePreference(String webAuthnPolicyPasswordlessAttestationConveyancePreference) {
+        this.webAuthnPolicyPasswordlessAttestationConveyancePreference = webAuthnPolicyPasswordlessAttestationConveyancePreference;
+    }
+
+    public String getWebAuthnPolicyPasswordlessAuthenticatorAttachment() {
+        return webAuthnPolicyPasswordlessAuthenticatorAttachment;
+    }
+
+    public void setWebAuthnPolicyPasswordlessAuthenticatorAttachment(String webAuthnPolicyPasswordlessAuthenticatorAttachment) {
+        this.webAuthnPolicyPasswordlessAuthenticatorAttachment = webAuthnPolicyPasswordlessAuthenticatorAttachment;
+    }
+
+    public String getWebAuthnPolicyPasswordlessRequireResidentKey() {
+        return webAuthnPolicyPasswordlessRequireResidentKey;
+    }
+
+    public void setWebAuthnPolicyPasswordlessRequireResidentKey(String webAuthnPolicyPasswordlessRequireResidentKey) {
+        this.webAuthnPolicyPasswordlessRequireResidentKey = webAuthnPolicyPasswordlessRequireResidentKey;
+    }
+
+    public String getWebAuthnPolicyPasswordlessUserVerificationRequirement() {
+        return webAuthnPolicyPasswordlessUserVerificationRequirement;
+    }
+
+    public void setWebAuthnPolicyPasswordlessUserVerificationRequirement(String webAuthnPolicyPasswordlessUserVerificationRequirement) {
+        this.webAuthnPolicyPasswordlessUserVerificationRequirement = webAuthnPolicyPasswordlessUserVerificationRequirement;
+    }
+
+    public Integer getWebAuthnPolicyPasswordlessCreateTimeout() {
+        return webAuthnPolicyPasswordlessCreateTimeout;
+    }
+
+    public void setWebAuthnPolicyPasswordlessCreateTimeout(Integer webAuthnPolicyPasswordlessCreateTimeout) {
+        this.webAuthnPolicyPasswordlessCreateTimeout = webAuthnPolicyPasswordlessCreateTimeout;
+    }
+
+    public Boolean isWebAuthnPolicyPasswordlessAvoidSameAuthenticatorRegister() {
+        return webAuthnPolicyPasswordlessAvoidSameAuthenticatorRegister;
+    }
+
+    public void setWebAuthnPolicyPasswordlessAvoidSameAuthenticatorRegister(Boolean webAuthnPolicyPasswordlessAvoidSameAuthenticatorRegister) {
+        this.webAuthnPolicyPasswordlessAvoidSameAuthenticatorRegister = webAuthnPolicyPasswordlessAvoidSameAuthenticatorRegister;
+    }
+
+    public List<String> getWebAuthnPolicyPasswordlessAcceptableAaguids() {
+        return webAuthnPolicyPasswordlessAcceptableAaguids;
+    }
+
+    public void setWebAuthnPolicyPasswordlessAcceptableAaguids(List<String> webAuthnPolicyPasswordlessAcceptableAaguids) {
+        this.webAuthnPolicyPasswordlessAcceptableAaguids = webAuthnPolicyPasswordlessAcceptableAaguids;
+    }
+
+    // Client Policies/Profiles
+
+    public ClientProfilesRepresentation getClientProfiles() {
+        return clientProfiles;
+    }
+
+    public void setClientProfiles(ClientProfilesRepresentation clientProfiles) {
+        this.clientProfiles = clientProfiles;
+    }
+
+    public ClientPoliciesRepresentation getClientPolicies() {
+        return clientPolicies;
+    }
+
+    public void setClientPolicies(ClientPoliciesRepresentation clientPolicies) {
+        this.clientPolicies = clientPolicies;
+    }
+
     public String getBrowserFlow() {
         return browserFlow;
     }
@@ -857,6 +1237,15 @@ public class RealmRepresentation {
         this.clientAuthenticationFlow = clientAuthenticationFlow;
     }
 
+    public String getDockerAuthenticationFlow() {
+        return dockerAuthenticationFlow;
+    }
+
+    public RealmRepresentation setDockerAuthenticationFlow(final String dockerAuthenticationFlow) {
+        this.dockerAuthenticationFlow = dockerAuthenticationFlow;
+        return this;
+    }
+
     public String getKeycloakVersion() {
         return keycloakVersion;
     }
@@ -873,12 +1262,33 @@ public class RealmRepresentation {
         this.groups = groups;
     }
 
+    @Deprecated // use getClientScopes() instead
     public List<ClientTemplateRepresentation> getClientTemplates() {
         return clientTemplates;
     }
 
-    public void setClientTemplates(List<ClientTemplateRepresentation> clientTemplates) {
-        this.clientTemplates = clientTemplates;
+    public List<ClientScopeRepresentation> getClientScopes() {
+        return clientScopes;
+    }
+
+    public void setClientScopes(List<ClientScopeRepresentation> clientScopes) {
+        this.clientScopes = clientScopes;
+    }
+
+    public List<String> getDefaultDefaultClientScopes() {
+        return defaultDefaultClientScopes;
+    }
+
+    public void setDefaultDefaultClientScopes(List<String> defaultDefaultClientScopes) {
+        this.defaultDefaultClientScopes = defaultDefaultClientScopes;
+    }
+
+    public List<String> getDefaultOptionalClientScopes() {
+        return defaultOptionalClientScopes;
+    }
+
+    public void setDefaultOptionalClientScopes(List<String> defaultOptionalClientScopes) {
+        this.defaultOptionalClientScopes = defaultOptionalClientScopes;
     }
 
     public MultivaluedHashMap<String, ComponentExportRepresentation> getComponents() {
@@ -908,5 +1318,18 @@ public class RealmRepresentation {
 
     public void setFederatedUsers(List<UserRepresentation> federatedUsers) {
         this.federatedUsers = federatedUsers;
+    }
+
+    public void setUserManagedAccessAllowed(Boolean userManagedAccessAllowed) {
+        this.userManagedAccessAllowed = userManagedAccessAllowed;
+    }
+
+    public Boolean isUserManagedAccessAllowed() {
+        return userManagedAccessAllowed;
+    }
+
+    @JsonIgnore
+    public Map<String, String> getAttributesOrEmpty() {
+        return (Map<String, String>) (attributes == null ? Collections.emptyMap() : attributes);
     }
 }

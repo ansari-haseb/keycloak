@@ -20,6 +20,7 @@ package org.keycloak.authorization.model;
 
 import org.keycloak.representations.idm.authorization.DecisionStrategy;
 import org.keycloak.representations.idm.authorization.Logic;
+import org.keycloak.storage.SearchableModelField;
 
 import java.util.Map;
 import java.util.Set;
@@ -30,6 +31,50 @@ import java.util.Set;
  * @author <a href="mailto:psilva@redhat.com">Pedro Igor</a>
  */
 public interface Policy {
+
+    public static class SearchableFields {
+        public static final SearchableModelField<Policy> ID = new SearchableModelField<>("id", String.class);
+        public static final SearchableModelField<Policy> NAME = new SearchableModelField<>("name", String.class);
+        public static final SearchableModelField<Policy> RESOURCE_SERVER_ID = new SearchableModelField<>("resourceServerId", String.class);
+        public static final SearchableModelField<Policy> RESOURCE_ID = new SearchableModelField<>("resourceId", String.class);
+        public static final SearchableModelField<Policy> SCOPE_ID = new SearchableModelField<>("scopeId", String.class);
+        public static final SearchableModelField<Policy> TYPE = new SearchableModelField<>("type", String.class);
+        public static final SearchableModelField<Policy> OWNER = new SearchableModelField<>("owner", String.class);
+        public static final SearchableModelField<Policy> CONFIG = new SearchableModelField<>("config", String.class);
+        public static final SearchableModelField<Policy> ASSOCIATED_POLICY_ID = new SearchableModelField<>("associatedPolicyId", String.class);
+    }
+
+    public static enum FilterOption {
+        ID("id", SearchableFields.ID),
+        PERMISSION("permission", SearchableFields.TYPE),
+        OWNER("owner", SearchableFields.OWNER),
+        ANY_OWNER("owner.any", SearchableFields.OWNER),
+        RESOURCE_ID("resources.id", SearchableFields.RESOURCE_ID),
+        SCOPE_ID("scopes.id", SearchableFields.SCOPE_ID),
+        CONFIG("config", SearchableFields.CONFIG),
+        TYPE("type", SearchableFields.TYPE),
+        NAME("name", SearchableFields.NAME);
+
+        public static final String[] EMPTY_FILTER = new String[0];
+        private final String name;
+        private final SearchableModelField<Policy> searchableModelField;
+
+        FilterOption(String name, SearchableModelField<Policy> searchableModelField) {
+            this.name = name;
+            this.searchableModelField = searchableModelField;
+        }
+
+
+        public String getName() {
+            return name;
+        }
+
+        public SearchableModelField<Policy> getSearchableModelField() {
+            return searchableModelField;
+        }
+    }
+    
+    public static final String CONFIG_SEPARATOR = "##";
 
     /**
      * Returns the unique identifier for this instance.
@@ -76,9 +121,10 @@ public interface Policy {
     /**
      * Returns a {@link Map} holding string-based key/value pairs representing any additional configuration for this policy.
      *
-     * @return a map with any additional configuration defined for this policy.
+     * @return a unmodifiable map with any additional configuration defined for this policy.
      */
     Map<String, String> getConfig();
+
 
     /**
      * Sets a {@link Map} with string-based key/value pairs representing any additional configuration for this policy.
@@ -86,6 +132,9 @@ public interface Policy {
      * @return a map with any additional configuration for this policy.
      */
     void setConfig(Map<String, String> config);
+
+    void removeConfig(String name);
+    void putConfig(String name, String value);
 
     /**
      * Returns the name of this policy.
@@ -120,7 +169,7 @@ public interface Policy {
      *
      * @return a resource server
      */
-    <R extends ResourceServer> R getResourceServer();
+     ResourceServer getResourceServer();
 
     /**
      * Returns the {@link Policy} instances associated with this policy and used to evaluate authorization decisions when
@@ -128,21 +177,25 @@ public interface Policy {
      *
      * @return the associated policies or an empty set if no policy is associated with this policy
      */
-    <P extends Policy> Set<P> getAssociatedPolicies();
+    Set<Policy> getAssociatedPolicies();
 
     /**
      * Returns the {@link Resource} instances where this policy applies.
      *
      * @return a set with all resource instances where this policy applies. Or an empty set if there is no resource associated with this policy
      */
-    <R extends Resource> Set<R> getResources();
+    Set<Resource> getResources();
 
     /**
      * Returns the {@link Scope} instances where this policy applies.
      *
      * @return a set with all scope instances where this policy applies. Or an empty set if there is no scope associated with this policy
      */
-    <S extends Scope> Set<S> getScopes();
+    Set<Scope> getScopes();
+
+    String getOwner();
+
+    void setOwner(String owner);
 
     void addScope(Scope scope);
 

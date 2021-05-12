@@ -18,9 +18,14 @@
 package org.keycloak.testsuite.page;
 
 import org.jboss.arquillian.drone.api.annotation.Drone;
+import org.junit.Assert;
+import org.keycloak.testsuite.pages.PageUtils;
+import org.openqa.selenium.By;
 import org.openqa.selenium.WebDriver;
 import org.openqa.selenium.WebElement;
 import org.openqa.selenium.support.FindBy;
+
+import static org.keycloak.testsuite.util.UIUtils.getTextFromElement;
 
 /**
  * @author <a href="mailto:sthorger@redhat.com">Stian Thorgersen</a>
@@ -53,12 +58,16 @@ public class LoginPasswordUpdatePage {
         return driver.getTitle().equals("Update password");
     }
 
+    public void assertCurrent() {
+        Assert.assertEquals("Update password", PageUtils.getPageTitle(driver));
+    }
+
     public void open() {
         throw new UnsupportedOperationException();
     }
 
     public String getError() {
-        return loginErrorMessage != null ? loginErrorMessage.getText() : null;
+        return loginErrorMessage != null ? getTextFromElement(loginErrorMessage) : null;
     }
 
 }

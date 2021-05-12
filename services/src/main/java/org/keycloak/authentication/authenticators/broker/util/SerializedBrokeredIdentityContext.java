@@ -24,13 +24,14 @@ import org.keycloak.broker.provider.IdentityProvider;
 import org.keycloak.broker.provider.IdentityProviderDataMarshaller;
 import org.keycloak.common.util.Base64Url;
 import org.keycloak.common.util.reflections.Reflections;
-import org.keycloak.models.ClientSessionModel;
 import org.keycloak.models.Constants;
 import org.keycloak.models.IdentityProviderModel;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.ModelException;
 import org.keycloak.models.RealmModel;
+import org.keycloak.models.UserModel;
 import org.keycloak.services.resources.IdentityBrokerService;
+import org.keycloak.sessions.AuthenticationSessionModel;
 import org.keycloak.util.JsonSerialization;
 
 import java.io.IOException;
@@ -38,6 +39,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * @author <a href="mailto:mposolda@redhat.com">Marek Posolda</a>
@@ -46,10 +49,6 @@ public class SerializedBrokeredIdentityContext implements UpdateProfileContext {
 
     private String id;
     private String brokerUsername;
-    private String modelUsername;
-    private String email;
-    private String firstName;
-    private String lastName;
     private String brokerSessionId;
     private String brokerUserId;
     private String code;
@@ -78,20 +77,20 @@ public class SerializedBrokeredIdentityContext implements UpdateProfileContext {
     @JsonIgnore
     @Override
     public String getUsername() {
-        return modelUsername;
+        return getFirstAttribute(UserModel.USERNAME);
     }
 
     @Override
     public void setUsername(String username) {
-        this.modelUsername = username;
+        setSingleAttribute(UserModel.USERNAME, username);
     }
 
     public String getModelUsername() {
-        return modelUsername;
+        return getFirstAttribute(UserModel.USERNAME);
     }
 
     public void setModelUsername(String modelUsername) {
-        this.modelUsername = modelUsername;
+        setSingleAttribute(UserModel.USERNAME, modelUsername);
     }
 
     public String getBrokerUsername() {
@@ -104,32 +103,32 @@ public class SerializedBrokeredIdentityContext implements UpdateProfileContext {
 
     @Override
     public String getEmail() {
-        return email;
+        return getFirstAttribute(UserModel.EMAIL);
     }
 
     @Override
     public void setEmail(String email) {
-        this.email = email;
+        setSingleAttribute(UserModel.EMAIL, email);
     }
 
     @Override
     public String getFirstName() {
-        return firstName;
+        return getFirstAttribute(UserModel.FIRST_NAME);
     }
 
     @Override
     public void setFirstName(String firstName) {
-        this.firstName = firstName;
+        setSingleAttribute(UserModel.FIRST_NAME, firstName);
     }
 
     @Override
     public String getLastName() {
-        return lastName;
+        return getFirstAttribute(UserModel.LAST_NAME);
     }
 
     @Override
     public void setLastName(String lastName) {
-        this.lastName = lastName;
+        setSingleAttribute(UserModel.LAST_NAME, lastName);
     }
 
     public String getBrokerSessionId() {
@@ -220,18 +219,23 @@ public class SerializedBrokeredIdentityContext implements UpdateProfileContext {
     @JsonIgnore
     @Override
     public List<String> getAttribute(String key) {
+        return this.getAttributeStream(key).collect(Collectors.toList());
+    }
+
+    @JsonIgnore
+    @Override
+    public Stream<String> getAttributeStream(String key) {
         ContextDataEntry ctxEntry = this.contextData.get(Constants.USER_ATTRIBUTES_PREFIX + key);
         if (ctxEntry != null) {
             try {
                 String asString = ctxEntry.getData();
                 byte[] asBytes = Base64Url.decode(asString);
-                List<String> asList = JsonSerialization.readValue(asBytes, List.class);
-                return asList;
+                return JsonSerialization.readValue(asBytes, List.class).stream();
             } catch (IOException ioe) {
                 throw new RuntimeException(ioe);
             }
         } else {
-            return null;
+            return Stream.empty();
         }
     }
 
@@ -246,7 +250,7 @@ public class SerializedBrokeredIdentityContext implements UpdateProfileContext {
         }
     }
 
-    public BrokeredIdentityContext deserialize(KeycloakSession session, ClientSessionModel clientSession) {
+    public BrokeredIdentityContext deserialize(KeycloakSession session, AuthenticationSessionModel authSession) {
         BrokeredIdentityContext ctx = new BrokeredIdentityContext(getId());
 
         ctx.setUsername(getBrokerUsername());
@@ -258,7 +262,7 @@ public class SerializedBrokeredIdentityContext implements UpdateProfileContext {
         ctx.setBrokerUserId(getBrokerUserId());
         ctx.setToken(getToken());
 
-        RealmModel realm = clientSession.getRealm();
+        RealmModel realm = authSession.getRealm();
         IdentityProviderModel idpConfig = realm.getIdentityProviderByAlias(getIdentityProviderId());
         if (idpConfig == null) {
             throw new ModelException("Can't find identity provider with ID " + getIdentityProviderId() + " in realm " + realm.getName());
@@ -282,7 +286,7 @@ public class SerializedBrokeredIdentityContext implements UpdateProfileContext {
             }
         }
 
-        ctx.setClientSession(clientSession);
+        ctx.setAuthenticationSession(authSession);
         return ctx;
     }
 
@@ -299,7 +303,7 @@ public class SerializedBrokeredIdentityContext implements UpdateProfileContext {
         ctx.setToken(context.getToken());
         ctx.setIdentityProviderId(context.getIdpConfig().getAlias());
 
-        ctx.emailAsUsername = context.getClientSession().getRealm().isRegistrationEmailAsUsername();
+        ctx.emailAsUsername = context.getAuthenticationSession().getRealm().isRegistrationEmailAsUsername();
 
         IdentityProviderDataMarshaller serializer = context.getIdp().getMarshaller();
 
@@ -313,24 +317,24 @@ public class SerializedBrokeredIdentityContext implements UpdateProfileContext {
         return ctx;
     }
 
-    // Save this context as note to clientSession
-    public void saveToClientSession(ClientSessionModel clientSession, String noteKey) {
+    // Save this context as note to authSession
+    public void saveToAuthenticationSession(AuthenticationSessionModel authSession, String noteKey) {
         try {
             String asString = JsonSerialization.writeValueAsString(this);
-            clientSession.setNote(noteKey, asString);
+            authSession.setAuthNote(noteKey, asString);
         } catch (IOException ioe) {
             throw new RuntimeException(ioe);
         }
     }
 
-    public static SerializedBrokeredIdentityContext readFromClientSession(ClientSessionModel clientSession, String noteKey) {
-        String asString = clientSession.getNote(noteKey);
+    public static SerializedBrokeredIdentityContext readFromAuthenticationSession(AuthenticationSessionModel authSession, String noteKey) {
+        String asString = authSession.getAuthNote(noteKey);
         if (asString == null) {
             return null;
         } else {
             try {
                 SerializedBrokeredIdentityContext serializedCtx = JsonSerialization.readValue(asString, SerializedBrokeredIdentityContext.class);
-                serializedCtx.emailAsUsername = clientSession.getRealm().isRegistrationEmailAsUsername();
+                serializedCtx.emailAsUsername = authSession.getRealm().isRegistrationEmailAsUsername();
                 return serializedCtx;
             } catch (IOException ioe) {
                 throw new RuntimeException(ioe);

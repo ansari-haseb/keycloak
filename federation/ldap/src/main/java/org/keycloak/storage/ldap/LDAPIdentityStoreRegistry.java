@@ -25,10 +25,8 @@ import org.keycloak.models.RealmModel;
 import org.keycloak.storage.ldap.idm.store.ldap.LDAPIdentityStore;
 import org.keycloak.storage.ldap.mappers.LDAPConfigDecorator;
 
-import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.stream.Collectors;
 
 /**
  * @author <a href="mailto:mposolda@redhat.com">Marek Posolda</a>
@@ -55,7 +53,7 @@ public class LDAPIdentityStoreRegistry {
         if (context == null || !ldapConfig.equals(context.config)) {
             logLDAPConfig(session, ldapModel, ldapConfig);
 
-            LDAPIdentityStore store = createLdapIdentityStore(ldapConfig);
+            LDAPIdentityStore store = createLdapIdentityStore(session, ldapConfig);
             context = new LDAPIdentityStoreContext(ldapConfig, store);
             ldapStores.put(ldapModel.getId(), context);
         }
@@ -68,38 +66,40 @@ public class LDAPIdentityStoreRegistry {
 
         if (logger.isDebugEnabled()) {
             RealmModel realm = session.realms().getRealm(ldapModel.getParentId());
-            List<ComponentModel> mappers = realm.getComponents(ldapModel.getId());
-            mappers.stream().forEach((ComponentModel c) -> {
-
-                logger.debugf("Mapper for provider: %s, Mapper name: %s, Provider: %s, Mapper configuration: %s", ldapModel.getName(), c.getName(), c.getProviderId(), c.getConfig().toString());
-
-            });
+            realm.getComponentsStream(ldapModel.getId()).forEach(c ->
+                    logger.debugf("Mapper for provider: %s, Mapper name: %s, Provider: %s, Mapper configuration: %s",
+                            ldapModel.getName(), c.getName(), c.getProviderId(), c.getConfig().toString()));
         }
     }
 
     /**
      * Create LDAPIdentityStore to be cached in the local registry
      */
-    public static LDAPIdentityStore createLdapIdentityStore(LDAPConfig cfg) {
-        checkSystemProperty("com.sun.jndi.ldap.connect.pool.authentication", "none simple");
-        checkSystemProperty("com.sun.jndi.ldap.connect.pool.initsize", "1");
-        checkSystemProperty("com.sun.jndi.ldap.connect.pool.maxsize", "1000");
-        checkSystemProperty("com.sun.jndi.ldap.connect.pool.prefsize", "5");
-        checkSystemProperty("com.sun.jndi.ldap.connect.pool.timeout", "300000");
-        checkSystemProperty("com.sun.jndi.ldap.connect.pool.protocol", "plain");
-        checkSystemProperty("com.sun.jndi.ldap.connect.pool.debug", "off");
+    public static LDAPIdentityStore createLdapIdentityStore(KeycloakSession session, LDAPConfig cfg) {
+        checkSystemProperty("com.sun.jndi.ldap.connect.pool.authentication", cfg.getConnectionPoolingAuthentication(), "none simple");
+        checkSystemProperty("com.sun.jndi.ldap.connect.pool.initsize", cfg.getConnectionPoolingInitSize(), "1");
+        checkSystemProperty("com.sun.jndi.ldap.connect.pool.maxsize", cfg.getConnectionPoolingMaxSize(), "1000");
+        checkSystemProperty("com.sun.jndi.ldap.connect.pool.prefsize", cfg.getConnectionPoolingPrefSize(), "5");
+        checkSystemProperty("com.sun.jndi.ldap.connect.pool.timeout", cfg.getConnectionPoolingTimeout(), "300000");
+        checkSystemProperty("com.sun.jndi.ldap.connect.pool.protocol", cfg.getConnectionPoolingProtocol(), "plain ssl");
+        checkSystemProperty("com.sun.jndi.ldap.connect.pool.debug", cfg.getConnectionPoolingDebug(), "off");
 
-        return new LDAPIdentityStore(cfg);
+        return new LDAPIdentityStore(session, cfg);
     }
 
-    private static void checkSystemProperty(String name, String defaultValue) {
-        if (System.getProperty(name) == null) {
-            System.setProperty(name, defaultValue);
+    private static void checkSystemProperty(String name, String cfgValue, String defaultValue) {
+        String value = System.getProperty(name);
+        if(cfgValue != null) {
+            value = cfgValue;
         }
+        if(value == null) {
+            value = defaultValue;
+        }
+        System.setProperty(name, value);
     }
 
 
-    private class LDAPIdentityStoreContext {
+    private static class LDAPIdentityStoreContext {
 
         private LDAPIdentityStoreContext(LDAPConfig config, LDAPIdentityStore store) {
             this.config = config;

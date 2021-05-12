@@ -20,8 +20,8 @@ package org.keycloak.protocol.saml.profile.ecp;
 import org.keycloak.dom.saml.v2.protocol.AuthnRequestType;
 import org.keycloak.events.EventBuilder;
 import org.keycloak.models.AuthenticationFlowModel;
+import org.keycloak.models.AuthenticatedClientSessionModel;
 import org.keycloak.models.ClientModel;
-import org.keycloak.models.ClientSessionModel;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.UserSessionModel;
 import org.keycloak.models.utils.DefaultAuthenticationFlows;
@@ -29,12 +29,14 @@ import org.keycloak.protocol.saml.JaxrsSAML2BindingBuilder;
 import org.keycloak.protocol.saml.SamlConfigAttributes;
 import org.keycloak.protocol.saml.SamlProtocol;
 import org.keycloak.protocol.saml.SamlService;
-import org.keycloak.protocol.saml.profile.ecp.util.Soap;
+import org.keycloak.protocol.saml.profile.util.Soap;
 import org.keycloak.saml.SAML2LogoutResponseBuilder;
 import org.keycloak.saml.common.constants.JBossSAMLConstants;
 import org.keycloak.saml.common.constants.JBossSAMLURIConstants;
 import org.keycloak.saml.common.exceptions.ConfigurationException;
 import org.keycloak.saml.common.exceptions.ProcessingException;
+import org.keycloak.saml.validators.DestinationValidator;
+import org.keycloak.sessions.AuthenticationSessionModel;
 import org.w3c.dom.Document;
 
 import javax.ws.rs.core.Response;
@@ -42,6 +44,8 @@ import javax.xml.soap.SOAPException;
 import javax.xml.soap.SOAPHeaderElement;
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.Map;
+import java.util.Objects;
 
 /**
  * @author <a href="mailto:psilva@redhat.com">Pedro Igor</a>
@@ -52,11 +56,15 @@ public class SamlEcpProfileService extends SamlService {
     private static final String NS_PREFIX_SAML_PROTOCOL = "samlp";
     private static final String NS_PREFIX_SAML_ASSERTION = "saml";
 
-    public SamlEcpProfileService(RealmModel realm, EventBuilder event) {
-        super(realm, event);
+    public SamlEcpProfileService(RealmModel realm, EventBuilder event, DestinationValidator destinationValidator) {
+        super(realm, event, destinationValidator);
     }
 
     public Response authenticate(InputStream inputStream) {
+        return authenticate(Soap.extractSoapMessage(inputStream));
+    }
+
+    public Response authenticate(Document soapMessage) {
         try {
             return new PostBindingProtocol() {
                 @Override
@@ -65,13 +73,18 @@ public class SamlEcpProfileService extends SamlService {
                 }
 
                 @Override
+                protected boolean isDestinationRequired() {
+                    return false;
+                }
+
+                @Override
                 protected Response loginRequest(String relayState, AuthnRequestType requestAbstractType, ClientModel client) {
                     // force passive authentication when executing this profile
                     requestAbstractType.setIsPassive(true);
-                    requestAbstractType.setDestination(uriInfo.getAbsolutePath());
+                    requestAbstractType.setDestination(session.getContext().getUri().getAbsolutePath());
                     return super.loginRequest(relayState, requestAbstractType, client);
                 }
-            }.execute(Soap.toSamlHttpPostMessage(inputStream), null, null);
+            }.execute(Soap.toSamlHttpPostMessage(soapMessage), null, null, null);
         } catch (Exception e) {
             String reason = "Some error occurred while processing the AuthnRequest.";
             String detail = e.getMessage();
@@ -85,15 +98,15 @@ public class SamlEcpProfileService extends SamlService {
     }
 
     @Override
-    protected Response newBrowserAuthentication(ClientSessionModel clientSession, boolean isPassive, boolean redirectToAuthentication, SamlProtocol samlProtocol) {
-        return super.newBrowserAuthentication(clientSession, isPassive, redirectToAuthentication, createEcpSamlProtocol());
+    protected Response newBrowserAuthentication(AuthenticationSessionModel authSession, boolean isPassive, boolean redirectToAuthentication, SamlProtocol samlProtocol) {
+        return super.newBrowserAuthentication(authSession, isPassive, redirectToAuthentication, createEcpSamlProtocol());
     }
 
     private SamlProtocol createEcpSamlProtocol() {
         return new SamlProtocol() {
             // method created to send a SOAP Binding response instead of a HTTP POST response
             @Override
-            protected Response buildAuthenticatedResponse(ClientSessionModel clientSession, String redirectUri, Document samlDocument, JaxrsSAML2BindingBuilder bindingBuilder) throws ConfigurationException, ProcessingException, IOException {
+            protected Response buildAuthenticatedResponse(AuthenticatedClientSessionModel clientSession, String redirectUri, Document samlDocument, JaxrsSAML2BindingBuilder bindingBuilder) throws ConfigurationException, ProcessingException, IOException {
                 Document document = bindingBuilder.postBinding(samlDocument).getDocument();
 
                 try {
@@ -113,7 +126,7 @@ public class SamlEcpProfileService extends SamlService {
                 }
             }
 
-            private void createRequestAuthenticatedHeader(ClientSessionModel clientSession, Soap.SoapMessageBuilder messageBuilder) {
+            private void createRequestAuthenticatedHeader(AuthenticatedClientSessionModel clientSession, Soap.SoapMessageBuilder messageBuilder) {
                 ClientModel client = clientSession.getClient();
 
                 if ("true".equals(client.getAttribute(SamlConfigAttributes.SAML_CLIENT_SIGNATURE_ATTRIBUTE))) {
@@ -125,7 +138,7 @@ public class SamlEcpProfileService extends SamlService {
             }
 
             private void createEcpResponseHeader(String redirectUri, Soap.SoapMessageBuilder messageBuilder) throws SOAPException {
-                SOAPHeaderElement ecpResponseHeader = messageBuilder.addHeader(JBossSAMLConstants.RESPONSE.get(), NS_PREFIX_PROFILE_ECP);
+                SOAPHeaderElement ecpResponseHeader = messageBuilder.addHeader(JBossSAMLConstants.RESPONSE__ECP.get(), NS_PREFIX_PROFILE_ECP);
 
                 ecpResponseHeader.setMustUnderstand(true);
                 ecpResponseHeader.setActor("http://schemas.xmlsoap.org/soap/actor/next");
@@ -133,7 +146,7 @@ public class SamlEcpProfileService extends SamlService {
             }
 
             @Override
-            protected Response buildErrorResponse(ClientSessionModel clientSession, JaxrsSAML2BindingBuilder binding, Document document) throws ConfigurationException, ProcessingException, IOException {
+            protected Response buildErrorResponse(boolean isPostBinding, String uri, JaxrsSAML2BindingBuilder binding, Document document) throws ConfigurationException, ProcessingException, IOException {
                 return Soap.createMessage().addToBody(document).build();
             }
 
@@ -141,17 +154,14 @@ public class SamlEcpProfileService extends SamlService {
             protected Response buildLogoutResponse(UserSessionModel userSession, String logoutBindingUri, SAML2LogoutResponseBuilder builder, JaxrsSAML2BindingBuilder binding) throws ConfigurationException, ProcessingException, IOException {
                 return Soap.createFault().reason("Logout not supported.").build();
             }
-        }.setEventBuilder(event).setHttpHeaders(headers).setRealm(realm).setSession(session).setUriInfo(uriInfo);
+        }.setEventBuilder(event).setHttpHeaders(headers).setRealm(realm).setSession(session).setUriInfo(session.getContext().getUri());
     }
 
     @Override
-    protected AuthenticationFlowModel getAuthenticationFlow() {
-        for (AuthenticationFlowModel flowModel : realm.getAuthenticationFlows()) {
-            if (flowModel.getAlias().equals(DefaultAuthenticationFlows.SAML_ECP_FLOW)) {
-                return flowModel;
-            }
-        }
-
-        throw new RuntimeException("Could not resolve authentication flow for SAML ECP Profile.");
+    protected AuthenticationFlowModel getAuthenticationFlow(AuthenticationSessionModel authSession) {
+        return realm.getAuthenticationFlowsStream()
+                .filter(flow -> Objects.equals(flow.getAlias(), DefaultAuthenticationFlows.SAML_ECP_FLOW))
+                .findFirst()
+                .orElseThrow(() -> new RuntimeException("Could not resolve authentication flow for SAML ECP Profile."));
     }
 }

@@ -18,6 +18,7 @@
 package org.keycloak.models.cache.infinispan.entities;
 
 import org.keycloak.models.ClientModel;
+import org.keycloak.models.ClientScopeModel;
 import org.keycloak.models.ProtocolMapperModel;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.RoleModel;
@@ -29,6 +30,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.stream.Collectors;
 
 /**
  * @author <a href="mailto:bill@burkecentral.com">Bill Burke</a>
@@ -39,25 +41,26 @@ public class CachedClient extends AbstractRevisioned implements InRealm {
     protected String name;
     protected String description;
     protected String realm;
-    protected Set<String> redirectUris = new HashSet<String>();
+    protected Set<String> redirectUris = new HashSet<>();
     protected boolean enabled;
+    protected boolean alwaysDisplayInConsole;
     protected String clientAuthenticatorType;
     protected String secret;
     protected String registrationToken;
     protected String protocol;
-    protected Map<String, String> attributes = new HashMap<String, String>();
+    protected Map<String, String> attributes = new HashMap<>();
+    protected Map<String, String> authFlowBindings = new HashMap<>();
     protected boolean publicClient;
     protected boolean fullScopeAllowed;
     protected boolean frontchannelLogout;
     protected int notBefore;
-    protected Set<String> scope = new HashSet<String>();
-    protected Set<String> webOrigins = new HashSet<String>();
-    protected Set<ProtocolMapperModel> protocolMappers = new HashSet<ProtocolMapperModel>();
+    protected Set<String> scope = new HashSet<>();
+    protected Set<String> webOrigins = new HashSet<>();
+    protected Set<ProtocolMapperModel> protocolMappers = new HashSet<>();
     protected boolean surrogateAuthRequired;
     protected String managementUrl;
     protected String rootUrl;
     protected String baseUrl;
-    protected List<String> defaultRoles = new LinkedList<String>();
     protected boolean bearerOnly;
     protected boolean consentRequired;
     protected boolean standardFlowEnabled;
@@ -66,10 +69,8 @@ public class CachedClient extends AbstractRevisioned implements InRealm {
     protected boolean serviceAccountsEnabled;
     protected int nodeReRegistrationTimeout;
     protected Map<String, Integer> registeredNodes;
-    protected String clientTemplate;
-    protected boolean useTemplateScope;
-    protected boolean useTemplateConfig;
-    protected boolean useTemplateMappers;
+    protected List<String> defaultClientScopesIds;
+    protected List<String> optionalClientScopesIds;
 
     public CachedClient(Long revision, RealmModel realm, ClientModel model) {
         super(revision, model.getId());
@@ -81,25 +82,22 @@ public class CachedClient extends AbstractRevisioned implements InRealm {
         description = model.getDescription();
         this.realm = realm.getId();
         enabled = model.isEnabled();
+        alwaysDisplayInConsole = model.isAlwaysDisplayInConsole();
         protocol = model.getProtocol();
         attributes.putAll(model.getAttributes());
+        authFlowBindings.putAll(model.getAuthenticationFlowBindingOverrides());
         notBefore = model.getNotBefore();
         frontchannelLogout = model.isFrontchannelLogout();
         publicClient = model.isPublicClient();
         fullScopeAllowed = model.isFullScopeAllowed();
         redirectUris.addAll(model.getRedirectUris());
         webOrigins.addAll(model.getWebOrigins());
-        for (RoleModel role : model.getScopeMappings())  {
-            scope.add(role.getId());
-        }
-        for (ProtocolMapperModel mapper : model.getProtocolMappers()) {
-            this.protocolMappers.add(mapper);
-        }
+        scope.addAll(model.getScopeMappingsStream().map(RoleModel::getId).collect(Collectors.toSet()));
+        protocolMappers.addAll(model.getProtocolMappersStream().collect(Collectors.toSet()));
         surrogateAuthRequired = model.isSurrogateAuthRequired();
         managementUrl = model.getManagementUrl();
         rootUrl = model.getRootUrl();
         baseUrl = model.getBaseUrl();
-        defaultRoles.addAll(model.getDefaultRoles());
         bearerOnly = model.isBearerOnly();
         consentRequired = model.isConsentRequired();
         standardFlowEnabled = model.isStandardFlowEnabled();
@@ -109,12 +107,15 @@ public class CachedClient extends AbstractRevisioned implements InRealm {
 
         nodeReRegistrationTimeout = model.getNodeReRegistrationTimeout();
         registeredNodes = new TreeMap<>(model.getRegisteredNodes());
-        if (model.getClientTemplate() != null) {
-            clientTemplate = model.getClientTemplate().getId();
+
+        defaultClientScopesIds = new LinkedList<>();
+        for (ClientScopeModel clientScope : model.getClientScopes(true).values()) {
+            defaultClientScopesIds.add(clientScope.getId());
         }
-        useTemplateConfig = model.useTemplateConfig();
-        useTemplateMappers = model.useTemplateMappers();
-        useTemplateScope = model.useTemplateScope();
+        optionalClientScopesIds = new LinkedList<>();
+        for (ClientScopeModel clientScope : model.getClientScopes(false).values()) {
+            optionalClientScopesIds.add(clientScope.getId());
+        }
     }
 
     public String getClientId() {
@@ -139,6 +140,10 @@ public class CachedClient extends AbstractRevisioned implements InRealm {
 
     public boolean isEnabled() {
         return enabled;
+    }
+
+    public boolean isAlwaysDisplayInConsole() {
+        return alwaysDisplayInConsole;
     }
 
     public String getClientAuthenticatorType() {
@@ -205,10 +210,6 @@ public class CachedClient extends AbstractRevisioned implements InRealm {
         return baseUrl;
     }
 
-    public List<String> getDefaultRoles() {
-        return defaultRoles;
-    }
-
     public boolean isBearerOnly() {
         return bearerOnly;
     }
@@ -241,19 +242,15 @@ public class CachedClient extends AbstractRevisioned implements InRealm {
         return registeredNodes;
     }
 
-    public String getClientTemplate() {
-        return clientTemplate;
+    public List<String> getDefaultClientScopesIds() {
+        return defaultClientScopesIds;
     }
 
-    public boolean isUseTemplateScope() {
-        return useTemplateScope;
+    public List<String> getOptionalClientScopesIds() {
+        return optionalClientScopesIds;
     }
 
-    public boolean isUseTemplateConfig() {
-        return useTemplateConfig;
-    }
-
-    public boolean isUseTemplateMappers() {
-        return useTemplateMappers;
+    public Map<String, String> getAuthFlowBindings() {
+        return authFlowBindings;
     }
 }

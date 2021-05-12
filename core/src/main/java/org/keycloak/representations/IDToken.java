@@ -17,7 +17,9 @@
 
 package org.keycloak.representations;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import org.keycloak.TokenCategory;
 
 /**
  * @author <a href="mailto:bill@burkecentral.com">Bill Burke</a>
@@ -51,13 +53,16 @@ public class IDToken extends JsonWebToken {
     public static final String CLAIMS_LOCALES = "claims_locales";
     public static final String ACR = "acr";
 
+    // Financial API - Part 2: Read and Write API Security Profile
+    // http://openid.net/specs/openid-financial-api-part-2.html#authorization-server
+    public static final String S_HASH = "s_hash";
+
     // NOTE!!!  WE used to use @JsonUnwrapped on a UserClaimSet object.  This screws up otherClaims and the won't work
     // anymore.  So don't have any @JsonUnwrapped!
     @JsonProperty(NONCE)
     protected String nonce;
 
-    @JsonProperty(AUTH_TIME)
-    protected int authTime;
+    protected Long auth_time;
 
     @JsonProperty(SESSION_STATE)
     protected String sessionState;
@@ -131,6 +136,11 @@ public class IDToken extends JsonWebToken {
     @JsonProperty(ACR)
     protected String acr;
 
+    // Financial API - Part 2: Read and Write API Security Profile
+    // http://openid.net/specs/openid-financial-api-part-2.html#authorization-server
+    @JsonProperty(S_HASH)
+    protected String stateHash; 
+
     public String getNonce() {
         return nonce;
     }
@@ -139,12 +149,28 @@ public class IDToken extends JsonWebToken {
         this.nonce = nonce;
     }
 
-    public int getAuthTime() {
-        return authTime;
+    public Long getAuth_time() {
+        return auth_time;
     }
 
+    /**
+     * @deprecated int will overflow with values after 2038. Use {@link #getAuth_time()} instead.
+     */
+    @Deprecated
+    @JsonIgnore
+    public int getAuthTime() {
+        return auth_time != null ? auth_time.intValue() : 0;
+    }
+
+    public void setAuth_time(Long auth_time) {
+        this.auth_time = auth_time;
+    }
+
+    /**
+     * @deprecated int will overflow with values after 2038. Use {@link #setAuth_time(Long)} ()} instead.
+     */
     public void setAuthTime(int authTime) {
-        this.authTime = authTime;
+        this.auth_time = Long.valueOf(authTime);
     }
 
     public String getSessionState() {
@@ -338,4 +364,20 @@ public class IDToken extends JsonWebToken {
     public void setAcr(String acr) {
         this.acr = acr;
     }
+
+    // Financial API - Part 2: Read and Write API Security Profile
+    // http://openid.net/specs/openid-financial-api-part-2.html#authorization-server
+    public String getStateHash() {
+        return stateHash;
+    }
+
+    public void setStateHash(String stateHash) {
+        this.stateHash = stateHash;
+    }
+
+    @Override
+    public TokenCategory getCategory() {
+        return TokenCategory.ID;
+    }
+
 }

@@ -25,7 +25,6 @@
     {
       "name": "Premium Resource",
       "uri": "/protected/premium/*",
-      "type": "urn:servlet-authz:protected:resource",
       "scopes": [
         {
           "name": "urn:servlet-authz:protected:premium:access"
@@ -34,7 +33,6 @@
     },
     {
       "name": "Main Page",
-      "type": "urn:servlet-authz:protected:resource",
       "scopes": [
         {
           "name": "urn:servlet-authz:page:main:actionForAdmin"
@@ -46,6 +44,30 @@
           "name": "urn:servlet-authz:page:main:actionForPremiumUser"
         }
       ]
+    },
+    {
+      "name": "Resource A",
+      "uri": "/protected/scopes.jsp",
+      "scopes": [
+        {
+          "name": "read"
+        },
+        {
+          "name": "write"
+        }
+      ]
+    },
+    {
+      "name": "Resource Protected With Claim",
+      "uri": "/protected/context/context.jsp"
+    },
+    {
+      "name": "Multiple URL resource",
+      "uris": ["/keycloak-7269/sub-resource1/*", "/keycloak-7269/sub-resource2/{whatever-pattern}/page.jsp"]
+    },
+    {
+      "name": "Resource Protected With Body Claim",
+      "uri": "/protected/filter/body"
     }
   ],
   "policies": [
@@ -141,6 +163,77 @@
       "config": {
         "scopes": "[\"urn:servlet-authz:page:main:actionForPremiumUser\"]",
         "applyPolicies": "[\"Only Premium User Policy\"]"
+      }
+    },
+    {
+      "name": "Deny Policy",
+      "type": "js",
+      "logic": "POSITIVE",
+      "decisionStrategy": "UNANIMOUS",
+      "config": {
+        "code": "// by default, grants any permission associated with this policy\n$evaluation.deny();"
+      }
+    },
+    {
+      "name": "Resource A Read Permission",
+      "type": "scope",
+      "logic": "POSITIVE",
+      "decisionStrategy": "UNANIMOUS",
+      "config": {
+        "resources": "[\"Resource A\"]",
+        "scopes": "[\"read\"]",
+        "applyPolicies": "[\"Any User Policy\"]"
+      }
+    },
+    {
+      "name": "Resource A Write Permission",
+      "type": "scope",
+      "logic": "POSITIVE",
+      "decisionStrategy": "UNANIMOUS",
+      "config": {
+        "resources": "[\"Resource A\"]",
+        "scopes": "[\"write\"]",
+        "applyPolicies": "[\"Deny Policy\"]"
+      }
+    },
+    {
+      "name": "Resource Protected With Claim Permission",
+      "type": "resource",
+      "logic": "POSITIVE",
+      "decisionStrategy": "UNANIMOUS",
+      "config": {
+        "resources": "[\"Resource Protected With Claim\"]",
+        "applyPolicies": "[\"Request Claim Policy\"]"
+      }
+    },
+    {
+      "name": "Permission for multiple url resource",
+      "type": "resource",
+      "logic": "POSITIVE",
+      "decisionStrategy": "UNANIMOUS",
+      "config": {
+        "resources": "[\"Multiple URL resource\"]",
+        "applyPolicies": "[\"All Users Policy\"]"
+      }
+    },
+    {
+      "name": "Request Claim Policy",
+      "description": "A policy that grants access based on claims from an http request",
+      "type": "js",
+      "logic": "POSITIVE",
+      "decisionStrategy": "UNANIMOUS",
+      "config": {
+        "code": "var context = $evaluation.getContext();\nvar attributes = context.getAttributes();\nvar claim = attributes.getValue('request-claim');\n\nif (claim && claim.asString(0) == 'expected-value') {\n   $evaluation.grant();\n}"
+      }
+    },
+    {
+      "name": "Resource Protected With Body Claim Permission",
+      "type": "resource",
+      "logic": "POSITIVE",
+      "decisionStrategy": "UNANIMOUS",
+      "config": {
+        "resources": "[\"Resource Protected With Body Claim\"]",
+        "applyPolicies": "[\"Any User Policy\"]"
       }
     }
   ]

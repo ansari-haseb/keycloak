@@ -17,6 +17,7 @@
 
 package org.keycloak.testsuite.util;
 
+import javax.mail.Address;
 import javax.mail.MessagingException;
 import javax.mail.Multipart;
 import javax.mail.internet.MimeMessage;
@@ -41,26 +42,71 @@ public class MailUtils {
         throw new AssertionError("No link found in " + body);
     }
 
-    public static String getPasswordResetEmailLink(MimeMessage message) throws IOException, MessagingException {
-        Multipart multipart = (Multipart) message.getContent();
+    public static String getPasswordResetEmailLink(MimeMessage message) throws IOException {
+        return getPasswordResetEmailLink(new EmailBody(message));
+    }
 
-        final String textContentType = multipart.getBodyPart(0).getContentType();
+    /**
+     *
+     * @param message email message
+     * @return first recipient of the email message
+     * @throws MessagingException
+     */
+    public static String getRecipient(MimeMessage message) throws MessagingException {
+        Address[] recipients = message.getRecipients(MimeMessage.RecipientType.TO);
+        return recipients[0].toString();
+    }
 
-        assertEquals("text/plain; charset=UTF-8", textContentType);
-
-        final String textBody = (String) multipart.getBodyPart(0).getContent();
-        final String textChangePwdUrl = getLink(textBody);
-
-        final String htmlContentType = multipart.getBodyPart(1).getContentType();
-
-        assertEquals("text/html; charset=UTF-8", htmlContentType);
-
-        final String htmlBody = (String) multipart.getBodyPart(1).getContent();
-        final String htmlChangePwdUrl = getLink(htmlBody);
-
+    public static String getPasswordResetEmailLink(EmailBody body) throws IOException {
+        final String textChangePwdUrl = getLink(body.getText());
+        String htmlChangePwdUrl = getLink(body.getHtml());
+        
+        // undo changes that may have been made by html sanitizer
+        htmlChangePwdUrl = htmlChangePwdUrl.replace("&#61;", "=");
+        htmlChangePwdUrl = htmlChangePwdUrl.replace("..", ".");
+        htmlChangePwdUrl = htmlChangePwdUrl.replace("&amp;", "&");
+        
         assertEquals(htmlChangePwdUrl, textChangePwdUrl);
 
         return htmlChangePwdUrl;
+    }
+
+    public static EmailBody getBody(MimeMessage message) throws IOException {
+        return new EmailBody(message);
+    }
+
+    public static class EmailBody {
+
+        private String text;
+        private String html;
+
+        private EmailBody(MimeMessage message) throws IOException {
+            try {
+                Multipart multipart = (Multipart) message.getContent();
+
+                String textContentType = multipart.getBodyPart(0).getContentType();
+
+                assertEquals("text/plain; charset=UTF-8", textContentType);
+
+                text = (String) multipart.getBodyPart(0).getContent();
+
+                String htmlContentType = multipart.getBodyPart(1).getContentType();
+
+                assertEquals("text/html; charset=UTF-8", htmlContentType);
+
+                html = (String) multipart.getBodyPart(1).getContent();
+            } catch (MessagingException e) {
+                throw new RuntimeException(e);
+            }
+        }
+
+        public String getText() {
+            return text;
+        }
+
+        public String getHtml() {
+            return html;
+        }
     }
 
 }

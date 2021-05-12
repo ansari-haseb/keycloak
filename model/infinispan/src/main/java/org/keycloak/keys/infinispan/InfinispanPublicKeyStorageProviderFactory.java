@@ -17,6 +17,7 @@
 
 package org.keycloak.keys.infinispan;
 
+import java.util.ArrayList;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.FutureTask;
@@ -27,15 +28,14 @@ import org.keycloak.Config;
 import org.keycloak.cluster.ClusterEvent;
 import org.keycloak.cluster.ClusterProvider;
 import org.keycloak.connections.infinispan.InfinispanConnectionProvider;
+import org.keycloak.jose.jwk.JWK;
 import org.keycloak.keys.PublicKeyStorageProvider;
-import org.keycloak.keys.PublicKeyStorageSpi;
 import org.keycloak.keys.PublicKeyStorageProviderFactory;
 import org.keycloak.keys.PublicKeyStorageUtils;
 import org.keycloak.models.ClientModel;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.KeycloakSessionFactory;
 import org.keycloak.models.RealmModel;
-import org.keycloak.models.cache.infinispan.events.InvalidationEvent;
 import org.keycloak.provider.ProviderEvent;
 import org.keycloak.provider.ProviderEventListener;
 
@@ -49,6 +49,8 @@ public class InfinispanPublicKeyStorageProviderFactory implements PublicKeyStora
     public static final String PROVIDER_ID = "infinispan";
 
     public static final String KEYS_CLEAR_CACHE_EVENTS = "KEYS_CLEAR_CACHE_EVENTS";
+
+    public static final String PUBLIC_KEY_STORAGE_INVALIDATION_EVENT = "PUBLIC_KEY_STORAGE_INVALIDATION_EVENT";
 
     private volatile Cache<String, PublicKeysEntry> keysCache;
 
@@ -69,12 +71,10 @@ public class InfinispanPublicKeyStorageProviderFactory implements PublicKeyStora
                     this.keysCache = session.getProvider(InfinispanConnectionProvider.class).getCache(InfinispanConnectionProvider.KEYS_CACHE_NAME);
 
                     ClusterProvider cluster = session.getProvider(ClusterProvider.class);
-                    cluster.registerListener(ClusterProvider.ALL, (ClusterEvent event) -> {
+                    cluster.registerListener(PUBLIC_KEY_STORAGE_INVALIDATION_EVENT, (ClusterEvent event) -> {
 
-                        if (event instanceof PublicKeyStorageInvalidationEvent) {
-                            PublicKeyStorageInvalidationEvent invalidationEvent = (PublicKeyStorageInvalidationEvent) event;
-                            keysCache.remove(invalidationEvent.getCacheKey());
-                        }
+                        PublicKeyStorageInvalidationEvent invalidationEvent = (PublicKeyStorageInvalidationEvent) event;
+                        keysCache.remove(invalidationEvent.getCacheKey());
 
                     });
 
@@ -108,7 +108,7 @@ public class InfinispanPublicKeyStorageProviderFactory implements PublicKeyStora
                 if (cacheKey != null) {
                     log.debugf("Invalidating %s from keysCache", cacheKey);
                     InfinispanPublicKeyStorageProvider provider = (InfinispanPublicKeyStorageProvider) cacheKey.session.getProvider(PublicKeyStorageProvider.class, getId());
-                    provider.addInvalidation(cacheKey.cacheKey);
+                    for (String ck : cacheKey.cacheKeys) provider.addInvalidation(ck);
                 }
             }
 
@@ -116,36 +116,45 @@ public class InfinispanPublicKeyStorageProviderFactory implements PublicKeyStora
     }
 
     private SessionAndKeyHolder getCacheKeyToInvalidate(ProviderEvent event) {
-        if (event instanceof RealmModel.ClientUpdatedEvent) {
-            RealmModel.ClientUpdatedEvent eventt = (RealmModel.ClientUpdatedEvent) event;
-            String cacheKey = PublicKeyStorageUtils.getClientModelCacheKey(eventt.getUpdatedClient().getRealm().getId(), eventt.getUpdatedClient().getId());
-            return new SessionAndKeyHolder(eventt.getKeycloakSession(), cacheKey);
-        } else if (event instanceof RealmModel.ClientRemovedEvent) {
-            RealmModel.ClientRemovedEvent eventt = (RealmModel.ClientRemovedEvent) event;
-            String cacheKey = PublicKeyStorageUtils.getClientModelCacheKey(eventt.getClient().getRealm().getId(), eventt.getClient().getId());
-            return new SessionAndKeyHolder(eventt.getKeycloakSession(), cacheKey);
+        ArrayList<String> cacheKeys = new ArrayList<>();
+        String cacheKey = null;
+        if (event instanceof ClientModel.ClientUpdatedEvent) {
+            ClientModel.ClientUpdatedEvent eventt = (ClientModel.ClientUpdatedEvent) event;
+            cacheKey = PublicKeyStorageUtils.getClientModelCacheKey(eventt.getUpdatedClient().getRealm().getId(), eventt.getUpdatedClient().getId(), JWK.Use.SIG);
+            cacheKeys.add(cacheKey);
+            cacheKey = PublicKeyStorageUtils.getClientModelCacheKey(eventt.getUpdatedClient().getRealm().getId(), eventt.getUpdatedClient().getId(), JWK.Use.ENCRYPTION);
+            cacheKeys.add(cacheKey);
+            return new SessionAndKeyHolder(eventt.getKeycloakSession(), cacheKeys);
+        } else if (event instanceof ClientModel.ClientRemovedEvent) {
+            ClientModel.ClientRemovedEvent eventt = (ClientModel.ClientRemovedEvent) event;
+            cacheKey = PublicKeyStorageUtils.getClientModelCacheKey(eventt.getClient().getRealm().getId(), eventt.getClient().getId(), JWK.Use.SIG);
+            cacheKeys.add(cacheKey);
+            cacheKey = PublicKeyStorageUtils.getClientModelCacheKey(eventt.getClient().getRealm().getId(), eventt.getClient().getId(), JWK.Use.ENCRYPTION);
+            cacheKeys.add(cacheKey);
+            return new SessionAndKeyHolder(eventt.getKeycloakSession(), cacheKeys);
         } else if (event instanceof RealmModel.IdentityProviderUpdatedEvent) {
             RealmModel.IdentityProviderUpdatedEvent eventt = (RealmModel.IdentityProviderUpdatedEvent) event;
-            String cacheKey = PublicKeyStorageUtils.getIdpModelCacheKey(eventt.getRealm().getId(), eventt.getUpdatedIdentityProvider().getInternalId());
-            return new SessionAndKeyHolder(eventt.getKeycloakSession(), cacheKey);
+            cacheKey = PublicKeyStorageUtils.getIdpModelCacheKey(eventt.getRealm().getId(), eventt.getUpdatedIdentityProvider().getInternalId());
+            cacheKeys.add(cacheKey);
+            return new SessionAndKeyHolder(eventt.getKeycloakSession(), cacheKeys);
         } else if (event instanceof RealmModel.IdentityProviderRemovedEvent) {
             RealmModel.IdentityProviderRemovedEvent eventt = (RealmModel.IdentityProviderRemovedEvent) event;
-            String cacheKey = PublicKeyStorageUtils.getIdpModelCacheKey(eventt.getRealm().getId(), eventt.getRemovedIdentityProvider().getInternalId());
-            return new SessionAndKeyHolder(eventt.getKeycloakSession(), cacheKey);
+            cacheKey = PublicKeyStorageUtils.getIdpModelCacheKey(eventt.getRealm().getId(), eventt.getRemovedIdentityProvider().getInternalId());
+            cacheKeys.add(cacheKey);
+            return new SessionAndKeyHolder(eventt.getKeycloakSession(), cacheKeys);
         } else {
             return null;
         }
     }
 
-    private class SessionAndKeyHolder {
+    private static class SessionAndKeyHolder {
         private final KeycloakSession session;
-        private final String cacheKey;
+        private final ArrayList<String> cacheKeys;
 
-        public SessionAndKeyHolder(KeycloakSession session, String cacheKey) {
+        public SessionAndKeyHolder(KeycloakSession session, ArrayList<String> cacheKeys) {
             this.session = session;
-            this.cacheKey = cacheKey;
+            this.cacheKeys = cacheKeys;
         }
-
     }
 
     @Override

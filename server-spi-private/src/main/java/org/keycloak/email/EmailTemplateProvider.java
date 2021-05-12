@@ -21,6 +21,10 @@ import org.keycloak.events.Event;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.UserModel;
 import org.keycloak.provider.Provider;
+import org.keycloak.sessions.AuthenticationSessionModel;
+
+import java.util.List;
+import java.util.Map;
 
 /**
  * @author <a href="mailto:sthorger@redhat.com">Stian Thorgersen</a>
@@ -28,14 +32,16 @@ import org.keycloak.provider.Provider;
 public interface EmailTemplateProvider extends Provider {
 
     String IDENTITY_PROVIDER_BROKER_CONTEXT = "identityProviderBrokerCtx";
+    
+    EmailTemplateProvider setAuthenticationSession(AuthenticationSessionModel authenticationSession);
 
-    public EmailTemplateProvider setRealm(RealmModel realm);
+    EmailTemplateProvider setRealm(RealmModel realm);
 
-    public EmailTemplateProvider setUser(UserModel user);
+    EmailTemplateProvider setUser(UserModel user);
 
-    public EmailTemplateProvider setAttribute(String name, Object value);
+    EmailTemplateProvider setAttribute(String name, Object value);
 
-    public void sendEvent(Event event) throws EmailException;
+    void sendEvent(Event event) throws EmailException;
 
     /**
      * Reset password sent from forgot password link on login
@@ -44,7 +50,16 @@ public interface EmailTemplateProvider extends Provider {
      * @param expirationInMinutes
      * @throws EmailException
      */
-    public void sendPasswordReset(String link, long expirationInMinutes) throws EmailException;
+    void sendPasswordReset(String link, long expirationInMinutes) throws EmailException;
+
+    /**
+     * Test SMTP connection with current logged in user
+     *
+     * @param config SMTP server configuration
+     * @param user SMTP recipient
+     * @throws EmailException
+     */
+    void sendSmtpTestEmail(Map<String, String> config, UserModel user) throws EmailException;
 
     /**
      * Send to confirm that user wants to link his account with identity broker link
@@ -58,8 +73,28 @@ public interface EmailTemplateProvider extends Provider {
      * @param expirationInMinutes
      * @throws EmailException
      */
-    public void sendExecuteActions(String link, long expirationInMinutes) throws EmailException;
+    void sendExecuteActions(String link, long expirationInMinutes) throws EmailException;
 
-    public void sendVerifyEmail(String link, long expirationInMinutes) throws EmailException;
+    void sendVerifyEmail(String link, long expirationInMinutes) throws EmailException;
 
+    /**
+     * Send formatted email
+     *
+     * @param subjectFormatKey message property that will be used to format email subject
+     * @param bodyTemplate freemarker template file
+     * @param bodyAttributes attributes used to fill template
+     * @throws EmailException
+     */
+    void send(String subjectFormatKey, String bodyTemplate, Map<String, Object> bodyAttributes) throws EmailException;
+
+    /**
+     * Send formatted email
+     *
+     * @param subjectFormatKey message property that will be used to format email subject
+     * @param subjectAttributes attributes used to fill subject format message
+     * @param bodyTemplate freemarker template file
+     * @param bodyAttributes attributes used to fill template
+     * @throws EmailException
+     */
+    void send(String subjectFormatKey, List<Object> subjectAttributes, String bodyTemplate, Map<String, Object> bodyAttributes) throws EmailException;
 }

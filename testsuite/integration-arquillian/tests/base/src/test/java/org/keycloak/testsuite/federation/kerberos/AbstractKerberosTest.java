@@ -17,11 +17,15 @@
 
 package org.keycloak.testsuite.federation.kerberos;
 
+import static org.keycloak.testsuite.admin.AbstractAdminTest.loadJson;
+
 import java.net.URI;
 import java.security.Principal;
 import java.util.Hashtable;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.function.Consumer;
 
 import javax.naming.Context;
 import javax.naming.NamingException;
@@ -29,13 +33,12 @@ import javax.naming.directory.Attributes;
 import javax.naming.directory.DirContext;
 import javax.naming.directory.InitialDirContext;
 import javax.security.sasl.Sasl;
-import javax.ws.rs.core.HttpHeaders;
 import javax.ws.rs.core.Response;
 
 import org.apache.http.NameValuePair;
 import org.apache.http.auth.AuthScope;
 import org.apache.http.auth.Credentials;
-import org.apache.http.client.params.AuthPolicy;
+import org.apache.http.client.config.AuthSchemes;
 import org.apache.http.client.utils.URLEncodedUtils;
 import org.apache.http.impl.client.DefaultHttpClient;
 import org.ietf.jgss.GSSCredential;
@@ -46,41 +49,43 @@ import org.jboss.resteasy.client.jaxrs.engines.ApacheHttpClient4Engine;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Rule;
-import org.junit.Test;
 import org.keycloak.OAuth2Constants;
 import org.keycloak.adapters.HttpClientBuilder;
-import org.keycloak.admin.client.resource.ClientResource;
 import org.keycloak.admin.client.resource.RealmResource;
-import org.keycloak.common.constants.KerberosConstants;
-import org.keycloak.common.util.KerberosSerializationUtils;
+import org.keycloak.authentication.authenticators.browser.SpnegoAuthenticatorFactory;
 import org.keycloak.common.util.MultivaluedHashMap;
 import org.keycloak.events.Details;
 import org.keycloak.federation.kerberos.CommonKerberosConfig;
+import org.keycloak.models.AuthenticationExecutionModel;
 import org.keycloak.models.LDAPConstants;
-import org.keycloak.models.ProtocolMapperModel;
 import org.keycloak.models.UserModel;
+import org.keycloak.models.utils.DefaultAuthenticationFlows;
 import org.keycloak.models.utils.ModelToRepresentation;
-import org.keycloak.protocol.oidc.mappers.UserSessionNoteMapper;
 import org.keycloak.representations.AccessToken;
+import org.keycloak.representations.idm.AuthenticationExecutionInfoRepresentation;
 import org.keycloak.representations.idm.ComponentRepresentation;
-import org.keycloak.representations.idm.ProtocolMapperRepresentation;
 import org.keycloak.representations.idm.RealmRepresentation;
 import org.keycloak.representations.idm.UserRepresentation;
 import org.keycloak.storage.UserStorageProvider;
+import org.keycloak.storage.UserStorageProviderModel;
 import org.keycloak.testsuite.AbstractAuthTest;
 import org.keycloak.testsuite.Assert;
 import org.keycloak.testsuite.AssertEvents;
 import org.keycloak.testsuite.admin.ApiUtil;
+import org.keycloak.testsuite.arquillian.annotation.AuthServerContainerExclude;
+import org.keycloak.testsuite.arquillian.annotation.AuthServerContainerExclude.AuthServer;
 import org.keycloak.testsuite.auth.page.AuthRealm;
 import org.keycloak.testsuite.pages.AccountPasswordPage;
 import org.keycloak.testsuite.pages.LoginPage;
+import org.keycloak.testsuite.util.KerberosRule;
 import org.keycloak.testsuite.util.OAuthClient;
-import static org.keycloak.testsuite.admin.AbstractAdminTest.loadJson;
-import static org.keycloak.testsuite.admin.ApiUtil.findClientByClientId;
 
 /**
+ * Contains just helper methods. No test methods.
+ *
  * @author <a href="mailto:mposolda@redhat.com">Marek Posolda</a>
  */
+@AuthServerContainerExclude(AuthServer.REMOTE)
 public abstract class AbstractKerberosTest extends AbstractAuthTest {
 
     protected KeycloakSPNegoSchemeFactory spnegoSchemeFactory;
@@ -96,11 +101,30 @@ public abstract class AbstractKerberosTest extends AbstractAuthTest {
     @Page
     protected AccountPasswordPage changePasswordPage;
 
+    protected abstract KerberosRule getKerberosRule();
+
     protected abstract CommonKerberosConfig getKerberosConfig();
 
     protected abstract ComponentRepresentation getUserStorageConfiguration();
 
-    protected abstract void setKrb5ConfPath();
+
+    protected ComponentRepresentation getUserStorageConfiguration(String providerName, String providerId) {
+        Map<String,String> kerberosConfig = getKerberosRule().getConfig();
+        MultivaluedHashMap<String, String> config = toComponentConfig(kerberosConfig);
+
+        UserStorageProviderModel model = new UserStorageProviderModel();
+        model.setLastSync(0);
+        model.setChangedSyncPeriod(-1);
+        model.setFullSyncPeriod(-1);
+        model.setName(providerName);
+        model.setPriority(0);
+        model.setProviderId(providerId);
+        model.setConfig(config);
+
+        ComponentRepresentation rep = ModelToRepresentation.toRepresentationWithoutConfig(model);
+        return rep;
+    }
+
 
     @Override
     public void addTestRealms(List<RealmRepresentation> testRealms) {
@@ -108,15 +132,21 @@ public abstract class AbstractKerberosTest extends AbstractAuthTest {
         testRealms.add(realmRep);
     }
 
+    @Override
+    public RealmResource testRealmResource() {
+        return adminClient.realm("test");
+    }
+
 
     @Before
+    @Override
     public void beforeAbstractKeycloakTest() throws Exception {
         super.beforeAbstractKeycloakTest();
 
         testRealmPage.setAuthRealm(AuthRealm.TEST);
         changePasswordPage.realm(AuthRealm.TEST);
 
-        setKrb5ConfPath();
+        getKerberosRule().setKrb5ConfPath(testingClient.testing());
 
         spnegoSchemeFactory = new KeycloakSPNegoSchemeFactory(getKerberosConfig());
         initHttpClient(true);
@@ -131,7 +161,8 @@ public abstract class AbstractKerberosTest extends AbstractAuthTest {
     }
 
     @After
-    public void afterAbstractKeycloakTest() {
+    @Override
+    public void afterAbstractKeycloakTest() throws Exception {
         cleanupApacheHttpClient();
 
         super.afterAbstractKeycloakTest();
@@ -149,154 +180,36 @@ public abstract class AbstractKerberosTest extends AbstractAuthTest {
 //    }
 
 
-    @Test
-    public void spnegoNotAvailableTest() throws Exception {
-        initHttpClient(false);
-
-        String kcLoginPageLocation = oauth.getLoginFormUrl();
-
-        Response response = client.target(kcLoginPageLocation).request().get();
-        Assert.assertEquals(401, response.getStatus());
-        Assert.assertEquals(KerberosConstants.NEGOTIATE, response.getHeaderString(HttpHeaders.WWW_AUTHENTICATE));
-        String responseText = response.readEntity(String.class);
-        response.close();
+    protected AccessToken assertSuccessfulSpnegoLogin(String loginUsername, String expectedUsername, String password) throws Exception {
+        return assertSuccessfulSpnegoLogin("kerberos-app", loginUsername, expectedUsername, password);
     }
 
-
-    protected OAuthClient.AccessTokenResponse spnegoLoginTestImpl() throws Exception {
-        Response spnegoResponse = spnegoLogin("hnelson", "secret");
+    protected AccessToken assertSuccessfulSpnegoLogin(String clientId, String loginUsername, String expectedUsername, String password) throws Exception {
+        oauth.clientId(clientId);
+        Response spnegoResponse = spnegoLogin(loginUsername, password);
         Assert.assertEquals(302, spnegoResponse.getStatus());
 
-        List<UserRepresentation> users = testRealmResource().users().search("hnelson", 0, 1);
+        List<UserRepresentation> users = testRealmResource().users().search(expectedUsername, 0, 1);
         String userId = users.get(0).getId();
         events.expectLogin()
-                .client("kerberos-app")
+                .client(clientId)
                 .user(userId)
-                .detail(Details.USERNAME, "hnelson")
+                .detail(Details.USERNAME, expectedUsername)
                 .assertEvent();
 
         String codeUrl = spnegoResponse.getLocation().toString();
 
-        return assertAuthenticationSuccess(codeUrl);
+        OAuthClient.AccessTokenResponse tokenResponse = assertAuthenticationSuccess(codeUrl);
+
+        AccessToken token = oauth.verifyToken(tokenResponse.getAccessToken());
+        Assert.assertEquals(userId, token.getSubject());
+        Assert.assertEquals(expectedUsername, token.getPreferredUsername());
+
+        return token;
     }
 
 
-    protected abstract boolean isCaseSensitiveLogin();
-
-    // KEYCLOAK-2102
-    @Test
-    public void spnegoCaseInsensitiveTest() throws Exception {
-        Response spnegoResponse = spnegoLogin(isCaseSensitiveLogin() ? "MyDuke" : "myduke", "theduke");
-        Assert.assertEquals(302, spnegoResponse.getStatus());
-        List<UserRepresentation> users = testRealmResource().users().search("myduke", 0, 1);
-        String userId = users.get(0).getId();
-        events.expectLogin()
-                .client("kerberos-app")
-                .user(userId)
-                .detail(Details.USERNAME, "myduke")
-                .assertEvent();
-
-        String codeUrl = spnegoResponse.getLocation().toString();
-
-        assertAuthenticationSuccess(codeUrl);
-    }
-
-    @Test
-    public void usernamePasswordLoginTest() throws Exception {
-        // Change editMode to READ_ONLY
-        updateProviderEditMode(UserStorageProvider.EditMode.READ_ONLY);
-
-        // Login with username/password from kerberos
-        changePasswordPage.open();
-        loginPage.assertCurrent();
-        loginPage.login("jduke", "theduke");
-        changePasswordPage.assertCurrent();
-
-        // Bad existing password
-        changePasswordPage.changePassword("theduke-invalid", "newPass", "newPass");
-        Assert.assertTrue(driver.getPageSource().contains("Invalid existing password."));
-
-        // Change password is not possible as editMode is READ_ONLY
-        changePasswordPage.changePassword("theduke", "newPass", "newPass");
-        Assert.assertTrue(
-                driver.getPageSource().contains("You can't update your password as your account is read only"));
-
-        // Change editMode to UNSYNCED
-        updateProviderEditMode(UserStorageProvider.EditMode.UNSYNCED);
-
-        // Successfully change password now
-        changePasswordPage.changePassword("theduke", "newPass", "newPass");
-        Assert.assertTrue(driver.getPageSource().contains("Your password has been updated."));
-        changePasswordPage.logout();
-
-        // Login with old password doesn't work, but with new password works
-        loginPage.login("jduke", "theduke");
-        loginPage.assertCurrent();
-        loginPage.login("jduke", "newPass");
-        changePasswordPage.assertCurrent();
-        changePasswordPage.logout();
-
-        // Assert SPNEGO login still with the old password as mode is unsynced
-        events.clear();
-        Response spnegoResponse = spnegoLogin("jduke", "theduke");
-        Assert.assertEquals(302, spnegoResponse.getStatus());
-        List<UserRepresentation> users = testRealmResource().users().search("jduke", 0, 1);
-        String userId = users.get(0).getId();
-        events.expectLogin()
-                .client("kerberos-app")
-                .user(userId)
-                .detail(Details.USERNAME, "jduke")
-                .assertEvent();
-
-        String codeUrl = spnegoResponse.getLocation().toString();
-
-        assertAuthenticationSuccess(codeUrl);
-    }
-
-
-    @Test
-    public void credentialDelegationTest() throws Exception {
-        // Add kerberos delegation credential mapper
-        ProtocolMapperModel protocolMapper = UserSessionNoteMapper.createClaimMapper(KerberosConstants.GSS_DELEGATION_CREDENTIAL_DISPLAY_NAME,
-                KerberosConstants.GSS_DELEGATION_CREDENTIAL,
-                KerberosConstants.GSS_DELEGATION_CREDENTIAL, "String",
-                true, KerberosConstants.GSS_DELEGATION_CREDENTIAL_DISPLAY_NAME,
-                true, false);
-        ProtocolMapperRepresentation protocolMapperRep = ModelToRepresentation.toRepresentation(protocolMapper);
-        ClientResource clientResource = findClientByClientId(testRealmResource(), "kerberos-app");
-        Response response = clientResource.getProtocolMappers().createMapper(protocolMapperRep);
-        String protocolMapperId = ApiUtil.getCreatedId(response);
-        response.close();
-
-        // SPNEGO login
-        OAuthClient.AccessTokenResponse tokenResponse = spnegoLoginTestImpl();
-
-        // Assert kerberos ticket in the accessToken can be re-used to authenticate against other 3rd party kerberos service (ApacheDS Server in this case)
-        String accessToken = tokenResponse.getAccessToken();
-        AccessToken token = oauth.verifyToken(accessToken);
-
-        String serializedGssCredential = (String) token.getOtherClaims().get(KerberosConstants.GSS_DELEGATION_CREDENTIAL);
-        Assert.assertNotNull(serializedGssCredential);
-        GSSCredential gssCredential = KerberosSerializationUtils.deserializeCredential(serializedGssCredential);
-        String ldapResponse = invokeLdap(gssCredential, token.getPreferredUsername());
-        Assert.assertEquals("Horatio Nelson", ldapResponse);
-
-        // Logout
-        oauth.openLogout();
-
-        // Remove protocolMapper
-        clientResource.getProtocolMappers().delete(protocolMapperId);
-
-        // Login and assert delegated credential not anymore
-        tokenResponse = spnegoLoginTestImpl();
-        accessToken = tokenResponse.getAccessToken();
-        token = oauth.verifyToken(accessToken);
-        Assert.assertFalse(token.getOtherClaims().containsKey(KerberosConstants.GSS_DELEGATION_CREDENTIAL));
-
-        events.clear();
-    }
-
-    private String invokeLdap(GSSCredential gssCredential, String username) throws NamingException {
+    protected String invokeLdap(GSSCredential gssCredential, String username) throws NamingException {
         Hashtable env = new Hashtable(11);
         env.put(Context.INITIAL_CONTEXT_FACTORY, "com.sun.jndi.ldap.LdapCtxFactory");
         env.put(Context.PROVIDER_URL, "ldap://localhost:10389");
@@ -328,7 +241,7 @@ public abstract class AbstractKerberosTest extends AbstractAuthTest {
             if (response.getLocation() == null)
                 return response;
             String uri = response.getLocation().toString();
-            if (uri.contains("login-actions/required-action")) {
+            if (uri.contains("login-actions/required-action") || uri.contains("auth_session_id")) {
                 response = client.target(uri).request().get();
             }
         }
@@ -341,17 +254,22 @@ public abstract class AbstractKerberosTest extends AbstractAuthTest {
         if (client != null) {
             cleanupApacheHttpClient();
         }
+        
+        DefaultHttpClient httpClient = (DefaultHttpClient) new HttpClientBuilder()
+                .disableCookieCache(false)
+                .build();
 
-        DefaultHttpClient httpClient = (DefaultHttpClient) new HttpClientBuilder().build();
-        httpClient.getAuthSchemes().register(AuthPolicy.SPNEGO, spnegoSchemeFactory);
+        httpClient.getAuthSchemes().register(AuthSchemes.SPNEGO, spnegoSchemeFactory);
 
         if (useSpnego) {
             Credentials fake = new Credentials() {
 
+                @Override
                 public String getPassword() {
                     return null;
                 }
 
+                @Override
                 public Principal getUserPrincipal() {
                     return null;
                 }
@@ -369,13 +287,13 @@ public abstract class AbstractKerberosTest extends AbstractAuthTest {
 
     protected void removeAllUsers() {
         RealmResource realm = testRealmResource();
-        List<UserRepresentation> users = realm.users().search("", 0, Integer.MAX_VALUE);
+        List<UserRepresentation> users = realm.users().search("", 0, -1);
         for (UserRepresentation user : users) {
             if (!user.getUsername().equals(AssertEvents.DEFAULT_USERNAME)) {
                 realm.users().get(user.getId()).remove();
             }
         }
-        Assert.assertEquals(1, realm.users().search("", 0, Integer.MAX_VALUE).size());
+        Assert.assertEquals(1, realm.users().search("", 0, -1).size());
     }
 
 
@@ -420,20 +338,57 @@ public abstract class AbstractKerberosTest extends AbstractAuthTest {
 
 
     protected void updateProviderEditMode(UserStorageProvider.EditMode editMode) {
+        updateUserStorageProvider(kerberosProvider -> kerberosProvider.getConfig().putSingle(LDAPConstants.EDIT_MODE, editMode.toString()));
+    }
+
+    protected void updateProviderValidatePasswordPolicy(Boolean validatePasswordPolicy) {
+        updateUserStorageProvider(kerberosProvider -> kerberosProvider.getConfig().putSingle(LDAPConstants.VALIDATE_PASSWORD_POLICY, validatePasswordPolicy.toString()));
+    }
+
+
+    /**
+     * Update UserStorage provider (Kerberos provider or LDAP provider with Kerberos enabled) with specified updater and save it
+     *
+     */
+    protected void updateUserStorageProvider(Consumer<ComponentRepresentation> updater) {
         List<ComponentRepresentation> reps = testRealmResource().components().query("test", UserStorageProvider.class.getName());
         Assert.assertEquals(1, reps.size());
         ComponentRepresentation kerberosProvider = reps.get(0);
-        kerberosProvider.getConfig().putSingle(LDAPConstants.EDIT_MODE, editMode.toString());
+
+        updater.accept(kerberosProvider);
+
         testRealmResource().components().component(kerberosProvider.getId()).update(kerberosProvider);
     }
 
-    public RealmResource testRealmResource() {
-        return adminClient.realm("test");
+
+    protected AuthenticationExecutionModel.Requirement updateKerberosAuthExecutionRequirement(AuthenticationExecutionModel.Requirement requirement) {
+        return updateKerberosAuthExecutionRequirement(requirement, testRealmResource());
+    }
+
+    public static AuthenticationExecutionModel.Requirement updateKerberosAuthExecutionRequirement(AuthenticationExecutionModel.Requirement requirement, RealmResource realmResource) {
+        Optional<AuthenticationExecutionInfoRepresentation> kerberosAuthExecutionOpt = realmResource
+                .flows()
+                .getExecutions(DefaultAuthenticationFlows.BROWSER_FLOW)
+                .stream()
+                .filter(e -> e.getProviderId().equals(SpnegoAuthenticatorFactory.PROVIDER_ID))
+                .findFirst();
+
+        Assert.assertTrue(kerberosAuthExecutionOpt.isPresent());
+
+        AuthenticationExecutionInfoRepresentation kerberosAuthExecution = kerberosAuthExecutionOpt.get();
+        String oldRequirementStr = kerberosAuthExecution.getRequirement();
+        AuthenticationExecutionModel.Requirement oldRequirement = AuthenticationExecutionModel.Requirement.valueOf(oldRequirementStr);
+        kerberosAuthExecution.setRequirement(requirement.name());
+
+        realmResource
+                .flows()
+                .updateExecutions(DefaultAuthenticationFlows.BROWSER_FLOW, kerberosAuthExecution);
+
+        return oldRequirement;
     }
 
 
-    // TODO: Use LDAPTestUtils.toComponentConfig once it's migrated to new testsuite
-    public static MultivaluedHashMap<String, String> toComponentConfig(Map<String, String> ldapConfig) {
+    private static MultivaluedHashMap<String, String> toComponentConfig(Map<String, String> ldapConfig) {
         MultivaluedHashMap<String, String> config = new MultivaluedHashMap<>();
         for (Map.Entry<String, String> entry : ldapConfig.entrySet()) {
             config.add(entry.getKey(), entry.getValue());

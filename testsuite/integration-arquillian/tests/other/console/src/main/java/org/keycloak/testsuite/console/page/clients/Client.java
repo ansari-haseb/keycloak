@@ -2,10 +2,14 @@ package org.keycloak.testsuite.console.page.clients;
 
 import org.jboss.arquillian.graphene.fragment.Root;
 import org.keycloak.testsuite.console.page.fragment.Breadcrumb;
+import org.openqa.selenium.By;
 import org.openqa.selenium.WebElement;
 import org.openqa.selenium.support.FindBy;
 
 import static org.keycloak.testsuite.console.page.fragment.Breadcrumb.BREADCRUMB_XPATH;
+import static org.keycloak.testsuite.util.UIUtils.clickLink;
+import static org.keycloak.testsuite.util.WaitUtils.waitUntilElement;
+
 import org.openqa.selenium.NoSuchElementException;
 
 /**
@@ -15,6 +19,7 @@ import org.openqa.selenium.NoSuchElementException;
 public class Client extends Clients {
 
     public static final String ID = "id"; // TODO client.id vs client.clientId
+    public static final String CLIENT_TABS_XPATH = "//div[@data-ng-controller='ClientTabCtrl']/ul";
 
     @Override
     public String getUriFragment() {
@@ -44,14 +49,15 @@ public class Client extends Clients {
     private WebElement deleteIcon;
     
     public void delete() {
-        deleteIcon.click();
+        clickLink(deleteIcon);
         modalDialog.confirmDeletion();
     }
 
-    @FindBy(xpath = "//div[@data-ng-controller='ClientTabCtrl']/ul")
+    @FindBy(xpath = CLIENT_TABS_XPATH)
     protected ClientTabs clientTabs;
 
     public ClientTabs tabs() {
+        waitUntilElement(By.xpath(CLIENT_TABS_XPATH)).is().present(); // a workaround to make FF stable
         return clientTabs;
     }
 
@@ -76,33 +82,39 @@ public class Client extends Clients {
         private WebElement installationLink;
         @FindBy(linkText = "Service Account Roles")
         private WebElement serviceAccountRoles;
+        @FindBy(linkText = "Authorization")
+        private WebElement authorizationLink;
 
         public void settings() {
-            settingsLink.click();
+            clickLink(settingsLink);
         }
 
         public void roles() {
-            rolesLink.click();
+            clickLink(rolesLink);
         }
 
         public void mappers() {
-            mappersLink.click();
+            clickLink(mappersLink);
         }
 
         public void scope() {
-            scopeLink.click();
+            clickLink(scopeLink);
         }
 
         public void revocation() {
-            revocationLink.click();
+            clickLink(revocationLink);
         }
 
         public void sessions() {
-            sessionsLink.click();
+            clickLink(sessionsLink);
         }
 
         public void installation() {
-            installationLink.click();
+            clickLink(installationLink);
+        }
+
+        public void authorization() {
+            clickLink(authorizationLink);
         }
         
         public boolean isServiceAccountRolesDisplayed() {

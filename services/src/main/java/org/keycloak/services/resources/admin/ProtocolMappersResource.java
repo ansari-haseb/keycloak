@@ -16,9 +16,11 @@
  */
 package org.keycloak.services.resources.admin;
 
+import static org.keycloak.protocol.ProtocolMapperUtils.isEnabled;
+
 import org.jboss.logging.Logger;
 import org.jboss.resteasy.annotations.cache.NoCache;
-import org.jboss.resteasy.spi.NotFoundException;
+import javax.ws.rs.NotFoundException;
 import org.keycloak.events.admin.OperationType;
 import org.keycloak.events.admin.ResourceType;
 import org.keycloak.models.KeycloakSession;
@@ -33,7 +35,7 @@ import org.keycloak.protocol.ProtocolMapperConfigException;
 import org.keycloak.representations.idm.ProtocolMapperRepresentation;
 import org.keycloak.services.ErrorResponse;
 import org.keycloak.services.ErrorResponseException;
-import org.keycloak.services.resources.admin.RealmAuth.Resource;
+import org.keycloak.services.resources.admin.permissions.AdminPermissionEvaluator;
 
 import javax.ws.rs.Consumes;
 import javax.ws.rs.DELETE;
@@ -46,11 +48,11 @@ import javax.ws.rs.Produces;
 import javax.ws.rs.core.Context;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
-import javax.ws.rs.core.UriInfo;
 import java.text.MessageFormat;
-import java.util.LinkedList;
 import java.util.List;
+import java.util.Objects;
 import java.util.Properties;
+import java.util.stream.Stream;
 
 /**
  * Base resource for managing users
@@ -66,23 +68,26 @@ public class ProtocolMappersResource {
 
     protected ProtocolMapperContainerModel client;
 
-    protected RealmAuth auth;
+    protected AdminPermissionEvaluator auth;
+    protected AdminPermissionEvaluator.RequirePermissionCheck managePermission;
+    protected AdminPermissionEvaluator.RequirePermissionCheck viewPermission;
 
     protected AdminEventBuilder adminEvent;
 
     @Context
-    protected UriInfo uriInfo;
-
-    @Context
     protected KeycloakSession session;
 
-    public ProtocolMappersResource(RealmModel realm, ProtocolMapperContainerModel client, RealmAuth auth, AdminEventBuilder adminEvent) {
+    public ProtocolMappersResource(RealmModel realm, ProtocolMapperContainerModel client, AdminPermissionEvaluator auth,
+                                   AdminEventBuilder adminEvent,
+                                   AdminPermissionEvaluator.RequirePermissionCheck managePermission,
+                                   AdminPermissionEvaluator.RequirePermissionCheck viewPermission) {
         this.realm = realm;
         this.auth = auth;
         this.client = client;
         this.adminEvent = adminEvent.resource(ResourceType.PROTOCOL_MAPPER);
+        this.managePermission = managePermission;
+        this.viewPermission = viewPermission;
 
-        auth.init(Resource.CLIENT);
     }
 
     /**
@@ -95,18 +100,12 @@ public class ProtocolMappersResource {
     @NoCache
     @Path("protocol/{protocol}")
     @Produces(MediaType.APPLICATION_JSON)
-    public List<ProtocolMapperRepresentation> getMappersPerProtocol(@PathParam("protocol") String protocol) {
-        auth.requireAny();
+    public Stream<ProtocolMapperRepresentation> getMappersPerProtocol(@PathParam("protocol") String protocol) {
+        viewPermission.require();
 
-        if (client == null) {
-            throw new NotFoundException("Could not find client");
-        }
-
-        List<ProtocolMapperRepresentation> mappers = new LinkedList<ProtocolMapperRepresentation>();
-        for (ProtocolMapperModel mapper : client.getProtocolMappers()) {
-            if (mapper.getProtocol().equals(protocol)) mappers.add(ModelToRepresentation.toRepresentation(mapper));
-        }
-        return mappers;
+        return client.getProtocolMappersStream()
+                .filter(mapper -> isEnabled(session, mapper) && Objects.equals(mapper.getProtocol(), protocol))
+                .map(ModelToRepresentation::toRepresentation);
     }
 
     /**
@@ -119,24 +118,20 @@ public class ProtocolMappersResource {
     @NoCache
     @Consumes(MediaType.APPLICATION_JSON)
     public Response createMapper(ProtocolMapperRepresentation rep) {
-        auth.requireManage();
-
-        if (client == null) {
-            throw new NotFoundException("Could not find client");
-        }
+        managePermission.require();
 
         ProtocolMapperModel model = null;
         try {
             model = RepresentationToModel.toModel(rep);
             validateModel(model);
             model = client.addProtocolMapper(model);
-            adminEvent.operation(OperationType.CREATE).resourcePath(uriInfo, model.getId()).representation(rep).success();
+            adminEvent.operation(OperationType.CREATE).resourcePath(session.getContext().getUri(), model.getId()).representation(rep).success();
 
         } catch (ModelDuplicateException e) {
             return ErrorResponse.exists("Protocol mapper exists with same name");
         }
 
-        return Response.created(uriInfo.getAbsolutePathBuilder().path(model.getId()).build()).build();
+        return Response.created(session.getContext().getUri().getAbsolutePathBuilder().path(model.getId()).build()).build();
     }
     /**
      * Create multiple mappers
@@ -147,11 +142,7 @@ public class ProtocolMappersResource {
     @NoCache
     @Consumes(MediaType.APPLICATION_JSON)
     public void createMapper(List<ProtocolMapperRepresentation> reps) {
-        auth.requireManage();
-
-        if (client == null) {
-            throw new NotFoundException("Could not find client");
-        }
+        managePermission.require();
 
         ProtocolMapperModel model = null;
         for (ProtocolMapperRepresentation rep : reps) {
@@ -159,7 +150,7 @@ public class ProtocolMappersResource {
             validateModel(model);
             model = client.addProtocolMapper(model);
         }
-        adminEvent.operation(OperationType.CREATE).resourcePath(uriInfo).representation(reps).success();
+        adminEvent.operation(OperationType.CREATE).resourcePath(session.getContext().getUri()).representation(reps).success();
     }
 
     /**
@@ -171,18 +162,12 @@ public class ProtocolMappersResource {
     @NoCache
     @Path("models")
     @Produces(MediaType.APPLICATION_JSON)
-    public List<ProtocolMapperRepresentation> getMappers() {
-        auth.requireAny();
+    public Stream<ProtocolMapperRepresentation> getMappers() {
+        viewPermission.require();
 
-        if (client == null) {
-            throw new NotFoundException("Could not find client");
-        }
-
-        List<ProtocolMapperRepresentation> mappers = new LinkedList<ProtocolMapperRepresentation>();
-        for (ProtocolMapperModel mapper : client.getProtocolMappers()) {
-            mappers.add(ModelToRepresentation.toRepresentation(mapper));
-        }
-        return mappers;
+        return client.getProtocolMappersStream()
+                .filter(mapper -> isEnabled(session, mapper))
+                .map(ModelToRepresentation::toRepresentation);
     }
 
     /**
@@ -196,11 +181,7 @@ public class ProtocolMappersResource {
     @Path("models/{id}")
     @Produces(MediaType.APPLICATION_JSON)
     public ProtocolMapperRepresentation getMapperById(@PathParam("id") String id) {
-        auth.requireAny();
-
-        if (client == null) {
-            throw new NotFoundException("Could not find client");
-        }
+        viewPermission.require();
 
         ProtocolMapperModel model = client.getProtocolMapperById(id);
         if (model == null) throw new NotFoundException("Model not found");
@@ -218,11 +199,7 @@ public class ProtocolMappersResource {
     @Path("models/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
     public void update(@PathParam("id") String id, ProtocolMapperRepresentation rep) {
-        auth.requireManage();
-
-        if (client == null) {
-            throw new NotFoundException("Could not find client");
-        }
+        managePermission.require();
 
         ProtocolMapperModel model = client.getProtocolMapperById(id);
         if (model == null) throw new NotFoundException("Model not found");
@@ -231,7 +208,7 @@ public class ProtocolMappersResource {
         validateModel(model);
 
         client.updateProtocolMapper(model);
-        adminEvent.operation(OperationType.UPDATE).resourcePath(uriInfo).representation(rep).success();
+        adminEvent.operation(OperationType.UPDATE).resourcePath(session.getContext().getUri()).representation(rep).success();
     }
 
     /**
@@ -243,16 +220,12 @@ public class ProtocolMappersResource {
     @NoCache
     @Path("models/{id}")
     public void delete(@PathParam("id") String id) {
-        auth.requireManage();
-
-        if (client == null) {
-            throw new NotFoundException("Could not find client");
-        }
+        managePermission.require();
 
         ProtocolMapperModel model = client.getProtocolMapperById(id);
         if (model == null) throw new NotFoundException("Model not found");
         client.removeProtocolMapper(model);
-        adminEvent.operation(OperationType.DELETE).resourcePath(uriInfo).success();
+        adminEvent.operation(OperationType.DELETE).resourcePath(session.getContext().getUri()).success();
 
     }
 
@@ -261,10 +234,12 @@ public class ProtocolMappersResource {
             ProtocolMapper mapper = (ProtocolMapper)session.getKeycloakSessionFactory().getProviderFactory(ProtocolMapper.class, model.getProtocolMapper());
             if (mapper != null) {
                 mapper.validateConfig(session, realm, client, model);
+            } else {
+                throw new NotFoundException("ProtocolMapper provider not found");
             }
         } catch (ProtocolMapperConfigException ex) {
             logger.error(ex.getMessage());
-            Properties messages = AdminRoot.getMessages(session, realm, auth.getAuth().getToken().getLocale());
+            Properties messages = AdminRoot.getMessages(session, realm, auth.adminAuth().getToken().getLocale());
             throw new ErrorResponseException(ex.getMessage(), MessageFormat.format(messages.getProperty(ex.getMessageKey(), ex.getMessage()), ex.getParameters()),
                     Response.Status.BAD_REQUEST);
         }

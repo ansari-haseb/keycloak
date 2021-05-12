@@ -26,7 +26,12 @@ import org.keycloak.models.cache.infinispan.entities.CachedRole;
 import org.keycloak.models.utils.KeycloakModelUtils;
 
 import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.function.Supplier;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * @author <a href="mailto:bill@burkecentral.com">Bill Burke</a>
@@ -39,22 +44,25 @@ public class RoleAdapter implements RoleModel {
     protected RealmCacheSession cacheSession;
     protected RealmModel realm;
     protected Set<RoleModel> composites;
+    private final Supplier<RoleModel> modelSupplier;
 
     public RoleAdapter(CachedRole cached, RealmCacheSession session, RealmModel realm) {
         this.cached = cached;
         this.cacheSession = session;
         this.realm = realm;
+        this.modelSupplier = this::getRoleModel;
     }
 
     protected void getDelegateForUpdate() {
         if (updated == null) {
             cacheSession.registerRoleInvalidation(cached.getId(), cached.getName(), getContainerId());
-            updated = cacheSession.getDelegate().getRoleById(cached.getId(), realm);
+            updated = modelSupplier.get();
             if (updated == null) throw new IllegalStateException("Not found in database");
         }
     }
 
     protected boolean invalidated;
+
     public void invalidate() {
         invalidated = true;
     }
@@ -62,12 +70,10 @@ public class RoleAdapter implements RoleModel {
     protected boolean isUpdated() {
         if (updated != null) return true;
         if (!invalidated) return false;
-        updated = cacheSession.getDelegate().getRoleById(cached.getId(), realm);
+        updated = cacheSession.getRoleDelegate().getRoleById(realm, cached.getId());
         if (updated == null) throw new IllegalStateException("Not found in database");
         return true;
     }
-
-
 
 
     @Override
@@ -86,18 +92,6 @@ public class RoleAdapter implements RoleModel {
     public void setDescription(String description) {
         getDelegateForUpdate();
         updated.setDescription(description);
-    }
-
-    @Override
-    public boolean isScopeParamRequired() {
-        if (isUpdated()) return updated.isScopeParamRequired();
-        return cached.isScopeParamRequired();
-    }
-
-    @Override
-    public void setScopeParamRequired(boolean scopeParamRequired) {
-        getDelegateForUpdate();
-        updated.setScopeParamRequired(scopeParamRequired);
     }
 
     @Override
@@ -131,21 +125,22 @@ public class RoleAdapter implements RoleModel {
     }
 
     @Override
-    public Set<RoleModel> getComposites() {
-        if (isUpdated()) return updated.getComposites();
+    public Stream<RoleModel> getCompositesStream() {
+        if (isUpdated()) return updated.getCompositesStream();
 
         if (composites == null) {
-            composites = new HashSet<RoleModel>();
-            for (String id : cached.getComposites()) {
-                RoleModel role = realm.getRoleById(id);
-                if (role == null) {
-                    throw new IllegalStateException("Could not find composite in role " + getName() + ": " + id);
-                }
-                composites.add(role);
-            }
+            composites = new HashSet<>();
+            composites = cached.getComposites().stream()
+                    .map(id -> {
+                        RoleModel role = realm.getRoleById(id);
+                        if (role == null) {
+                            throw new IllegalStateException("Could not find composite in role " + getName() + ": " + id);
+                        }
+                        return role;
+                    }).collect(Collectors.toSet());
         }
 
-        return composites;
+        return composites.stream();
     }
 
     @Override
@@ -156,7 +151,7 @@ public class RoleAdapter implements RoleModel {
     @Override
     public String getContainerId() {
         if (isClientRole()) {
-            CachedClientRole appRole = (CachedClientRole)cached;
+            CachedClientRole appRole = (CachedClientRole) cached;
             return appRole.getClientId();
         } else {
             return realm.getId();
@@ -169,7 +164,7 @@ public class RoleAdapter implements RoleModel {
         if (cached instanceof CachedRealmRole) {
             return realm;
         } else {
-            CachedClientRole appRole = (CachedClientRole)cached;
+            CachedClientRole appRole = (CachedClientRole) cached;
             return realm.getClientById(appRole.getClientId());
         }
     }
@@ -180,9 +175,62 @@ public class RoleAdapter implements RoleModel {
     }
 
     @Override
+    public void setSingleAttribute(String name, String value) {
+        getDelegateForUpdate();
+        updated.setSingleAttribute(name, value);
+    }
+
+    @Override
+    public void setAttribute(String name, List<String> values) {
+        getDelegateForUpdate();
+        updated.setAttribute(name, values);
+    }
+
+    @Override
+    public void removeAttribute(String name) {
+        getDelegateForUpdate();
+        updated.removeAttribute(name);
+    }
+
+    @Override
+    public String getFirstAttribute(String name) {
+        if (updated != null) {
+            return updated.getFirstAttribute(name);
+        }
+
+        return cached.getAttributes(modelSupplier).getFirst(name);
+    }
+
+    @Override
+    public Stream<String> getAttributeStream(String name) {
+        if (updated != null) {
+            return updated.getAttributeStream(name);
+        }
+
+        List<String> result = cached.getAttributes(modelSupplier).get(name);
+        if (result == null) {
+            return Stream.empty();
+        }
+        return result.stream();
+    }
+
+    @Override
+    public Map<String, List<String>> getAttributes() {
+        if (updated != null) {
+            return updated.getAttributes();
+        }
+
+        return cached.getAttributes(modelSupplier);
+    }
+
+    private RoleModel getRoleModel() {
+        return cacheSession.getRoleDelegate().getRoleById(realm, cached.getId());
+    }
+
+    @Override
     public boolean equals(Object o) {
         if (this == o) return true;
-        if (o == null || !(o instanceof RoleModel)) return false;
+        if (!(o instanceof RoleModel)) return false;
 
         RoleModel that = (RoleModel) o;
         return that.getId().equals(getId());

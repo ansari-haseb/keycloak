@@ -22,6 +22,7 @@ import org.keycloak.broker.oidc.OIDCIdentityProviderFactory;
 import org.keycloak.broker.provider.BrokeredIdentityContext;
 import org.keycloak.common.util.CollectionUtil;
 import org.keycloak.models.IdentityProviderMapperModel;
+import org.keycloak.models.IdentityProviderSyncMode;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.UserModel;
@@ -29,9 +30,12 @@ import org.keycloak.provider.ProviderConfigProperty;
 import org.keycloak.saml.common.util.StringUtil;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
@@ -49,6 +53,7 @@ public class UserAttributeMapper extends AbstractClaimMapper {
     public static final String EMAIL = "email";
     public static final String FIRST_NAME = "firstName";
     public static final String LAST_NAME = "lastName";
+    private static final Set<IdentityProviderSyncMode> IDENTITY_PROVIDER_SYNC_MODES = new HashSet<>(Arrays.asList(IdentityProviderSyncMode.values()));
 
     static {
         ProviderConfigProperty property;
@@ -56,7 +61,7 @@ public class UserAttributeMapper extends AbstractClaimMapper {
         property1 = new ProviderConfigProperty();
         property1.setName(CLAIM);
         property1.setLabel("Claim");
-        property1.setHelpText("Name of claim to search for in token.  You can reference nested claims using a '.', i.e. 'address.locality'.");
+        property1.setHelpText("Name of claim to search for in token. You can reference nested claims using a '.', i.e. 'address.locality'. To use dot (.) literally, escape it with backslash (\\.)");
         property1.setType(ProviderConfigProperty.STRING_TYPE);
         configProperties.add(property1);
         property = new ProviderConfigProperty();
@@ -68,6 +73,11 @@ public class UserAttributeMapper extends AbstractClaimMapper {
     }
 
     public static final String PROVIDER_ID = "oidc-user-attribute-idp-mapper";
+
+    @Override
+    public boolean supportsSyncMode(IdentityProviderSyncMode syncMode) {
+        return IDENTITY_PROVIDER_SYNC_MODES.contains(syncMode);
+    }
 
     @Override
     public List<ProviderConfigProperty> getConfigProperties() {
@@ -150,7 +160,7 @@ public class UserAttributeMapper extends AbstractClaimMapper {
         } else if (LAST_NAME.equalsIgnoreCase(attribute)) {
             setIfNotEmpty(user::setLastName, values);
         } else {
-            List<String> current = user.getAttribute(attribute);
+            List<String> current = user.getAttributeStream(attribute).collect(Collectors.toList());
             if (!CollectionUtil.collectionEquals(values, current)) {
                 user.setAttribute(attribute, values);
             } else if (values.isEmpty()) {

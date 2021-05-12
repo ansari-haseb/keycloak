@@ -92,9 +92,13 @@ public interface GeneralConstants {
 
     String ROLE_VALIDATOR_IGNORE = "ROLE_VALIDATOR_IGNORE";
 
+    String URL = "url";
+
     String SAML_REQUEST_KEY = "SAMLRequest";
 
     String SAML_RESPONSE_KEY = "SAMLResponse";
+
+    String SAML_ARTIFACT_KEY = "SAMLart";
 
     String SAML_SIG_ALG_REQUEST_KEY = "SigAlg";
 

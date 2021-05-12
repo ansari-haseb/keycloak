@@ -17,11 +17,15 @@
 
 package org.keycloak.protocol.oidc.mappers;
 
+import org.keycloak.models.ClientSessionContext;
+import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.ProtocolMapperModel;
 import org.keycloak.models.UserSessionModel;
 import org.keycloak.protocol.ProtocolMapperUtils;
 import org.keycloak.provider.ProviderConfigProperty;
+import org.keycloak.representations.AccessToken;
 import org.keycloak.representations.IDToken;
+import org.keycloak.utils.RoleResolveUtil;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -45,6 +49,14 @@ public class UserRealmRoleMappingMapper extends AbstractUserRoleMappingMapper {
         realmRolePrefix.setHelpText(ProtocolMapperUtils.USER_MODEL_REALM_ROLE_MAPPING_ROLE_PREFIX_HELP_TEXT);
         realmRolePrefix.setType(ProviderConfigProperty.STRING_TYPE);
         CONFIG_PROPERTIES.add(realmRolePrefix);
+
+        ProviderConfigProperty multiValued = new ProviderConfigProperty();
+        multiValued.setName(ProtocolMapperUtils.MULTIVALUED);
+        multiValued.setLabel(ProtocolMapperUtils.MULTIVALUED_LABEL);
+        multiValued.setHelpText(ProtocolMapperUtils.MULTIVALUED_HELP_TEXT);
+        multiValued.setType(ProviderConfigProperty.BOOLEAN_TYPE);
+        multiValued.setDefaultValue("true");
+        CONFIG_PROPERTIES.add(multiValued);
 
         OIDCAttributeMapperHelper.addAttributeConfig(CONFIG_PROPERTIES, UserRealmRoleMappingMapper.class);
     }
@@ -75,22 +87,34 @@ public class UserRealmRoleMappingMapper extends AbstractUserRoleMappingMapper {
     }
 
     @Override
-    protected void setClaim(IDToken token, ProtocolMapperModel mappingModel, UserSessionModel userSession) {
+    protected void setClaim(IDToken token, ProtocolMapperModel mappingModel, UserSessionModel userSession, KeycloakSession session, ClientSessionContext clientSessionCtx) {
         String rolePrefix = mappingModel.getConfig().get(ProtocolMapperUtils.USER_MODEL_REALM_ROLE_MAPPING_ROLE_PREFIX);
-        AbstractUserRoleMappingMapper.setClaim(token, mappingModel, userSession, role -> ! role.isClientRole(), rolePrefix);
+
+        AccessToken.Access access = RoleResolveUtil.getResolvedRealmRoles(session, clientSessionCtx, false);
+        if (access == null) {
+            return;
+        }
+
+        AbstractUserRoleMappingMapper.setClaim(token, mappingModel, access.getRoles(),null, rolePrefix);
     }
 
     public static ProtocolMapperModel create(String realmRolePrefix,
                                              String name,
                                              String tokenClaimName, boolean accessToken, boolean idToken) {
-        ProtocolMapperModel mapper = OIDCAttributeMapperHelper.createClaimMapper(name, "foo",
-                tokenClaimName, "String",
-                true, name,
-                accessToken, idToken,
-                PROVIDER_ID);
 
+        return create(realmRolePrefix, name, tokenClaimName, accessToken, idToken, false);
+    }
+
+    public static ProtocolMapperModel create(String realmRolePrefix,
+                                             String name,
+                                             String tokenClaimName, boolean accessToken, boolean idToken, boolean multiValued) {
+        ProtocolMapperModel mapper = OIDCAttributeMapperHelper.createClaimMapper(name, "foo",
+          tokenClaimName, "String",
+          accessToken, idToken, false,
+          PROVIDER_ID);
+
+        mapper.getConfig().put(ProtocolMapperUtils.MULTIVALUED, String.valueOf(multiValued));
         mapper.getConfig().put(ProtocolMapperUtils.USER_MODEL_REALM_ROLE_MAPPING_ROLE_PREFIX, realmRolePrefix);
         return mapper;
-
     }
 }

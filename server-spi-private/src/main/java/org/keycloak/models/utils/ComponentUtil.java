@@ -17,6 +17,7 @@
 
 package org.keycloak.models.utils;
 
+import org.jboss.logging.Logger;
 import org.keycloak.component.ComponentFactory;
 import org.keycloak.component.ComponentModel;
 import org.keycloak.models.KeycloakSession;
@@ -38,6 +39,8 @@ import java.util.Map;
  */
 public class ComponentUtil {
 
+    private static final Logger logger = Logger.getLogger(ComponentUtil.class);
+
     public static Map<String, ProviderConfigProperty> getComponentConfigProperties(KeycloakSession session, ComponentRepresentation component) {
         return getComponentConfigProperties(session, component.getProviderType(), component.getProviderId());
     }
@@ -54,7 +57,7 @@ public class ComponentUtil {
         return getComponentFactory(session, component.getProviderType(), component.getProviderId());
     }
 
-    private static Map<String, ProviderConfigProperty> getComponentConfigProperties(KeycloakSession session, String providerType, String providerId) {
+    public static Map<String, ProviderConfigProperty> getComponentConfigProperties(KeycloakSession session, String providerType, String providerId) {
         try {
             ComponentFactory componentFactory = getComponentFactory(session, providerType, providerId);
             List<ProviderConfigProperty> l = componentFactory.getConfigProperties();
@@ -100,6 +103,15 @@ public class ComponentUtil {
         factory.onUpdate(session, realm, oldModel, newModel);
         if (factory instanceof UserStorageProviderFactory) {
             ((OnUpdateComponent)session.userStorageManager()).onUpdate(session, realm, oldModel, newModel);
+        }
+    }
+    public static void notifyPreRemove(KeycloakSession session, RealmModel realm, ComponentModel model) {
+        try {
+            ComponentFactory factory = getComponentFactory(session, model);
+            factory.preRemove(session, realm, model);
+        } catch (IllegalArgumentException iae) {
+            // We allow to remove broken providers without throwing an exception
+            logger.warn(iae.getMessage());
         }
     }
 

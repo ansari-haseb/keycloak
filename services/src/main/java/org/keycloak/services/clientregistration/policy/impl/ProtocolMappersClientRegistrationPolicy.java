@@ -18,13 +18,12 @@
 package org.keycloak.services.clientregistration.policy.impl;
 
 import java.util.List;
-import java.util.Set;
+import java.util.stream.Collectors;
 
 import org.jboss.logging.Logger;
 import org.keycloak.component.ComponentModel;
 import org.keycloak.models.ClientModel;
 import org.keycloak.models.KeycloakSession;
-import org.keycloak.models.ProtocolMapperModel;
 import org.keycloak.representations.idm.ProtocolMapperRepresentation;
 import org.keycloak.services.ServicesLogger;
 import org.keycloak.services.clientregistration.ClientRegistrationContext;
@@ -70,46 +69,17 @@ public class ProtocolMappersClientRegistrationPolicy implements ClientRegistrati
         }
     }
 
-
-    protected void enableConsentRequiredForAll(ClientModel clientModel) {
-        if (isConsentRequiredForMappers()) {
-            logger.debugf("Enable consentRequired for all protocol mappers of client %s", clientModel.getClientId());
-
-            Set<ProtocolMapperModel> mappers = clientModel.getProtocolMappers();
-
-            for (ProtocolMapperModel mapper : mappers) {
-                mapper.setConsentRequired(true);
-
-                if (mapper.getConsentText() == null) {
-                    mapper.setConsentText(mapper.getName());
-                }
-
-                clientModel.updateProtocolMapper(mapper);
-            }
-        }
-    }
-
     // Remove builtin mappers of unsupported types too
     @Override
     public void afterRegister(ClientRegistrationContext context, ClientModel clientModel) {
         // Remove mappers of unsupported type, which were added "automatically"
         List<String> allowedMapperProviders = getAllowedMapperProviders();
-        Set<ProtocolMapperModel> createdMappers = clientModel.getProtocolMappers();
-
-        createdMappers.stream().filter((ProtocolMapperModel mapper) -> {
-
-            return !allowedMapperProviders.contains(mapper.getProtocolMapper());
-
-        }).forEach((ProtocolMapperModel mapperToRemove) -> {
-
-            logger.debugf("Removing builtin mapper '%s' of type '%s' as type is not permitted", mapperToRemove.getName(), mapperToRemove.getProtocolMapper());
-            clientModel.removeProtocolMapper(mapperToRemove);
-
-        });
-
-        // Enable consentRequired for all protocolMappers
-        enableConsentRequiredForAll(clientModel);
-
+        clientModel.getProtocolMappersStream()
+                .filter(mapper -> !allowedMapperProviders.contains(mapper.getProtocolMapper()))
+                .peek(mapperToRemove -> logger.debugf("Removing builtin mapper '%s' of type '%s' as type is not permitted",
+                        mapperToRemove.getName(), mapperToRemove.getProtocolMapper()))
+                .collect(Collectors.toList())
+                .forEach(clientModel::removeProtocolMapper);
     }
 
     // We don't take already existing protocolMappers into consideration for now
@@ -120,8 +90,6 @@ public class ProtocolMappersClientRegistrationPolicy implements ClientRegistrati
 
     @Override
     public void afterUpdate(ClientRegistrationContext context, ClientModel clientModel) {
-        // Enable consentRequired for all protocolMappers
-        enableConsentRequiredForAll(clientModel);
     }
 
     @Override
@@ -138,8 +106,4 @@ public class ProtocolMappersClientRegistrationPolicy implements ClientRegistrati
         return componentModel.getConfig().getList(ProtocolMappersClientRegistrationPolicyFactory.ALLOWED_PROTOCOL_MAPPER_TYPES);
     }
 
-    private boolean isConsentRequiredForMappers() {
-        String s = componentModel.getConfig().getFirst(ProtocolMappersClientRegistrationPolicyFactory.CONSENT_REQUIRED_FOR_ALL_MAPPERS);
-        return s==null || Boolean.parseBoolean(s);
-    }
 }

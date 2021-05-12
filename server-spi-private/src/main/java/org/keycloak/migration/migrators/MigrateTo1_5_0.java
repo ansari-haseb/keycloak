@@ -19,14 +19,11 @@ package org.keycloak.migration.migrators;
 
 import org.keycloak.migration.ModelVersion;
 import org.keycloak.models.AuthenticationFlowModel;
-import org.keycloak.models.ClientModel;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.OTPPolicy;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.utils.DefaultAuthenticationFlows;
-import org.keycloak.models.utils.KeycloakModelUtils;
-
-import java.util.List;
+import org.keycloak.representations.idm.RealmRepresentation;
 
 /**
  * @author <a href="mailto:bill@burkecentral.com">Bill Burke</a>
@@ -40,32 +37,35 @@ public class MigrateTo1_5_0 implements Migration {
     }
 
     public void migrate(KeycloakSession session) {
-        List<RealmModel> realms = session.realms().getRealms();
-        for (RealmModel realm : realms) {
-            DefaultAuthenticationFlows.migrateFlows(realm); // add reset credentials flo
-            realm.setOTPPolicy(OTPPolicy.DEFAULT_POLICY);
-            realm.setBrowserFlow(realm.getFlowByAlias(DefaultAuthenticationFlows.BROWSER_FLOW));
-            realm.setRegistrationFlow(realm.getFlowByAlias(DefaultAuthenticationFlows.REGISTRATION_FLOW));
-            realm.setDirectGrantFlow(realm.getFlowByAlias(DefaultAuthenticationFlows.DIRECT_GRANT_FLOW));
+        session.realms().getRealmsStream().forEach(realm -> migrateRealm(session, realm));
+    }
 
-            AuthenticationFlowModel resetFlow = realm.getFlowByAlias(DefaultAuthenticationFlows.RESET_CREDENTIALS_FLOW);
-            if (resetFlow == null) {
-                DefaultAuthenticationFlows.resetCredentialsFlow(realm);
-            } else {
-                realm.setResetCredentialsFlow(resetFlow);
-            }
+    @Override
+    public void migrateImport(KeycloakSession session, RealmModel realm, RealmRepresentation rep, boolean skipUserDependent) {
+        migrateRealm(session, realm);
+    }
 
-            AuthenticationFlowModel clientAuthFlow = realm.getFlowByAlias(DefaultAuthenticationFlows.CLIENT_AUTHENTICATION_FLOW);
-            if (clientAuthFlow == null) {
-                DefaultAuthenticationFlows.clientAuthFlow(realm);
-            } else {
-                realm.setClientAuthenticationFlow(clientAuthFlow);
-            }
+    protected void migrateRealm(KeycloakSession session, RealmModel realm) {
+        DefaultAuthenticationFlows.migrateFlows(realm); // add reset credentials flo
+        realm.setOTPPolicy(OTPPolicy.DEFAULT_POLICY);
+        realm.setBrowserFlow(realm.getFlowByAlias(DefaultAuthenticationFlows.BROWSER_FLOW));
+        realm.setRegistrationFlow(realm.getFlowByAlias(DefaultAuthenticationFlows.REGISTRATION_FLOW));
+        realm.setDirectGrantFlow(realm.getFlowByAlias(DefaultAuthenticationFlows.DIRECT_GRANT_FLOW));
 
-            for (ClientModel client : realm.getClients()) {
-                client.setClientAuthenticatorType(KeycloakModelUtils.getDefaultClientAuthenticatorType());
-            }
+        AuthenticationFlowModel resetFlow = realm.getFlowByAlias(DefaultAuthenticationFlows.RESET_CREDENTIALS_FLOW);
+        if (resetFlow == null) {
+            DefaultAuthenticationFlows.resetCredentialsFlow(realm);
+        } else {
+            realm.setResetCredentialsFlow(resetFlow);
         }
 
+        AuthenticationFlowModel clientAuthFlow = realm.getFlowByAlias(DefaultAuthenticationFlows.CLIENT_AUTHENTICATION_FLOW);
+        if (clientAuthFlow == null) {
+            DefaultAuthenticationFlows.clientAuthFlow(realm);
+        } else {
+            realm.setClientAuthenticationFlow(clientAuthFlow);
+        }
+
+        realm.getClientsStream().forEach(MigrationUtils::setDefaultClientAuthenticatorType);
     }
 }

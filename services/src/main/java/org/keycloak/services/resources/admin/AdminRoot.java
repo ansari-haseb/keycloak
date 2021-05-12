@@ -19,14 +19,12 @@ package org.keycloak.services.resources.admin;
 import org.jboss.logging.Logger;
 import org.jboss.resteasy.spi.HttpRequest;
 import org.jboss.resteasy.spi.HttpResponse;
-import org.jboss.resteasy.spi.NoLogWebApplicationException;
-import org.jboss.resteasy.spi.NotFoundException;
+import javax.ws.rs.NotFoundException;
 import org.jboss.resteasy.spi.ResteasyProviderFactory;
-import org.jboss.resteasy.spi.UnauthorizedException;
+import javax.ws.rs.NotAuthorizedException;
 import org.keycloak.common.ClientConnection;
 import org.keycloak.jose.jws.JWSInput;
 import org.keycloak.jose.jws.JWSInputException;
-import org.keycloak.models.AdminRoles;
 import org.keycloak.models.ClientModel;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
@@ -38,10 +36,12 @@ import org.keycloak.services.managers.AuthenticationManager;
 import org.keycloak.services.managers.RealmManager;
 import org.keycloak.services.resources.Cors;
 import org.keycloak.services.resources.admin.info.ServerInfoAdminResource;
+import org.keycloak.services.resources.admin.permissions.AdminPermissions;
 import org.keycloak.theme.Theme;
-import org.keycloak.theme.ThemeProvider;
+import org.keycloak.urls.UrlType;
 
 import javax.ws.rs.GET;
+import javax.ws.rs.HttpMethod;
 import javax.ws.rs.Path;
 import javax.ws.rs.PathParam;
 import javax.ws.rs.core.Context;
@@ -64,9 +64,6 @@ public class AdminRoot {
     protected static final Logger logger = Logger.getLogger(AdminRoot.class);
 
     @Context
-    protected UriInfo uriInfo;
-
-    @Context
     protected ClientConnection clientConnection;
 
     @Context
@@ -75,7 +72,6 @@ public class AdminRoot {
     @Context
     protected HttpResponse response;
 
-    protected AppAuthManager authManager;
     protected TokenManager tokenManager;
 
     @Context
@@ -83,7 +79,6 @@ public class AdminRoot {
 
     public AdminRoot() {
         this.tokenManager = new TokenManager();
-        this.authManager = new AppAuthManager();
     }
 
     public static UriBuilder adminBaseUrl(UriInfo uriInfo) {
@@ -104,7 +99,7 @@ public class AdminRoot {
     public Response masterRealmAdminConsoleRedirect() {
         RealmModel master = new RealmManager(session).getKeycloakAdminstrationRealm();
         return Response.status(302).location(
-                uriInfo.getBaseUriBuilder().path(AdminRoot.class).path(AdminRoot.class, "getAdminConsole").path("/").build(master.getName())
+                session.getContext().getUri(UrlType.ADMIN).getBaseUriBuilder().path(AdminRoot.class).path(AdminRoot.class, "getAdminConsole").path("/").build(master.getName())
         ).build();
     }
 
@@ -156,26 +151,32 @@ public class AdminRoot {
 
 
     protected AdminAuth authenticateRealmAdminRequest(HttpHeaders headers) {
-        String tokenString = authManager.extractAuthorizationHeaderToken(headers);
-        if (tokenString == null) throw new UnauthorizedException("Bearer");
+        String tokenString = AppAuthManager.extractAuthorizationHeaderToken(headers);
+        if (tokenString == null) throw new NotAuthorizedException("Bearer");
         AccessToken token;
         try {
             JWSInput input = new JWSInput(tokenString);
             token = input.readJsonContent(AccessToken.class);
         } catch (JWSInputException e) {
-            throw new UnauthorizedException("Bearer token format error");
+            throw new NotAuthorizedException("Bearer token format error");
         }
         String realmName = token.getIssuer().substring(token.getIssuer().lastIndexOf('/') + 1);
         RealmManager realmManager = new RealmManager(session);
         RealmModel realm = realmManager.getRealmByName(realmName);
         if (realm == null) {
-            throw new UnauthorizedException("Unknown realm in token");
+            throw new NotAuthorizedException("Unknown realm in token");
         }
         session.getContext().setRealm(realm);
-        AuthenticationManager.AuthResult authResult = authManager.authenticateBearerToken(session, realm, uriInfo, clientConnection, headers);
+
+        AuthenticationManager.AuthResult authResult = new AppAuthManager.BearerTokenAuthenticator(session)
+                .setRealm(realm)
+                .setConnection(clientConnection)
+                .setHeaders(headers)
+                .authenticate();
+
         if (authResult == null) {
             logger.debug("Token not valid");
-            throw new UnauthorizedException("Bearer");
+            throw new NotAuthorizedException("Bearer");
         }
 
         ClientModel client = realm.getClientByClientId(token.getIssuedFor());
@@ -195,7 +196,6 @@ public class AdminRoot {
         return adminBaseUrl(base).path(AdminRoot.class, "getRealmsAdmin");
     }
 
-
     /**
      * Base Path to realm admin REST interface
      *
@@ -203,8 +203,10 @@ public class AdminRoot {
      * @return
      */
     @Path("realms")
-    public RealmsAdminResource getRealmsAdmin(@Context final HttpHeaders headers) {
-        handlePreflightRequest();
+    public Object getRealmsAdmin(@Context final HttpHeaders headers) {
+        if (request.getHttpMethod().equals(HttpMethod.OPTIONS)) {
+            return new AdminCorsPreflightService(request);
+        }
 
         AdminAuth auth = authenticateRealmAdminRequest(headers);
         if (auth != null) {
@@ -225,11 +227,13 @@ public class AdminRoot {
      * @return
      */
     @Path("serverinfo")
-    public ServerInfoAdminResource getServerInfo(@Context final HttpHeaders headers) {
-        handlePreflightRequest();
+    public Object getServerInfo(@Context final HttpHeaders headers) {
+        if (request.getHttpMethod().equals(HttpMethod.OPTIONS)) {
+            return new AdminCorsPreflightService(request);
+        }
 
         AdminAuth auth = authenticateRealmAdminRequest(headers);
-        if (!isAdmin(auth)) {
+        if (!AdminPermissions.realms(session, auth).isAdmin()) {
             throw new ForbiddenException();
         }
 
@@ -244,37 +248,8 @@ public class AdminRoot {
         return adminResource;
     }
 
-    protected boolean isAdmin(AdminAuth auth) {
-
-        RealmManager realmManager = new RealmManager(session);
-        if (auth.getRealm().equals(realmManager.getKeycloakAdminstrationRealm())) {
-            if (auth.hasOneOfRealmRole(AdminRoles.ADMIN, AdminRoles.CREATE_REALM)) {
-                return true;
-            }
-            for (RealmModel realm : session.realms().getRealms()) {
-                ClientModel client = realm.getMasterAdminClient();
-                if (auth.hasOneOfAppRole(client, AdminRoles.ALL_REALM_ROLES)) {
-                    return true;
-                }
-            }
-            return false;
-        } else {
-            ClientModel client = auth.getRealm().getClientByClientId(realmManager.getRealmAdminClientId(auth.getRealm()));
-            return auth.hasOneOfAppRole(client, AdminRoles.ALL_REALM_ROLES);
-        }
-    }
-
-    protected void handlePreflightRequest() {
-        if (request.getHttpMethod().equalsIgnoreCase("OPTIONS")) {
-            logger.debug("Cors admin pre-flight");
-            Response response = Cors.add(request, Response.ok()).preflight().allowedMethods("GET", "PUT", "POST", "DELETE").auth().build();
-            throw new NoLogWebApplicationException(response);
-        }
-    }
-
     public static Theme getTheme(KeycloakSession session, RealmModel realm) throws IOException {
-        ThemeProvider themeProvider = session.getProvider(ThemeProvider.class, "extending");
-        return themeProvider.getTheme(realm.getAdminTheme(), Theme.Type.ADMIN);
+        return session.theme().getTheme(Theme.Type.ADMIN);
     }
 
     public static Properties getMessages(KeycloakSession session, RealmModel realm, String lang) {

@@ -75,7 +75,6 @@ public class CertificateUtils {
      */
     public static X509Certificate generateV3Certificate(KeyPair keyPair, PrivateKey caPrivateKey, X509Certificate caCert,
             String subject) throws Exception {
-
         try {
             X500Name subjectDN = new X500Name("CN=" + subject);
 
@@ -88,8 +87,7 @@ public class CertificateUtils {
             Date notAfter = new Date(System.currentTimeMillis() + (((1000L * 60 * 60 * 24 * 30)) * 12) * 3);
 
             // SubjectPublicKeyInfo
-            SubjectPublicKeyInfo subjPubKeyInfo = new SubjectPublicKeyInfo(ASN1Sequence.getInstance(keyPair.getPublic()
-                    .getEncoded()));
+            SubjectPublicKeyInfo subjPubKeyInfo = SubjectPublicKeyInfo.getInstance(keyPair.getPublic().getEncoded());
 
             X509v3CertificateBuilder certGen = new X509v3CertificateBuilder(new X500Name(caCert.getSubjectDN().getName()),
                     serialNumber, notBefore, notAfter, subjectDN, subjPubKeyInfo);

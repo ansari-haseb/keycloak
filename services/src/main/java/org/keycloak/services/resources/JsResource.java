@@ -17,14 +17,21 @@
 
 package org.keycloak.services.resources;
 
-import org.keycloak.Config;
+import org.jboss.resteasy.spi.HttpRequest;
 import org.keycloak.common.Version;
+import org.keycloak.encoding.ResourceEncodingHelper;
+import org.keycloak.encoding.ResourceEncodingProvider;
+import org.keycloak.models.KeycloakSession;
+import org.keycloak.services.util.CacheControlUtil;
+import org.keycloak.utils.MediaType;
 
 import javax.ws.rs.GET;
 import javax.ws.rs.Path;
 import javax.ws.rs.PathParam;
 import javax.ws.rs.Produces;
+import javax.ws.rs.QueryParam;
 import javax.ws.rs.core.CacheControl;
+import javax.ws.rs.core.Context;
 import javax.ws.rs.core.Response;
 import java.io.InputStream;
 
@@ -36,6 +43,12 @@ import java.io.InputStream;
 @Path("/js")
 public class JsResource {
 
+    @Context
+    private KeycloakSession session;
+
+    @Context
+    private HttpRequest request;
+
     /**
      * Get keycloak.js file for javascript clients
      *
@@ -43,38 +56,30 @@ public class JsResource {
      */
     @GET
     @Path("/keycloak.js")
-    @Produces("text/javascript")
-    public Response getKeycloakJs() {
-        return getJs("keycloak.js");
+    @Produces(MediaType.TEXT_PLAIN_JAVASCRIPT)
+    public Response getKeycloakJs(@QueryParam("version") String version) {
+        return getJs("keycloak.js", version);
     }
 
     @GET
     @Path("/{version}/keycloak.js")
-    @Produces("text/javascript")
+    @Produces(MediaType.TEXT_PLAIN_JAVASCRIPT)
     public Response getKeycloakJsWithVersion(@PathParam("version") String version) {
-        if (!version.equals(Version.RESOURCES_VERSION)) {
-            return Response.status(Response.Status.NOT_FOUND).build();
-        }
-
-        return getKeycloakJs();
+        return getJs("keycloak.js", version);
     }
 
     @GET
     @Path("/keycloak.min.js")
-    @Produces("text/javascript")
-    public Response getKeycloakMinJs() {
-        return getJs("keycloak.min.js");
+    @Produces(MediaType.TEXT_PLAIN_JAVASCRIPT)
+    public Response getKeycloakMinJs(@QueryParam("version") String version) {
+        return getJs("keycloak.min.js", version);
     }
 
     @GET
     @Path("/{version}/keycloak.min.js")
-    @Produces("text/javascript")
+    @Produces(MediaType.TEXT_PLAIN_JAVASCRIPT)
     public Response getKeycloakMinJsWithVersion(@PathParam("version") String version) {
-        if (!version.equals(Version.RESOURCES_VERSION)) {
-            return Response.status(Response.Status.NOT_FOUND).build();
-        }
-
-        return getKeycloakMinJs();
+        return getJs("keycloak.min.js", version);
     }
 
     /**
@@ -84,50 +89,63 @@ public class JsResource {
      */
     @GET
     @Path("/keycloak-authz.js")
-    @Produces("text/javascript")
-    public Response getKeycloakAuthzJs() {
-        return getJs("keycloak-authz.js");
+    @Produces(MediaType.TEXT_PLAIN_JAVASCRIPT)
+    public Response getKeycloakAuthzJs(@QueryParam("version") String version) {
+        return getJs("keycloak-authz.js", version);
     }
 
     @GET
     @Path("/{version}/keycloak-authz.js")
-    @Produces("text/javascript")
+    @Produces(MediaType.TEXT_PLAIN_JAVASCRIPT)
     public Response getKeycloakAuthzJsWithVersion(@PathParam("version") String version) {
-        if (!version.equals(Version.RESOURCES_VERSION)) {
-            return Response.status(Response.Status.NOT_FOUND).build();
-        }
-
-        return getKeycloakAuthzJs();
+        return getJs("keycloak-authz.js", version);
     }
 
     @GET
     @Path("/keycloak-authz.min.js")
-    @Produces("text/javascript")
-    public Response getKeycloakAuthzMinJs() {
-        return getJs("keycloak-authz.min.js");
+    @Produces(MediaType.TEXT_PLAIN_JAVASCRIPT)
+    public Response getKeycloakAuthzMinJs(@QueryParam("version") String version) {
+        return getJs("keycloak-authz.min.js", version);
     }
 
     @GET
     @Path("/{version}/keycloak-authz.min.js")
-    @Produces("text/javascript")
+    @Produces(MediaType.TEXT_PLAIN_JAVASCRIPT)
     public Response getKeycloakAuthzMinJsWithVersion(@PathParam("version") String version) {
-        if (!version.equals(Version.RESOURCES_VERSION)) {
-            return Response.status(Response.Status.NOT_FOUND).build();
-        }
-
-        return getKeycloakAuthzMinJs();
+        return getJs("keycloak-authz.min.js", version);
     }
 
-    private Response getJs(String name) {
-        InputStream inputStream = getClass().getClassLoader().getResourceAsStream(name);
-        if (inputStream != null) {
-            CacheControl cacheControl = new CacheControl();
-            cacheControl.setNoTransform(false);
-            cacheControl.setMaxAge(Config.scope("theme").getInt("staticMaxAge", -1));
-
-            return Response.ok(inputStream).type("text/javascript").cacheControl(cacheControl).build();
+    private Response getJs(String name, String version) {
+        CacheControl cacheControl;
+        if (version != null) {
+            if (!version.equals(Version.RESOURCES_VERSION)) {
+                return Response.status(Response.Status.NOT_FOUND).build();
+            }
+            cacheControl = CacheControlUtil.getDefaultCacheControl();
         } else {
-            return Response.status(Response.Status.NOT_FOUND).build();
+            cacheControl = CacheControlUtil.noCache();
+        }
+
+        String contentType = "text/javascript";
+        Cors cors = Cors.add(request).allowAllOrigins();
+
+        ResourceEncodingProvider encodingProvider = ResourceEncodingHelper.getResourceEncodingProvider(session, contentType);
+
+        InputStream inputStream;
+        if (encodingProvider != null) {
+            inputStream = encodingProvider.getEncodedStream(() -> getClass().getClassLoader().getResourceAsStream(name), "js", name);
+        } else {
+            inputStream = getClass().getClassLoader().getResourceAsStream(name);
+        }
+
+        if (inputStream != null) {
+            Response.ResponseBuilder rb = Response.ok(inputStream).type(contentType).cacheControl(cacheControl);
+            if (encodingProvider != null) {
+                rb.encoding(encodingProvider.getEncoding());
+            }
+            return cors.builder(rb).build();
+        } else {
+            return cors.builder(Response.status(Response.Status.NOT_FOUND)).build();
         }
     }
 }

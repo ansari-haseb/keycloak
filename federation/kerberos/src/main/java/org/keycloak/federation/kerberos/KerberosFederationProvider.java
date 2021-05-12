@@ -23,7 +23,6 @@ import org.keycloak.credential.CredentialAuthentication;
 import org.keycloak.credential.CredentialInput;
 import org.keycloak.credential.CredentialInputUpdater;
 import org.keycloak.credential.CredentialInputValidator;
-import org.keycloak.credential.CredentialModel;
 import org.keycloak.federation.kerberos.impl.KerberosUsernamePasswordAuthenticator;
 import org.keycloak.federation.kerberos.impl.SPNEGOAuthenticator;
 import org.keycloak.models.CredentialValidationOutput;
@@ -34,24 +33,24 @@ import org.keycloak.models.RoleModel;
 import org.keycloak.models.UserCredentialModel;
 import org.keycloak.models.UserModel;
 import org.keycloak.models.UserManager;
+import org.keycloak.models.credential.PasswordCredentialModel;
 import org.keycloak.storage.ReadOnlyException;
 import org.keycloak.storage.UserStorageProvider;
 import org.keycloak.storage.UserStorageProviderModel;
 import org.keycloak.storage.user.ImportedUserValidation;
 import org.keycloak.storage.user.UserLookupProvider;
 
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Set;
+import java.util.stream.Stream;
 
 /**
  * @author <a href="mailto:mposolda@redhat.com">Marek Posolda</a>
  */
 public class KerberosFederationProvider implements UserStorageProvider,
-        UserLookupProvider,
+        UserLookupProvider.Streams,
         CredentialInputValidator,
-        CredentialInputUpdater,
+        CredentialInputUpdater.Streams,
         CredentialAuthentication,
         ImportedUserValidation {
 
@@ -84,7 +83,7 @@ public class KerberosFederationProvider implements UserStorageProvider,
     }
 
     @Override
-    public UserModel getUserByUsername(String username, RealmModel realm) {
+    public UserModel getUserByUsername(RealmModel realm, String username) {
         KerberosUsernamePasswordAuthenticator authenticator = factory.createKerberosUsernamePasswordAuthenticator(kerberosConfig);
         if (authenticator.isUserAvailable(username)) {
             // Case when method was called with username including kerberos realm like john@REALM.ORG . Authenticator already checked that kerberos realm was correct
@@ -99,12 +98,12 @@ public class KerberosFederationProvider implements UserStorageProvider,
     }
 
     @Override
-    public UserModel getUserByEmail(String email, RealmModel realm) {
+    public UserModel getUserByEmail(RealmModel realm, String email) {
         return null;
     }
 
     @Override
-    public UserModel getUserById(String id, RealmModel realm) {
+    public UserModel getUserById(RealmModel realm, String id) {
         return null;
     }
 
@@ -132,7 +131,7 @@ public class KerberosFederationProvider implements UserStorageProvider,
 
     @Override
     public boolean updateCredential(RealmModel realm, UserModel user, CredentialInput input) {
-        if (!(input instanceof UserCredentialModel) || !CredentialModel.PASSWORD.equals(input.getType())) return false;
+        if (!(input instanceof UserCredentialModel) || !PasswordCredentialModel.TYPE.equals(input.getType())) return false;
         if (kerberosConfig.getEditMode() == EditMode.READ_ONLY) {
             throw new ReadOnlyException("Can't change password in Keycloak database. Change password with your Kerberos server");
         }
@@ -145,18 +144,18 @@ public class KerberosFederationProvider implements UserStorageProvider,
     }
 
     @Override
-    public Set<String> getDisableableCredentialTypes(RealmModel realm, UserModel user) {
-        return Collections.EMPTY_SET;
+    public Stream<String> getDisableableCredentialTypesStream(RealmModel realm, UserModel user) {
+        return Stream.empty();
     }
 
     @Override
     public boolean supportsCredentialType(String credentialType) {
-        return credentialType.equals(CredentialModel.KERBEROS) || (kerberosConfig.isAllowPasswordAuthentication() && credentialType.equals(CredentialModel.PASSWORD));
+        return credentialType.equals(UserCredentialModel.KERBEROS) || (kerberosConfig.isAllowPasswordAuthentication() && credentialType.equals(PasswordCredentialModel.TYPE));
     }
 
     @Override
     public boolean supportsCredentialAuthenticationFor(String type) {
-        return CredentialModel.KERBEROS.equals(type);
+        return UserCredentialModel.KERBEROS.equals(type);
     }
 
     @Override
@@ -167,8 +166,8 @@ public class KerberosFederationProvider implements UserStorageProvider,
     @Override
     public boolean isValid(RealmModel realm, UserModel user, CredentialInput input) {
         if (!(input instanceof UserCredentialModel)) return false;
-        if (input.getType().equals(UserCredentialModel.PASSWORD) && !session.userCredentialManager().isConfiguredLocally(realm, user, UserCredentialModel.PASSWORD)) {
-            return validPassword(user.getUsername(), ((UserCredentialModel)input).getValue());
+        if (input.getType().equals(PasswordCredentialModel.TYPE) && !session.userCredentialManager().isConfiguredLocally(realm, user, PasswordCredentialModel.TYPE)) {
+            return validPassword(user.getUsername(), input.getChallengeResponse());
         } else {
             return false; // invalid cred type
         }
@@ -188,7 +187,7 @@ public class KerberosFederationProvider implements UserStorageProvider,
         if (!(input instanceof UserCredentialModel)) return null;
         UserCredentialModel credential = (UserCredentialModel)input;
         if (credential.getType().equals(UserCredentialModel.KERBEROS)) {
-            String spnegoToken = credential.getValue();
+            String spnegoToken = credential.getChallengeResponse();
             SPNEGOAuthenticator spnegoAuthenticator = factory.createSPNEGOAuthenticator(spnegoToken, kerberosConfig);
 
             spnegoAuthenticator.authenticate();
@@ -207,9 +206,14 @@ public class KerberosFederationProvider implements UserStorageProvider,
 
                     return new CredentialValidationOutput(user, CredentialValidationOutput.Status.AUTHENTICATED, state);
                 }
-            }  else {
+            }  else if (spnegoAuthenticator.getResponseToken() != null) {
+                // Case when SPNEGO handshake requires multiple steps
+                logger.tracef("SPNEGO Handshake will continue");
                 state.put(KerberosConstants.RESPONSE_TOKEN, spnegoAuthenticator.getResponseToken());
                 return new CredentialValidationOutput(null, CredentialValidationOutput.Status.CONTINUE, state);
+            } else {
+                logger.tracef("SPNEGO Handshake not successful");
+                return CredentialValidationOutput.failed();
             }
 
         } else {
@@ -230,9 +234,9 @@ public class KerberosFederationProvider implements UserStorageProvider,
      * @return user if found or successfully created. Null if user with same username already exists, but is not linked to this provider
      */
     protected UserModel findOrCreateAuthenticatedUser(RealmModel realm, String username) {
-        UserModel user = session.userLocalStorage().getUserByUsername(username, realm);
+        UserModel user = session.userLocalStorage().getUserByUsername(realm, username);
         if (user != null) {
-            user = session.users().getUserById(user.getId(), realm);  // make sure we get a cached instance
+            user = session.users().getUserById(realm, user.getId());  // make sure we get a cached instance
             logger.debug("Kerberos authenticated user " + username + " found in Keycloak storage");
 
             if (!model.getId().equals(user.getFederationLink())) {

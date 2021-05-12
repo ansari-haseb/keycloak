@@ -34,6 +34,8 @@ import org.keycloak.common.util.MultivaluedHashMap;
 import org.keycloak.saml.common.constants.JBossSAMLConstants;
 import org.keycloak.saml.common.constants.JBossSAMLURIConstants;
 import org.keycloak.saml.common.exceptions.ParsingException;
+import org.keycloak.saml.common.util.DocumentUtil;
+import org.keycloak.saml.processing.core.parsers.saml.xmldsig.XmlDSigQNames;
 import org.keycloak.saml.processing.core.util.NamespaceContext;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
@@ -65,12 +67,10 @@ public class SamlDescriptorIDPKeysExtractor {
         MultivaluedHashMap<String, KeyInfo> res = new MultivaluedHashMap<>();
 
         try {
-            DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-            factory.setNamespaceAware(true);
-            DocumentBuilder builder = factory.newDocumentBuilder();
+            DocumentBuilder builder = DocumentUtil.getDocumentBuilder();
             Document doc = builder.parse(stream);
 
-            XPathExpression expr = xpath.compile("/m:EntitiesDescriptor/m:EntityDescriptor/m:IDPSSODescriptor/m:KeyDescriptor");
+            XPathExpression expr = xpath.compile("//m:EntityDescriptor/m:IDPSSODescriptor/m:KeyDescriptor");
             NodeList keyDescriptors = (NodeList) expr.evaluate(doc, XPathConstants.NODESET);
             for (int i = 0; i < keyDescriptors.getLength(); i ++) {
                 Node keyDescriptor = keyDescriptors.item(i);
@@ -89,7 +89,7 @@ public class SamlDescriptorIDPKeysExtractor {
     }
 
     private KeyInfo processKeyDescriptor(Element keyDescriptor) throws MarshalException {
-        NodeList childNodes = keyDescriptor.getElementsByTagNameNS(JBossSAMLURIConstants.XMLDSIG_NSURI.get(), JBossSAMLConstants.KEY_INFO.get());
+        NodeList childNodes = keyDescriptor.getElementsByTagNameNS(JBossSAMLURIConstants.XMLDSIG_NSURI.get(), XmlDSigQNames.KEY_INFO.getQName().getLocalPart());
 
         if (childNodes.getLength() == 0) {
             return null;

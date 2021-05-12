@@ -26,6 +26,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import static org.keycloak.testsuite.util.UIUtils.clickLink;
+import static org.keycloak.testsuite.util.WaitUtils.waitForPageToLoad;
+
 /**
  * @author <a href="mailto:mposolda@redhat.com">Marek Posolda</a>
  */
@@ -39,6 +42,7 @@ public class AccountApplicationsPage extends AbstractAccountPage {
     @Override
     public void open() {
         driver.navigate().to(getPath());
+        waitForPageToLoad();
     }
 
     private String getPath() {
@@ -46,7 +50,7 @@ public class AccountApplicationsPage extends AbstractAccountPage {
     }
 
     public void revokeGrant(String clientId) {
-        driver.findElement(By.id("revoke-" + clientId)).click();
+        clickLink(driver.findElement(By.id("revoke-" + clientId)));
     }
 
     public Map<String, AppEntry> getApplications() {
@@ -61,6 +65,14 @@ public class AccountApplicationsPage extends AbstractAccountPage {
                     case 1:
                         currentEntry = new AppEntry();
                         String client = col.getText();
+                        WebElement link = null;
+                        try {
+                            link = col.findElement(By.tagName("a"));
+                            String href = link.getAttribute("href");
+                            currentEntry.setHref(href);
+                        } catch (Exception e) {
+                            //ignore
+                        }
                         table.put(client, currentEntry);
                         break;
                     case 2:
@@ -72,24 +84,15 @@ public class AccountApplicationsPage extends AbstractAccountPage {
                         }
                         break;
                     case 3:
-                        rolesStr = col.getText();
-                        if (rolesStr.isEmpty()) break;
-                        roles = rolesStr.split(",");
-                        for (String role : roles) {
-                            role = role.trim();
-                            currentEntry.addGrantedRole(role);
+                        String clientScopesStr = col.getText();
+                        if (clientScopesStr.isEmpty()) break;
+                        String[] clientScopes = clientScopesStr.split(",");
+                        for (String clientScope : clientScopes) {
+                            clientScope = clientScope.trim();
+                            currentEntry.addGrantedClientScope(clientScope);
                         }
                         break;
                     case 4:
-                        String protMappersStr = col.getText();
-                        if (protMappersStr.isEmpty()) break;
-                        String[] protMappers = protMappersStr.split(",");
-                        for (String protMapper : protMappers) {
-                            protMapper = protMapper.trim();
-                            currentEntry.addMapper(protMapper);
-                        }
-                        break;
-                    case 5:
                         String additionalGrant = col.getText();
                         if (additionalGrant.isEmpty()) break;
                         String[] grants = additionalGrant.split(",");
@@ -108,36 +111,36 @@ public class AccountApplicationsPage extends AbstractAccountPage {
     public static class AppEntry {
 
         private final List<String> rolesAvailable = new ArrayList<String>();
-        private final List<String> rolesGranted = new ArrayList<String>();
-        private final List<String> protocolMappersGranted = new ArrayList<String>();
+        private final List<String> clientScopesGranted = new ArrayList<String>();
         private final List<String> additionalGrants = new ArrayList<>();
+        private String href = null;
 
         private void addAvailableRole(String role) {
             rolesAvailable.add(role);
         }
 
-        private void addGrantedRole(String role) {
-            rolesGranted.add(role);
-        }
-
-        private void addMapper(String protocolMapper) {
-            protocolMappersGranted.add(protocolMapper);
+        private void addGrantedClientScope(String clientScope) {
+            clientScopesGranted.add(clientScope);
         }
 
         private void addAdditionalGrant(String grant) {
             additionalGrants.add(grant);
         }
-
-        public List<String> getRolesGranted() {
-            return rolesGranted;
+        
+        public void setHref(String href) {
+            this.href = href;
+        }
+        
+        public String getHref() {
+            return this.href;
         }
 
         public List<String> getRolesAvailable() {
             return rolesAvailable;
         }
 
-        public List<String> getProtocolMappersGranted() {
-            return protocolMappersGranted;
+        public List<String> getClientScopesGranted() {
+            return clientScopesGranted;
         }
 
         public List<String> getAdditionalGrants() {

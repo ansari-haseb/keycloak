@@ -39,7 +39,7 @@ public class Time {
      * @return see description
      */
     public static long currentTimeMillis() {
-        return System.currentTimeMillis() + (offset * 1000);
+        return System.currentTimeMillis() + (offset * 1000L);
     }
 
     /**
@@ -48,7 +48,16 @@ public class Time {
      * @return see description
      */
     public static Date toDate(int time) {
-        return new Date(((long) time ) * 1000);
+        return new Date(time * 1000L);
+    }
+
+    /**
+     * Returns {@link Date} object, its value set to time
+     * @param time Time in milliseconds since the epoch
+     * @return see description
+     */
+    public static Date toDate(long time) {
+        return new Date(time);
     }
 
     /**
@@ -56,8 +65,8 @@ public class Time {
      * @param time Time in seconds since the epoch
      * @return Time in milliseconds
      */
-    public static long toMillis(int time) {
-        return ((long) time) * 1000;
+    public static long toMillis(long time) {
+        return time * 1000L;
     }
 
     /**

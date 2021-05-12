@@ -28,6 +28,13 @@ import java.util.Map;
  */
 public class IdentityProviderModel implements Serializable {
 
+    public static final String ALLOWED_CLOCK_SKEW = "allowedClockSkew";
+    public static final String LOGIN_HINT = "loginHint";
+
+    public static final String SYNC_MODE = "syncMode";
+    
+    public static final String HIDE_ON_LOGIN = "hideOnLoginPage";
+
     private String internalId;
 
     /**
@@ -48,6 +55,9 @@ public class IdentityProviderModel implements Serializable {
     private boolean storeToken;
 
     protected boolean addReadTokenRoleOnCreate;
+
+    protected boolean linkOnly;
+
     /**
      * Specifies if particular provider should be used by default for authentication even before displaying login screen
      */
@@ -59,11 +69,13 @@ public class IdentityProviderModel implements Serializable {
 
     private String displayName;
 
+    private IdentityProviderSyncMode syncMode;
+
     /**
      * <p>A map containing the configuration and properties for a specific identity provider instance and implementation. The items
      * in the map are understood by the identity provider implementation.</p>
      */
-    private Map<String, String> config = new HashMap<String, String>();
+    private Map<String, String> config = new HashMap<>();
 
     public IdentityProviderModel() {
     }
@@ -74,10 +86,11 @@ public class IdentityProviderModel implements Serializable {
             this.providerId = model.getProviderId();
             this.alias = model.getAlias();
             this.displayName = model.getDisplayName();
-            this.config = new HashMap<String, String>(model.getConfig());
+            this.config = new HashMap<>(model.getConfig());
             this.enabled = model.isEnabled();
             this.trustEmail = model.isTrustEmail();
             this.storeToken = model.isStoreToken();
+            this.linkOnly = model.isLinkOnly();
             this.authenticateByDefault = model.isAuthenticateByDefault();
             this.addReadTokenRoleOnCreate = model.addReadTokenRoleOnCreate;
             this.firstBrokerLoginFlowId = model.getFirstBrokerLoginFlowId();
@@ -123,6 +136,14 @@ public class IdentityProviderModel implements Serializable {
 
     public void setStoreToken(boolean storeToken) {
         this.storeToken = storeToken;
+    }
+
+    public boolean isLinkOnly() {
+        return linkOnly;
+    }
+
+    public void setLinkOnly(boolean linkOnly) {
+        this.linkOnly = linkOnly;
     }
 
     @Deprecated
@@ -182,5 +203,39 @@ public class IdentityProviderModel implements Serializable {
     public void setDisplayName(String displayName) {
         this.displayName = displayName;
     }
-    
+
+    /**
+     * <p>Validates this configuration.
+     * 
+     * <p>Sub-classes can override this method in order to enforce provider specific validations.
+     * 
+     * @param realm the realm
+     */
+    public void validate(RealmModel realm) {
+    }
+        
+    public IdentityProviderSyncMode getSyncMode() {
+        return IdentityProviderSyncMode.valueOf(getConfig().getOrDefault(SYNC_MODE, "LEGACY"));
+    }
+
+    public void setSyncMode(IdentityProviderSyncMode syncMode) {
+        getConfig().put(SYNC_MODE, syncMode.toString());
+    }
+
+    public boolean isLoginHint() {
+        return Boolean.valueOf(getConfig().get(LOGIN_HINT));
+    }
+
+    public void setLoginHint(boolean loginHint) {
+        getConfig().put(LOGIN_HINT, String.valueOf(loginHint));
+    }
+
+     
+    public boolean isHideOnLogin() {
+        return Boolean.valueOf(getConfig().get(HIDE_ON_LOGIN));
+    }
+
+    public void setHideOnLogin(boolean hideOnLogin) {
+        getConfig().put(HIDE_ON_LOGIN, String.valueOf(hideOnLogin));
+    }
 }

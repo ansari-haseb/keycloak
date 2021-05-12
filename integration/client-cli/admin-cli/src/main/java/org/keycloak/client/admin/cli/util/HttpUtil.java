@@ -30,9 +30,11 @@ import org.apache.http.client.methods.HttpPost;
 import org.apache.http.client.methods.HttpPut;
 import org.apache.http.client.methods.HttpRequestBase;
 import org.apache.http.conn.ssl.SSLConnectionSocketFactory;
+import org.apache.http.conn.ssl.TrustSelfSignedStrategy;
 import org.apache.http.entity.InputStreamEntity;
 import org.apache.http.entity.StringEntity;
 import org.apache.http.impl.client.HttpClientBuilder;
+import org.apache.http.ssl.SSLContextBuilder;
 import org.apache.http.ssl.SSLContexts;
 import org.keycloak.client.admin.cli.httpcomponents.HttpDelete;
 import org.keycloak.client.admin.cli.operations.LocalSearch;
@@ -53,6 +55,8 @@ import java.security.cert.CertificateException;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Supplier;
 
 import static org.keycloak.common.util.ObjectUtil.capitalize;
 
@@ -65,9 +69,11 @@ public class HttpUtil {
     public static final String APPLICATION_JSON = "application/json";
     public static final String APPLICATION_FORM_URL_ENCODED = "application/x-www-form-urlencoded";
     public static final String UTF_8 = "utf-8";
+    private static final String[] DEFAULT_QUERY_PARAMS = { "first", "0", "max", "2" };
 
     private static HttpClient httpClient;
     private static SSLConnectionSocketFactory sslsf;
+    private static final AtomicBoolean tlsWarningEmitted = new AtomicBoolean();
 
     public static InputStream doGet(String url, String acceptType, String authorization) {
         try {
@@ -257,9 +263,27 @@ public class HttpUtil {
         }
         SSLContext theContext = SSLContexts.custom()
                 .useProtocol("TLS")
-                .loadTrustMaterial(file, password == null ? null : password.toCharArray())
+                .loadTrustMaterial(file, password == null ? null : password.toCharArray(), TrustSelfSignedStrategy.INSTANCE)
                 .build();
         sslsf = new SSLConnectionSocketFactory(theContext);
+    }
+
+    public static void setSkipCertificateValidation() {
+        if (!tlsWarningEmitted.getAndSet(true)) {
+            // Since this is a static util, it may happen that TLS is setup many times in one command
+            // invocation (e.g. when a command requires logging in). However, we would like to
+            // prevent this warning from appearing multiple times. That's why we need to guard it with a boolean.
+            System.err.println("The server is configured to use TLS but there is no truststore specified.");
+            System.err.println("The tool will skip certificate validation. This is highly discouraged for production use cases");
+        }
+
+        SSLContextBuilder builder = new SSLContextBuilder();
+        try {
+            builder.loadTrustMaterial(null, new TrustSelfSignedStrategy());
+            sslsf = new SSLConnectionSocketFactory(builder.build());
+        } catch (Exception e) {
+            throw new RuntimeException("Failed setting up TLS", e);
+        }
     }
 
     public static String extractIdFromLocation(String location) {
@@ -412,21 +436,37 @@ public class HttpUtil {
         checkSuccess(resourceUrl, response);
     }
 
-    public static String getIdForType(String rootUrl, String realm, String auth, String resourceEndpoint, String attrName, String attrValue) {
+    public static String getIdForType(String rootUrl, String realm, String auth, String resourceEndpoint, String attrName, String attrValue, String inputAttrName) {
 
-        return getAttrForType(rootUrl, realm, auth, resourceEndpoint, attrName, attrValue, "id");
+        return getAttrForType(rootUrl, realm, auth, resourceEndpoint, attrName, attrValue, inputAttrName, "id", null);
     }
 
-    public static String getAttrForType(String rootUrl, String realm, String auth, String resourceEndpoint, String attrName, String attrValue, String returnAttrName) {
+    public static String getIdForType(String rootUrl, String realm, String auth, String resourceEndpoint, String attrName, String attrValue, String inputAttrName, Supplier<String[]> endpointParams) {
+        return getAttrForType(rootUrl, realm, auth, resourceEndpoint, attrName, attrValue, inputAttrName, "id", endpointParams);
+    }
 
+    public static String getAttrForType(String rootUrl, String realm, String auth, String resourceEndpoint, String attrName, String attrValue, String inputAttrName, String returnAttrName) {
+        return getAttrForType(rootUrl, realm, auth, resourceEndpoint, attrName, attrValue, inputAttrName, returnAttrName, null);
+    }
+
+    public static String getAttrForType(String rootUrl, String realm, String auth, String resourceEndpoint, String attrName, String attrValue, String inputAttrName, String returnAttrName, Supplier<String[]> endpointParams) {
         String resourceUrl = composeResourceUrl(rootUrl, realm, resourceEndpoint);
-        resourceUrl = HttpUtil.addQueryParamsToUri(resourceUrl, attrName, attrValue, "first", "0", "max", "2");
+        String[] defaultParams;
+
+        if (endpointParams == null) {
+            defaultParams = DEFAULT_QUERY_PARAMS;
+        } else {
+            defaultParams = endpointParams.get();
+        }
+
+        resourceUrl = HttpUtil.addQueryParamsToUri(resourceUrl, attrName, attrValue);
+        resourceUrl = HttpUtil.addQueryParamsToUri(resourceUrl, defaultParams);
 
         List<ObjectNode> users = doGetJSON(RoleOperations.LIST_OF_NODES.class, resourceUrl, auth);
 
         ObjectNode user;
         try {
-            user = new LocalSearch(users).exactMatchOne(attrValue, attrName);
+            user = new LocalSearch(users).exactMatchOne(attrValue, inputAttrName);
         } catch (Exception e) {
             throw new RuntimeException("Multiple " + resourceEndpoint + " found for " + attrName + ": " + attrValue, e);
         }

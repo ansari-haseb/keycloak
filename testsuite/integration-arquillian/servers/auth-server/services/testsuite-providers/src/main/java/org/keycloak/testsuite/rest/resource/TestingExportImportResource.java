@@ -56,7 +56,7 @@ public class TestingExportImportResource {
     @Produces(MediaType.APPLICATION_JSON)
     public Response runImport() {
         new ExportImportManager(session).runImport();
-        return Response.ok().build();
+        return Response.noContent().build();
     }
 
     @GET
@@ -64,7 +64,7 @@ public class TestingExportImportResource {
     @Produces(MediaType.APPLICATION_JSON)
     public Response runExport() {
         new ExportImportManager(session).runExport();
-        return Response.ok().build();
+        return Response.noContent().build();
     }
 
     @GET
@@ -146,5 +146,17 @@ public class TestingExportImportResource {
         System.setProperty("project.build.directory", "target");
         String absolutePath = new File(System.getProperty("project.build.directory", "target")).getAbsolutePath();
         return absolutePath;
+    }
+
+    @GET
+    @Path("/clear")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response clear() {
+        System.clearProperty(REALM_NAME);
+        System.clearProperty(PROVIDER);
+        System.clearProperty(ACTION);
+        System.clearProperty(FILE);
+
+        return Response.noContent().build();
     }
 }

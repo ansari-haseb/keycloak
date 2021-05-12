@@ -21,6 +21,10 @@ import org.openqa.selenium.By;
 import org.openqa.selenium.WebElement;
 import org.openqa.selenium.support.FindBy;
 
+import static org.keycloak.testsuite.util.UIUtils.getTextFromElement;
+import static org.keycloak.testsuite.util.UIUtils.setTextInputValue;
+import static org.keycloak.testsuite.util.UIUtils.clickLink;
+
 /**
  * @author <a href="mailto:sthorger@redhat.com">Stian Thorgersen</a>
  */
@@ -38,22 +42,20 @@ public class WelcomePage extends AuthServer {
     @FindBy(id = "create-button")
     private WebElement createButton;
 
+    @FindBy(css = ".welcome-header h1")
+    private WebElement welcomeMessage;
+
     public boolean isPasswordSet() {
         return !(driver.getPageSource().contains("Please create an initial admin user to get started.") ||
                  driver.getPageSource().contains("You need local access to create the initial admin user."));
     }
 
     public void setPassword(String username, String password) {
-        usernameInput.clear();
-        usernameInput.sendKeys(username);
+        setTextInputValue(usernameInput, username);
+        setTextInputValue(passwordInput, password);
+        setTextInputValue(passwordConfirmationInput, password);
 
-        passwordInput.clear();
-        passwordInput.sendKeys(password);
-
-        passwordConfirmationInput.clear();
-        passwordConfirmationInput.sendKeys(password);
-
-        createButton.click();
+        clickLink(createButton);
 
         if (!driver.getPageSource().contains("User created")) {
             throw new RuntimeException("Failed to updated password");
@@ -61,7 +63,11 @@ public class WelcomePage extends AuthServer {
     }
 
     public void navigateToAdminConsole() {
-        driver.findElement(By.linkText("Administration Console")).click();
+        clickLink(driver.findElement(By.linkText("Administration Console")));
     }
-    
+
+    public String getWelcomeMessage() {
+        return getTextFromElement(welcomeMessage);
+    }
+
 }

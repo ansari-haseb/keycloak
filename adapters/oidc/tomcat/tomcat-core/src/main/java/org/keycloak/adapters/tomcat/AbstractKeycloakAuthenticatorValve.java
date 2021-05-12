@@ -17,11 +17,7 @@
 
 package org.keycloak.adapters.tomcat;
 
-import org.apache.catalina.Context;
-import org.apache.catalina.Lifecycle;
-import org.apache.catalina.LifecycleEvent;
-import org.apache.catalina.LifecycleListener;
-import org.apache.catalina.Manager;
+import org.apache.catalina.*;
 import org.apache.catalina.authenticator.FormAuthenticator;
 import org.apache.catalina.connector.Request;
 import org.apache.catalina.connector.Response;
@@ -105,7 +101,7 @@ public abstract class AbstractKeycloakAuthenticatorValve extends FormAuthenticat
         // Possible scenarios:
         // 1) The deployment has a keycloak.config.resolver specified and it exists:
         //    Outcome: adapter uses the resolver
-        // 2) The deployment has a keycloak.config.resolver and isn't valid (doesn't exists, isn't a resolver, ...) :
+        // 2) The deployment has a keycloak.config.resolver and isn't valid (doesn't exist, isn't a resolver, ...) :
         //    Outcome: adapter is left unconfigured
         // 3) The deployment doesn't have a keycloak.config.resolver , but has a keycloak.json (or equivalent)
         //    Outcome: adapter uses it
@@ -136,7 +132,7 @@ public abstract class AbstractKeycloakAuthenticatorValve extends FormAuthenticat
         }
 
         context.getServletContext().setAttribute(AdapterDeploymentContext.class.getName(), deploymentContext);
-        AuthenticatedActionsValve actions = new AuthenticatedActionsValve(deploymentContext, getNext(), getContainer());
+        AbstractAuthenticatedActionsValve actions = createAuthenticatedActionsValve(deploymentContext, getNext(), getContainer());
         setNext(actions);
 
         nodesRegistrationManagement = new NodesRegistrationManagement();
@@ -187,8 +183,9 @@ public abstract class AbstractKeycloakAuthenticatorValve extends FormAuthenticat
         }
     }
 
-    protected abstract GenericPrincipalFactory createPrincipalFactory();
+    protected abstract PrincipalFactory createPrincipalFactory();
     protected abstract boolean forwardToErrorPageInternal(Request request, HttpServletResponse response, Object loginConfig) throws IOException;
+    protected abstract AbstractAuthenticatedActionsValve createAuthenticatedActionsValve(AdapterDeploymentContext deploymentContext, Valve next, Container container);
 
     protected boolean authenticateInternal(Request request, HttpServletResponse response, Object loginConfig) throws IOException {
         CatalinaHttpFacade facade = new OIDCCatalinaHttpFacade(request, response);

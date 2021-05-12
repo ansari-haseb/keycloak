@@ -19,6 +19,11 @@ package org.keycloak.adapters.undertow;
 
 import io.undertow.server.HttpServerExchange;
 import io.undertow.server.handlers.CookieImpl;
+import io.undertow.server.handlers.form.FormData;
+import io.undertow.server.handlers.form.FormData.FormValue;
+import io.undertow.server.handlers.form.FormDataParser;
+import io.undertow.server.handlers.form.FormParserFactory;
+import io.undertow.servlet.handlers.ServletRequestContext;
 import io.undertow.util.AttachmentKey;
 import io.undertow.util.Headers;
 import io.undertow.util.HttpString;
@@ -28,6 +33,12 @@ import org.keycloak.adapters.spi.LogoutError;
 import org.keycloak.common.util.KeycloakUriBuilder;
 
 import javax.security.cert.X509Certificate;
+import javax.servlet.ServletInputStream;
+import javax.servlet.ServletRequest;
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletRequestWrapper;
+
+import java.io.BufferedInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -75,6 +86,11 @@ public class UndertowHttpFacade implements HttpFacade {
     }
 
     protected class RequestFacade implements Request {
+
+        private InputStream inputStream;
+        private final FormParserFactory formParserFactory = FormParserFactory.builder().build();
+        private FormData formData;
+
         @Override
         public String getURI() {
             KeycloakUriBuilder uriBuilder = KeycloakUriBuilder.fromUri(exchange.getRequestURI())
@@ -96,7 +112,34 @@ public class UndertowHttpFacade implements HttpFacade {
 
         @Override
         public String getFirstParam(String param) {
-            throw new RuntimeException("Not implemented yet");
+            Deque<String> values = exchange.getQueryParameters().get(param);
+
+            if (values != null && !values.isEmpty()) {
+                return values.getFirst();
+            }
+
+            if (formData == null && "post".equalsIgnoreCase(getMethod())) {
+                FormDataParser parser = formParserFactory.createParser(exchange);
+                try {
+                    formData = parser.parseBlocking();
+                } catch (IOException cause) {
+                    throw new RuntimeException("Failed to parse form parameters", cause);
+                }
+            }
+
+            if (formData != null) {
+                Deque<FormValue> formValues = formData.get(param);
+
+                if (formValues != null && !formValues.isEmpty()) {
+                    FormValue firstValue = formValues.getFirst();
+
+                    if (!firstValue.isFile()) {
+                        return firstValue.getValue();
+                    }
+                }
+            }
+
+            return null;
         }
 
         @Override
@@ -136,7 +179,38 @@ public class UndertowHttpFacade implements HttpFacade {
 
         @Override
         public InputStream getInputStream() {
+            return getInputStream(false);
+        }
+
+        @Override
+        public InputStream getInputStream(boolean buffered) {
             if (!exchange.isBlocking()) exchange.startBlocking();
+
+            if (inputStream != null) {
+                return inputStream;
+            }
+
+            if (buffered) {
+                ServletRequestContext context = exchange.getAttachment(ServletRequestContext.ATTACHMENT_KEY);
+                ServletRequest servletRequest = context.getServletRequest();
+
+                inputStream = new BufferedInputStream(exchange.getInputStream());
+                
+                context.setServletRequest(new HttpServletRequestWrapper((HttpServletRequest) servletRequest) {
+                    @Override
+                    public ServletInputStream getInputStream() {
+                        inputStream.mark(0);
+                        return new ServletInputStream() {
+                            @Override
+                            public int read() throws IOException {
+                                return inputStream.read();
+                            }
+                        };
+                    }
+                });
+                return inputStream;
+            }
+
             return exchange.getInputStream();
         }
 

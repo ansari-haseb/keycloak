@@ -22,17 +22,48 @@ import org.keycloak.authorization.AuthorizationProvider;
 import org.keycloak.authorization.model.Policy;
 import org.keycloak.authorization.model.ResourceServer;
 import org.keycloak.provider.ProviderFactory;
+import org.keycloak.representations.idm.authorization.AbstractPolicyRepresentation;
+import org.keycloak.representations.idm.authorization.PolicyRepresentation;
 
 /**
  * @author <a href="mailto:psilva@redhat.com">Pedro Igor</a>
  */
-public interface PolicyProviderFactory extends ProviderFactory<PolicyProvider> {
+public interface PolicyProviderFactory<R extends AbstractPolicyRepresentation> extends ProviderFactory<PolicyProvider> {
 
     String getName();
 
     String getGroup();
 
+    default boolean isInternal() {
+        return false;
+    }
+
     PolicyProvider create(AuthorizationProvider authorization);
 
-    PolicyProviderAdminService getAdminResource(ResourceServer resourceServer);
+    R toRepresentation(Policy policy, AuthorizationProvider authorization);
+
+    Class<R> getRepresentationType();
+
+    default void onCreate(Policy policy, R representation, AuthorizationProvider authorization) {
+
+    }
+
+    default void onUpdate(Policy policy, R representation, AuthorizationProvider authorization) {
+
+    }
+
+    default void onRemove(Policy policy, AuthorizationProvider authorization) {
+
+    }
+
+    default void onImport(Policy policy, PolicyRepresentation representation, AuthorizationProvider authorization) {
+
+    }
+
+    default void onExport(Policy policy, PolicyRepresentation representation, AuthorizationProvider authorizationProvider) {
+    }
+
+    default PolicyProviderAdminService getAdminResource(ResourceServer resourceServer, AuthorizationProvider authorization) {
+        return null;
+    }
 }

@@ -25,6 +25,7 @@ import java.security.PrivateKey;
 import java.util.Set;
 import org.apache.http.client.HttpClient;
 import org.keycloak.rotation.KeyLocator;
+import java.net.URI;
 
 /**
  * Represents SAML deployment configuration.
@@ -84,6 +85,12 @@ public interface SamlDeployment {
          */
         HttpClient getClient();
 
+        /**
+         * Returns allowed time difference (in milliseconds) between IdP and SP
+         * @return see description
+         */
+        int getAllowedClockSkew();
+
         public interface SingleSignOnService {
             /**
              * Returns {@code true} if the requests to IdP need to be signed by SP key.
@@ -103,8 +110,24 @@ public interface SamlDeployment {
              */
             boolean validateAssertionSignature();
             Binding getRequestBinding();
+            /**
+             * SAML allows the client to request what binding type it wants authn responses to use. The default is
+             * that the client will not request a specific binding type for responses.
+             * @return
+             */
             Binding getResponseBinding();
+            /**
+             * Returns URL for the IDP login service that the client will send requests to.
+             * @return
+             */
             String getRequestBindingUrl();
+            /**
+             * Returns URI where the IdP should send the responses to. The default is
+             * that the client will not request a specific assertion consumer service URL.
+             * This property is typically accompanied by the ProtocolBinding attribute.
+             * @return
+             */
+            URI getAssertionConsumerServiceUrl();
         }
 
         public interface SingleLogoutService {
@@ -141,10 +164,16 @@ public interface SamlDeployment {
     KeyPair getSigningKeyPair();
     String getSignatureCanonicalizationMethod();
     SignatureAlgorithm getSignatureAlgorithm();
-    String getAssertionConsumerServiceUrl();
     String getLogoutPage();
 
     Set<String> getRoleAttributeNames();
+
+    /**
+     * Obtains the {@link RoleMappingsProvider} that was configured for the SP.
+     *
+     * @return a reference to the configured {@link RoleMappingsProvider}.
+     */
+    RoleMappingsProvider getRoleMappingsProvider();
 
     enum PrincipalNamePolicy {
         FROM_NAME_ID,
@@ -152,6 +181,8 @@ public interface SamlDeployment {
     }
     PrincipalNamePolicy getPrincipalNamePolicy();
     String getPrincipalAttributeName();
+    boolean isAutodetectBearerOnly();
 
+    boolean isKeepDOMAssertion();
 
 }

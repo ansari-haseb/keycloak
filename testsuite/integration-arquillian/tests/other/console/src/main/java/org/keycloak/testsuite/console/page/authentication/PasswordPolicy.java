@@ -1,6 +1,6 @@
 package org.keycloak.testsuite.console.page.authentication;
 
-import org.keycloak.testsuite.page.Form;
+import org.keycloak.testsuite.util.UIUtils;
 import org.openqa.selenium.By;
 import org.openqa.selenium.WebElement;
 import org.openqa.selenium.support.FindBy;
@@ -36,7 +36,7 @@ public class PasswordPolicy extends Authentication {
         addPolicySelect.selectByVisibleText(policy.getName());
         if (value != null) {setPolicyValue(policy, value);}
         primaryButton.click();
-        waitForPageToLoad(driver);
+        waitForPageToLoad();
     }
 
 
@@ -53,7 +53,7 @@ public class PasswordPolicy extends Authentication {
         if (primaryButton.isEnabled()) {
             primaryButton.click();
         }
-        waitForPageToLoad(driver);
+        waitForPageToLoad();
     }
 
     public void editPolicy(Type policy, int value) {
@@ -65,12 +65,12 @@ public class PasswordPolicy extends Authentication {
         if (primaryButton.isEnabled()) {
             primaryButton.click();
         }
-        waitForPageToLoad(driver);
+        waitForPageToLoad();
     }
 
     private void setPolicyValue(Type policy, String value) {
         WebElement input = getPolicyRow(policy).findElement(By.tagName("input"));
-        Form.setInputValue(input, value);
+        UIUtils.setTextInputValue(input, value);
     }
 
     private WebElement getPolicyRow(Type policy) {

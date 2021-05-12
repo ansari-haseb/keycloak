@@ -30,7 +30,6 @@ import org.keycloak.models.RealmModel;
 import org.keycloak.models.UserManager;
 import org.keycloak.models.UserModel;
 import org.keycloak.models.UserSessionProvider;
-import org.keycloak.models.session.UserSessionPersisterProvider;
 import org.keycloak.models.utils.RepresentationToModel;
 import org.keycloak.protocol.LoginProtocol;
 import org.keycloak.protocol.LoginProtocolFactory;
@@ -39,6 +38,7 @@ import org.keycloak.protocol.oidc.mappers.UserSessionNoteMapper;
 import org.keycloak.representations.adapters.config.BaseRealmConfig;
 import org.keycloak.representations.adapters.config.PolicyEnforcerConfig;
 import org.keycloak.representations.idm.ClientRepresentation;
+import org.keycloak.sessions.AuthenticationSessionProvider;
 
 import java.net.URI;
 import java.util.Collections;
@@ -47,6 +47,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.stream.Collectors;
 
 /**
  * @author <a href="mailto:bill@burkecentral.com">Bill Burke</a>
@@ -73,8 +74,8 @@ public class ClientManager {
      * @param addDefaultRoles
      * @return
      */
-    public static ClientModel createClient(KeycloakSession session, RealmModel realm, ClientRepresentation rep, boolean addDefaultRoles) {
-        ClientModel client = RepresentationToModel.createClient(session, realm, rep, addDefaultRoles);
+    public static ClientModel createClient(KeycloakSession session, RealmModel realm, ClientRepresentation rep) {
+        ClientModel client = RepresentationToModel.createClient(session, realm, rep);
 
         if (rep.getProtocol() != null) {
             LoginProtocolFactory providerFactory = (LoginProtocolFactory) session.getKeycloakSessionFactory().getProviderFactory(LoginProtocol.class, rep.getProtocol());
@@ -84,8 +85,7 @@ public class ClientManager {
 
         // remove default mappers if there is a template
         if (rep.getProtocolMappers() == null && rep.getClientTemplate() != null) {
-            Set<ProtocolMapperModel> mappers = client.getProtocolMappers();
-            for (ProtocolMapperModel mapper : mappers) client.removeProtocolMapper(mapper);
+            client.getProtocolMappersStream().collect(Collectors.toList()).forEach(client::removeProtocolMapper);
         }
         return client;
 
@@ -99,9 +99,9 @@ public class ClientManager {
                 sessions.onClientRemoved(realm, client);
             }
 
-            UserSessionPersisterProvider sessionsPersister = realmManager.getSession().getProvider(UserSessionPersisterProvider.class);
-            if (sessionsPersister != null) {
-                sessionsPersister.onClientRemoved(realm, client);
+            AuthenticationSessionProvider authSessions = realmManager.getSession().authenticationSessions();
+            if (authSessions != null) {
+                authSessions.onClientRemoved(realm, client);
             }
 
             UserModel serviceAccountUser = realmManager.getSession().users().getServiceAccount(client);
@@ -158,7 +158,6 @@ public class ClientManager {
             // Don't use federation for service account user
             UserModel user = realmManager.getSession().userLocalStorage().addUser(client.getRealm(), username);
             user.setEnabled(true);
-            user.setEmail(username + "@placeholder.org");
             user.setServiceAccountClientLink(client.getId());
         }
 
@@ -168,7 +167,6 @@ public class ClientManager {
             ProtocolMapperModel protocolMapper = UserSessionNoteMapper.createClaimMapper(ServiceAccountConstants.CLIENT_ID_PROTOCOL_MAPPER,
                     ServiceAccountConstants.CLIENT_ID,
                     ServiceAccountConstants.CLIENT_ID, "String",
-                    false, "",
                     true, true);
             client.addProtocolMapper(protocolMapper);
         }
@@ -179,7 +177,6 @@ public class ClientManager {
             ProtocolMapperModel protocolMapper = UserSessionNoteMapper.createClaimMapper(ServiceAccountConstants.CLIENT_HOST_PROTOCOL_MAPPER,
                     ServiceAccountConstants.CLIENT_HOST,
                     ServiceAccountConstants.CLIENT_HOST, "String",
-                    false, "",
                     true, true);
             client.addProtocolMapper(protocolMapper);
         }
@@ -189,7 +186,6 @@ public class ClientManager {
             ProtocolMapperModel protocolMapper = UserSessionNoteMapper.createClaimMapper(ServiceAccountConstants.CLIENT_ADDRESS_PROTOCOL_MAPPER,
                     ServiceAccountConstants.CLIENT_ADDRESS,
                     ServiceAccountConstants.CLIENT_ADDRESS, "String",
-                    false, "",
                     true, true);
             client.addProtocolMapper(protocolMapper);
         }
@@ -202,12 +198,11 @@ public class ClientManager {
         if (serviceAccountUser != null) {
             String username = ServiceAccountConstants.SERVICE_ACCOUNT_USER_PREFIX + newClientId;
             serviceAccountUser.setUsername(username);
-            serviceAccountUser.setEmail(username + "@placeholder.org");
         }
     }
 
     @JsonPropertyOrder({"realm", "realm-public-key", "bearer-only", "auth-server-url", "ssl-required",
-            "resource", "public-client", "credentials",
+            "resource", "public-client", "verify-token-audience", "credentials",
             "use-resource-role-mappings"})
     public static class InstallationAdapterConfig extends BaseRealmConfig {
         @JsonProperty("resource")
@@ -220,6 +215,8 @@ public class ClientManager {
         protected Boolean publicClient;
         @JsonProperty("credentials")
         protected Map<String, Object> credentials;
+        @JsonProperty("verify-token-audience")
+        protected Boolean verifyTokenAudience;
         @JsonProperty("policy-enforcer")
         protected PolicyEnforcerConfig enforcerConfig;
 
@@ -245,6 +242,14 @@ public class ClientManager {
 
         public void setCredentials(Map<String, Object> credentials) {
             this.credentials = credentials;
+        }
+
+        public Boolean getVerifyTokenAudience() {
+            return verifyTokenAudience;
+        }
+
+        public void setVerifyTokenAudience(Boolean verifyTokenAudience) {
+            this.verifyTokenAudience = verifyTokenAudience;
         }
 
         public Boolean getPublicClient() {
@@ -281,7 +286,7 @@ public class ClientManager {
 
         if (clientModel.isPublicClient() && !clientModel.isBearerOnly()) rep.setPublicClient(true);
         if (clientModel.isBearerOnly()) rep.setBearerOnly(true);
-        if (clientModel.getRoles().size() > 0) rep.setUseResourceRoleMappings(true);
+        if (clientModel.getRolesStream().count() > 0) rep.setUseResourceRoleMappings(true);
 
         rep.setResource(clientModel.getClientId());
 
@@ -325,7 +330,7 @@ public class ClientManager {
                 }
             }
         }
-        if (clientModel.getRoles().size() > 0) {
+        if (clientModel.getRolesStream().count() > 0) {
             buffer.append("    <use-resource-role-mappings>true</use-resource-role-mappings>\n");
         }
         buffer.append("</secure-deployment>\n");

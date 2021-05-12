@@ -87,29 +87,17 @@ public class FolderTheme implements Theme {
     }
 
     @Override
-    public InputStream getTemplateAsStream(String name) throws IOException {
-        URL url = getTemplate(name);
-        return url != null ? url.openStream() : null;
-    }
-
-    @Override
-    public URL getResource(String path) throws IOException {
+    public InputStream getResourceAsStream(String path) throws IOException {
         if (File.separatorChar != '/') {
             path = path.replace('/', File.separatorChar);
         }
 
         File file = new File(resourcesDir, path);
-        if (!file.isFile() || !file.getCanonicalPath().startsWith(resourcesDir.getCanonicalPath())) {
+        if (!file.isFile() || !file.getCanonicalPath().startsWith(resourcesDir.getCanonicalPath() + File.separator)) {
             return null;
         } else {
-            return file.toURI().toURL();
+            return file.toURI().toURL().openStream();
         }
-    }
-
-    @Override
-    public InputStream getResourceAsStream(String path) throws IOException {
-        URL url = getResource(path);
-        return url != null ? url.openStream() : null;
     }
 
     @Override

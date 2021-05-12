@@ -26,7 +26,6 @@ import org.keycloak.dom.saml.v2.protocol.ResponseType;
 import org.keycloak.saml.common.PicketLinkLogger;
 import org.keycloak.saml.common.PicketLinkLoggerFactory;
 import org.keycloak.saml.common.constants.GeneralConstants;
-import org.keycloak.saml.common.constants.JBossSAMLConstants;
 import org.keycloak.saml.common.constants.JBossSAMLURIConstants;
 import org.keycloak.saml.common.exceptions.ConfigurationException;
 import org.keycloak.saml.common.exceptions.ParsingException;
@@ -77,24 +76,40 @@ public class SAML2Request {
     }
 
     /**
+     * Create authentication request with protocolBinding defaulting to POST
+     *
+     * @param id
+     * @param assertionConsumerURL
+     * @param destination
+     * @param issuerValue
+     * @return
+     * @throws ConfigurationException
+     */
+    public AuthnRequestType createAuthnRequestType(String id, String assertionConsumerURL, String destination,
+                                                   String issuerValue) throws ConfigurationException {
+        return createAuthnRequestType(id, assertionConsumerURL, destination, issuerValue, JBossSAMLURIConstants.SAML_HTTP_POST_BINDING.getUri());
+    }
+
+    /**
      * Create an authentication request
      *
      * @param id
      * @param assertionConsumerURL
      * @param destination
      * @param issuerValue
+     * @param protocolBindingUri
      *
      * @return
      *
      * @throws ConfigurationException
      */
     public AuthnRequestType createAuthnRequestType(String id, String assertionConsumerURL, String destination,
-                                                   String issuerValue) throws ConfigurationException {
+                                                   String issuerValue, URI protocolBinding) throws ConfigurationException {
         XMLGregorianCalendar issueInstant = XMLTimeUtil.getIssueInstant();
 
         AuthnRequestType authnRequest = new AuthnRequestType(id, issueInstant);
         authnRequest.setAssertionConsumerServiceURL(URI.create(assertionConsumerURL));
-        authnRequest.setProtocolBinding(URI.create(JBossSAMLConstants.HTTP_POST_BINDING.get()));
+        authnRequest.setProtocolBinding(protocolBinding);
         if (destination != null) {
             authnRequest.setDestination(URI.create(destination));
         }
@@ -108,7 +123,7 @@ public class SAML2Request {
         // Create a default NameIDPolicy
         NameIDPolicyType nameIDPolicy = new NameIDPolicyType();
         nameIDPolicy.setAllowCreate(Boolean.TRUE);
-        nameIDPolicy.setFormat(URI.create(this.nameIDFormat));
+        nameIDPolicy.setFormat(this.nameIDFormat == null ? null : URI.create(this.nameIDFormat));
 
         authnRequest.setNameIDPolicy(nameIDPolicy);
 
@@ -156,19 +171,28 @@ public class SAML2Request {
      * @throws IOException
      * @throws ParsingException
      */
-    public SAML2Object getSAML2ObjectFromStream(InputStream is) throws ConfigurationException, ParsingException,
+    public static SAMLDocumentHolder getSAML2ObjectFromStream(InputStream is) throws ConfigurationException, ParsingException,
             ProcessingException {
         if (is == null)
             throw logger.nullArgumentError("InputStream");
 
         Document samlDocument = DocumentUtil.getDocument(is);
+        return getSAML2ObjectFromDocument(samlDocument);
+    }
 
-        SAMLParser samlParser = new SAMLParser();
+    /**
+     * Get the Underlying SAML2Object from a document
+     * @param samlDocument a Document containing a SAML2Object
+     * @return a SAMLDocumentHolder
+     * @throws ProcessingException
+     * @throws ParsingException
+     */
+    public static SAMLDocumentHolder getSAML2ObjectFromDocument(Document samlDocument) throws ProcessingException, ParsingException {
+        SAMLParser samlParser = SAMLParser.getInstance();
         JAXPValidationUtil.checkSchemaValidation(samlDocument);
         SAML2Object requestType = (SAML2Object) samlParser.parse(samlDocument);
 
-        samlDocumentHolder = new SAMLDocumentHolder(requestType, samlDocument);
-        return requestType;
+        return new SAMLDocumentHolder(requestType, samlDocument);
     }
 
     /**
@@ -190,7 +214,7 @@ public class SAML2Request {
 
         Document samlDocument = DocumentUtil.getDocument(is);
 
-        SAMLParser samlParser = new SAMLParser();
+        SAMLParser samlParser = SAMLParser.getInstance();
         JAXPValidationUtil.checkSchemaValidation(samlDocument);
         RequestAbstractType requestType = (RequestAbstractType) samlParser.parse(samlDocument);
 
@@ -217,7 +241,7 @@ public class SAML2Request {
 
         Document samlDocument = DocumentUtil.getDocument(is);
 
-        SAMLParser samlParser = new SAMLParser();
+        SAMLParser samlParser = SAMLParser.getInstance();
         JAXPValidationUtil.checkSchemaValidation(samlDocument);
 
         AuthnRequestType requestType = (AuthnRequestType) samlParser.parse(samlDocument);
@@ -243,14 +267,10 @@ public class SAML2Request {
      *
      * @throws ConfigurationException
      */
-    public static LogoutRequestType createLogoutRequest(String issuer) throws ConfigurationException {
+    public static LogoutRequestType createLogoutRequest(NameIDType issuer) throws ConfigurationException {
         LogoutRequestType lrt = new LogoutRequestType(IDGenerator.create("ID_"), XMLTimeUtil.getIssueInstant());
 
-        // Create an issuer
-        NameIDType issuerNameID = new NameIDType();
-        issuerNameID.setValue(issuer);
-
-        lrt.setIssuer(issuerNameID);
+        lrt.setIssuer(issuer);
 
         return lrt;
     }

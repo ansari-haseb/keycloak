@@ -2,10 +2,14 @@ package org.keycloak.testsuite.util;
 
 import org.keycloak.admin.client.resource.ClientResource;
 import org.keycloak.admin.client.resource.RealmResource;
+import org.keycloak.protocol.oidc.OIDCAdvancedConfigWrapper;
+import org.keycloak.protocol.oidc.OIDCConfigAttributes;
 import org.keycloak.representations.idm.ClientRepresentation;
 import org.keycloak.representations.idm.ProtocolMapperRepresentation;
 import org.keycloak.representations.idm.RoleRepresentation;
+import org.keycloak.representations.idm.UserRepresentation;
 
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedList;
@@ -52,6 +56,12 @@ public class ClientManager {
             clientResource.update(app);
         }
 
+        public void setServiceAccountsEnabled(Boolean enabled) {
+            ClientRepresentation app = clientResource.toRepresentation();
+            app.setServiceAccountsEnabled(enabled);
+            clientResource.update(app);
+        }
+
         public void updateAttribute(String attribute, String value) {
             ClientRepresentation app = clientResource.toRepresentation();
             if (app.getAttributes() == null) {
@@ -61,10 +71,11 @@ public class ClientManager {
             clientResource.update(app);
         }
 
-        public void directAccessGrant(Boolean enable) {
+        public ClientManagerBuilder directAccessGrant(Boolean enable) {
             ClientRepresentation app = clientResource.toRepresentation();
             app.setDirectAccessGrantsEnabled(enable);
             clientResource.update(app);
+            return this;
         }
 
         public ClientManagerBuilder standardFlow(Boolean enable) {
@@ -81,10 +92,27 @@ public class ClientManager {
             return this;
         }
 
-        public void fullScopeAllowed(boolean enable) {
+        public ClientManagerBuilder fullScopeAllowed(boolean enable) {
             ClientRepresentation app = clientResource.toRepresentation();
             app.setFullScopeAllowed(enable);
             clientResource.update(app);
+            return this;
+        }
+
+        public void addClientScope(String clientScopeId, boolean defaultScope) {
+            if (defaultScope) {
+                clientResource.addDefaultClientScope(clientScopeId);
+            } else {
+                clientResource.addOptionalClientScope(clientScopeId);
+            }
+        }
+
+        public void removeClientScope(String clientScopeId, boolean defaultScope) {
+            if (defaultScope) {
+                clientResource.removeDefaultClientScope(clientScopeId);
+            } else {
+                clientResource.removeOptionalClientScope(clientScopeId);
+            }
         }
 
         public void consentRequired(boolean enable) {
@@ -112,7 +140,7 @@ public class ClientManager {
             clientResource.getScopeMappings().realmLevel().remove(Collections.singletonList(newRole));
         }
 
-        public void addRedirectUris(String... redirectUris) {
+        public ClientManagerBuilder addRedirectUris(String... redirectUris) {
             ClientRepresentation app = clientResource.toRepresentation();
             if (app.getRedirectUris() == null) {
                 app.setRedirectUris(new LinkedList<String>());
@@ -121,6 +149,7 @@ public class ClientManager {
                 app.getRedirectUris().add(redirectUri);
             }
             clientResource.update(app);
+            return this;
         }
 
         public void removeRedirectUris(String... redirectUris) {
@@ -131,6 +160,39 @@ public class ClientManager {
                 }
             }
             clientResource.update(app);
+        }
+
+        public ClientManagerBuilder addWebOrigins(String... webOrigins) {
+            ClientRepresentation app = clientResource.toRepresentation();
+            if (app.getWebOrigins() == null) {
+                app.setWebOrigins(new LinkedList<String>());
+            }
+            for (String webOrigin : webOrigins) {
+                app.getWebOrigins().add(webOrigin);
+            }
+            clientResource.update(app);
+            return this;
+        }
+
+        public void removeWebOrigins(String... webOrigins) {
+            ClientRepresentation app = clientResource.toRepresentation();
+            for (String webOrigin : webOrigins) {
+                if (app.getWebOrigins() != null) {
+                    app.getWebOrigins().remove(webOrigin);
+                }
+            }
+            clientResource.update(app);
+        }
+
+        // Set valid values of "request_uri" parameter
+        public void setRequestUris(String... requestUris) {
+            ClientRepresentation app = clientResource.toRepresentation();
+            OIDCAdvancedConfigWrapper.fromClientRepresentation(app).setRequestUris(Arrays.asList(requestUris));
+            clientResource.update(app);
+        }
+
+        public UserRepresentation getServiceAccountUser() {
+            return clientResource.getServiceAccountUser();
         }
     }
 }

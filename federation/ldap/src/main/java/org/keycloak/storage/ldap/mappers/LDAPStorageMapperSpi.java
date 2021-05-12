@@ -17,8 +17,6 @@
 
 package org.keycloak.storage.ldap.mappers;
 
-import org.keycloak.credential.CredentialProvider;
-import org.keycloak.credential.CredentialProviderFactory;
 import org.keycloak.provider.Provider;
 import org.keycloak.provider.ProviderFactory;
 import org.keycloak.provider.Spi;
@@ -30,7 +28,7 @@ public class LDAPStorageMapperSpi implements Spi {
 
     @Override
     public boolean isInternal() {
-        return false;
+        return true;
     }
 
     @Override

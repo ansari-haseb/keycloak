@@ -16,6 +16,7 @@
  */
 package org.keycloak.client.admin.cli.util;
 
+import org.keycloak.OAuth2Constants;
 import org.keycloak.client.admin.cli.config.ConfigData;
 import org.keycloak.client.admin.cli.config.ConfigHandler;
 import org.keycloak.client.admin.cli.config.ConfigUpdateOperation;
@@ -44,7 +45,8 @@ public class ConfigUtil {
         ConfigUtil.handler = handler;
     }
 
-    public static void saveTokens(AccessTokenResponse tokens, String endpoint, String realm, String clientId, String signKey, Long sigExpiresAt, String secret) {
+    public static void saveTokens(AccessTokenResponse tokens, String endpoint, String realm, String clientId, String signKey, Long sigExpiresAt, String secret,
+                                  String grantTypeForAuthentication) {
         handler.saveMergeConfig(config -> {
             config.setServerUrl(endpoint);
             config.setRealm(realm);
@@ -55,16 +57,22 @@ public class ConfigUtil {
             realmConfig.setSigningToken(signKey);
             realmConfig.setSecret(secret);
             realmConfig.setExpiresAt(System.currentTimeMillis() + tokens.getExpiresIn() * 1000);
-            realmConfig.setRefreshExpiresAt(tokens.getRefreshExpiresIn() == 0 ?
-                    Long.MAX_VALUE : System.currentTimeMillis() + tokens.getRefreshExpiresIn() * 1000);
+            if (realmConfig.getRefreshToken() != null) {
+                realmConfig.setRefreshExpiresAt(tokens.getRefreshExpiresIn() == 0 ?
+                        Long.MAX_VALUE : System.currentTimeMillis() + tokens.getRefreshExpiresIn() * 1000);
+            }
             realmConfig.setSigExpiresAt(sigExpiresAt);
             realmConfig.setClientId(clientId);
+            realmConfig.setGrantTypeForAuthentication(grantTypeForAuthentication);
         });
     }
 
     public static void checkServerInfo(ConfigData config) {
-        if (config.getServerUrl() == null || config.getRealm() == null) {
-            throw new RuntimeException("No server or realm specified. Use --server, --realm, or '" + OsUtil.CMD + " config credentials'.");
+        if (config.getServerUrl() == null) {
+            throw new RuntimeException("No server specified. Use --server, or '" + OsUtil.CMD + " config credentials or connection'.");
+        }
+        if (config.getRealm() == null && config.getExternalToken() == null) {
+            throw new RuntimeException("No realm or token specified. Use --realm, --token, or '" + OsUtil.CMD + " config credentials'.");
         }
     }
 
@@ -73,8 +81,12 @@ public class ConfigUtil {
     }
 
     public static boolean credentialsAvailable(ConfigData config) {
-        return config.getServerUrl() != null && config.getRealm() != null
-                && config.sessionRealmConfigData() != null && config.sessionRealmConfigData().getRefreshToken() != null;
+        // Just supporting "client_credentials" grant type for the case when refresh token is missing
+        boolean credsAvailable = config.getServerUrl() != null && (config.getExternalToken() != null || (config.getRealm() != null
+                && config.sessionRealmConfigData() != null &&
+                (config.sessionRealmConfigData().getRefreshToken() != null || (config.sessionRealmConfigData().getToken() != null && OAuth2Constants.CLIENT_CREDENTIALS.equals(config.sessionRealmConfigData().getGrantTypeForAuthentication())))
+        ));
+        return credsAvailable;
     }
 
     public static ConfigData loadConfig() {

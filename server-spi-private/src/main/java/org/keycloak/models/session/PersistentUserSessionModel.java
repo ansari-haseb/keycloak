@@ -23,8 +23,9 @@ package org.keycloak.models.session;
 public class PersistentUserSessionModel {
 
     private String userSessionId;
+    private int started;
     private int lastSessionRefresh;
-
+    private boolean offline;
     private String data;
 
     public String getUserSessionId() {
@@ -35,6 +36,14 @@ public class PersistentUserSessionModel {
         this.userSessionId = userSessionId;
     }
 
+    public int getStarted() {
+        return started;
+    }
+
+    public void setStarted(int started) {
+        this.started = started;
+    }
+
     public int getLastSessionRefresh() {
         return lastSessionRefresh;
     }
@@ -43,6 +52,13 @@ public class PersistentUserSessionModel {
         this.lastSessionRefresh = lastSessionRefresh;
     }
 
+    public boolean isOffline() {
+        return offline;
+    }
+
+    public void setOffline(boolean offline) {
+        this.offline = offline;
+    }
 
     public String getData() {
         return data;

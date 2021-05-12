@@ -18,18 +18,19 @@ package org.keycloak.forms.login.freemarker.model;
 
 import org.keycloak.models.IdentityProviderModel;
 import org.keycloak.models.KeycloakSession;
+import org.keycloak.models.OrderedModel;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.utils.KeycloakModelUtils;
 import org.keycloak.services.Urls;
+import org.keycloak.theme.Theme;
 
-import javax.ws.rs.core.UriInfo;
+import java.io.IOException;
 import java.net.URI;
-import java.util.Comparator;
-import java.util.LinkedList;
+import java.net.URL;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
-import java.util.TreeSet;
+import java.util.Optional;
 
 /**
  * @author <a href="mailto:sthorger@redhat.com">Stian Thorgersen</a>
@@ -37,31 +38,34 @@ import java.util.TreeSet;
  */
 public class IdentityProviderBean {
 
+    public static OrderedModel.OrderedModelComparator<IdentityProvider> IDP_COMPARATOR_INSTANCE = new OrderedModel.OrderedModelComparator<>();
+
     private boolean displaySocial;
     private List<IdentityProvider> providers;
     private RealmModel realm;
     private final KeycloakSession session;
 
-    public IdentityProviderBean(RealmModel realm, KeycloakSession session, List<IdentityProviderModel> identityProviders, URI baseURI, UriInfo uriInfo) {
+    public IdentityProviderBean(RealmModel realm, KeycloakSession session, List<IdentityProviderModel> identityProviders, URI baseURI) {
         this.realm = realm;
         this.session = session;
 
         if (!identityProviders.isEmpty()) {
-            Set<IdentityProvider> orderedSet = new TreeSet<>(IdentityProviderComparator.INSTANCE);
+            List<IdentityProvider> orderedList = new ArrayList<>();
             for (IdentityProviderModel identityProvider : identityProviders) {
-                if (identityProvider.isEnabled()) {
-                    addIdentityProvider(orderedSet, realm, baseURI, identityProvider);
+                if (identityProvider.isEnabled() && !identityProvider.isLinkOnly()) {
+                    addIdentityProvider(orderedList, realm, baseURI, identityProvider);
                 }
             }
 
-            if (!orderedSet.isEmpty()) {
-                providers = new LinkedList<>(orderedSet);
+            if (!orderedList.isEmpty()) {
+                orderedList.sort(IDP_COMPARATOR_INSTANCE);
+                providers = orderedList;
                 displaySocial = true;
             }
         }
     }
 
-    private void addIdentityProvider(Set<IdentityProvider> orderedSet, RealmModel realm, URI baseURI, IdentityProviderModel identityProvider) {
+    private void addIdentityProvider(List<IdentityProvider> orderedSet, RealmModel realm, URI baseURI, IdentityProviderModel identityProvider) {
         String loginUrl = Urls.identityProviderAuthnRequest(baseURI, identityProvider.getAlias(), realm.getName()).toString();
         String displayName = KeycloakModelUtils.getIdentityProviderDisplayName(session, identityProvider);
         Map<String, String> config = identityProvider.getConfig();
@@ -69,8 +73,22 @@ public class IdentityProviderBean {
         if (!hideOnLoginPage) {
             orderedSet.add(new IdentityProvider(identityProvider.getAlias(),
                     displayName, identityProvider.getProviderId(), loginUrl,
-                    config != null ? config.get("guiOrder") : null));
+                    config != null ? config.get("guiOrder") : null, getLoginIconClasses(identityProvider.getAlias())));
         }
+    }
+
+    // Get icon classes defined in properties of current theme with key 'kcLogoIdP-{alias}'
+    // f.e. kcLogoIdP-github = fa fa-github
+    private String getLoginIconClasses(String alias) {
+        final String ICON_THEME_PREFIX = "kcLogoIdP-";
+
+        try {
+            Theme theme = session.theme().getTheme(Theme.Type.LOGIN);
+            return Optional.ofNullable(theme.getProperties().getProperty(ICON_THEME_PREFIX + alias)).orElse("");
+        } catch (IOException e) {
+            //NOP
+        }
+        return "";
     }
 
     public List<IdentityProvider> getProviders() {
@@ -81,20 +99,26 @@ public class IdentityProviderBean {
         return  realm.isRegistrationAllowed() || displaySocial;
     }
 
-    public static class IdentityProvider {
+    public static class IdentityProvider implements OrderedModel {
 
         private final String alias;
         private final String providerId; // This refer to providerType (facebook, google, etc.)
         private final String loginUrl;
         private final String guiOrder;
         private final String displayName;
+        private final String iconClasses;
 
         public IdentityProvider(String alias, String displayName, String providerId, String loginUrl, String guiOrder) {
+            this(alias, displayName, providerId, loginUrl, guiOrder, "");
+        }
+
+        public IdentityProvider(String alias, String displayName, String providerId, String loginUrl, String guiOrder, String iconClasses) {
             this.alias = alias;
             this.displayName = displayName;
             this.providerId = providerId;
             this.loginUrl = loginUrl;
             this.guiOrder = guiOrder;
+            this.iconClasses = iconClasses;
         }
 
         public String getAlias() {
@@ -109,6 +133,7 @@ public class IdentityProviderBean {
             return providerId;
         }
 
+        @Override
         public String getGuiOrder() {
             return guiOrder;
         }
@@ -116,39 +141,10 @@ public class IdentityProviderBean {
         public String getDisplayName() {
             return displayName;
         }
-    }
 
-    public static class IdentityProviderComparator implements Comparator<IdentityProvider> {
-
-        public static IdentityProviderComparator INSTANCE = new IdentityProviderComparator();
-
-        private IdentityProviderComparator() {
-
-        }
-
-        @Override
-        public int compare(IdentityProvider o1, IdentityProvider o2) {
-
-            int o1order = parseOrder(o1);
-            int o2order = parseOrder(o2);
-
-            if (o1order > o2order)
-                return 1;
-            else if (o1order < o2order)
-                return -1;
-
-            return 1;
-        }
-
-        private int parseOrder(IdentityProvider ip) {
-            if (ip != null && ip.getGuiOrder() != null) {
-                try {
-                    return Integer.parseInt(ip.getGuiOrder());
-                } catch (NumberFormatException e) {
-                    // ignore it and use defaulr
-                }
-            }
-            return 10000;
+        public String getIconClasses() {
+            return iconClasses;
         }
     }
+
 }

@@ -17,6 +17,8 @@
 package org.keycloak.admin.client.resource;
 
 import org.jboss.resteasy.annotations.cache.NoCache;
+import org.keycloak.representations.idm.authorization.PolicyEvaluationRequest;
+import org.keycloak.representations.idm.authorization.PolicyEvaluationResponse;
 import org.keycloak.representations.idm.authorization.PolicyProviderRepresentation;
 import org.keycloak.representations.idm.authorization.PolicyRepresentation;
 
@@ -26,6 +28,7 @@ import javax.ws.rs.POST;
 import javax.ws.rs.Path;
 import javax.ws.rs.PathParam;
 import javax.ws.rs.Produces;
+import javax.ws.rs.QueryParam;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import java.util.List;
@@ -43,14 +46,64 @@ public interface PoliciesResource {
     @Path("{id}")
     PolicyResource policy(@PathParam("id") String id);
 
+    @Path("/search")
+    @GET
+    @Produces(MediaType.APPLICATION_JSON)
+    @NoCache
+    PolicyRepresentation findByName(@QueryParam("name") String name);
+
     @GET
     @Produces(MediaType.APPLICATION_JSON)
     @NoCache
     List<PolicyRepresentation> policies();
+
+    @GET
+    @Produces(MediaType.APPLICATION_JSON)
+    @NoCache
+    List<PolicyRepresentation> policies(@QueryParam("policyId") String id,
+            @QueryParam("name") String name,
+            @QueryParam("type") String type,
+            @QueryParam("resource") String resource,
+            @QueryParam("scope") String scope,
+            @QueryParam("permission") Boolean permission,
+            @QueryParam("owner") String owner,
+            @QueryParam("fields") String fields,
+            @QueryParam("first") Integer firstResult,
+            @QueryParam("max") Integer maxResult);
 
     @Path("providers")
     @GET
     @Produces(MediaType.APPLICATION_JSON)
     @NoCache
     List<PolicyProviderRepresentation> policyProviders();
+
+    @POST
+    @Consumes("application/json")
+    @Produces("application/json")
+    @Path("evaluate")
+    PolicyEvaluationResponse evaluate(PolicyEvaluationRequest evaluationRequest);
+
+    @Path("role")
+    RolePoliciesResource role();
+
+    @Path("user")
+    UserPoliciesResource user();
+
+    @Path("js")
+    JSPoliciesResource js();
+
+    @Path("time")
+    TimePoliciesResource time();
+
+    @Path("aggregate")
+    AggregatePoliciesResource aggregate();
+
+    @Path("client")
+    ClientPoliciesResource client();
+
+    @Path("group")
+    GroupPoliciesResource group();
+
+    @Path("client-scope")
+    ClientScopePoliciesResource clientScope();
 }

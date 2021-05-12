@@ -111,8 +111,7 @@ public class FilterSessionStore implements AdapterSessionStore {
                     if (body == null) return new MultivaluedHashMap<String, String>();
 
                     String contentType = getContentType();
-                    contentType = contentType.toLowerCase();
-                    if (contentType.startsWith("application/x-www-form-urlencoded")) {
+                    if (contentType != null && contentType.toLowerCase().startsWith("application/x-www-form-urlencoded")) {
                         ByteArrayInputStream is = new ByteArrayInputStream(body);
                         try {
                             parameters = parseForm(is);
@@ -397,7 +396,7 @@ public class FilterSessionStore implements AdapterSessionStore {
             InputStream is = request.getInputStream();
 
             while ( (bytesRead = is.read(buffer) ) >= 0) {
-                os.write(buffer);
+                os.write(buffer, 0, bytesRead);
                 totalRead += bytesRead;
                 if (totalRead > maxBuffer) {
                     throw new RuntimeException("max buffer reached on a saved request");

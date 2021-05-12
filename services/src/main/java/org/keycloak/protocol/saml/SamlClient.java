@@ -17,6 +17,7 @@
 
 package org.keycloak.protocol.saml;
 
+import org.jboss.logging.Logger;
 import org.keycloak.models.ClientConfigResolver;
 import org.keycloak.models.ClientModel;
 import org.keycloak.saml.SignatureAlgorithm;
@@ -30,6 +31,8 @@ import org.keycloak.saml.common.util.XmlKeyInfoKeyNameTransformer;
  * @version $Revision: 1 $
  */
 public class SamlClient extends ClientConfigResolver {
+
+    protected static final Logger logger = Logger.getLogger(SamlClient.class);
 
     public static final XmlKeyInfoKeyNameTransformer DEFAULT_XML_KEY_INFO_KEY_NAME_TRANSFORMER = XmlKeyInfoKeyNameTransformer.KEY_ID;
 
@@ -111,8 +114,17 @@ public class SamlClient extends ClientConfigResolver {
         return "true".equals(resolveAttribute(SamlConfigAttributes.SAML_FORCE_NAME_ID_FORMAT_ATTRIBUTE));
 
     }
+
     public void setForceNameIDFormat(boolean val) {
         client.setAttribute(SamlConfigAttributes.SAML_FORCE_NAME_ID_FORMAT_ATTRIBUTE, Boolean.toString(val));
+    }
+
+    public boolean forceArtifactBinding(){
+        return "true".equals(resolveAttribute(SamlConfigAttributes.SAML_ARTIFACT_BINDING));
+    }
+
+    public void setForceArtifactBinding(boolean val) {
+        client.setAttribute(SamlConfigAttributes.SAML_ARTIFACT_BINDING, Boolean.toString(val));
     }
 
     public boolean requiresRealmSignature() {
@@ -139,16 +151,18 @@ public class SamlClient extends ClientConfigResolver {
         client.setAttribute(SamlConfigAttributes.SAML_FORCE_POST_BINDING, Boolean.toString(val));
 
     }
+
     public boolean requiresAssertionSignature() {
-       return "true".equals(resolveAttribute(SamlConfigAttributes.SAML_ASSERTION_SIGNATURE));
+        return "true".equals(resolveAttribute(SamlConfigAttributes.SAML_ASSERTION_SIGNATURE));
     }
 
     public void setRequiresAssertionSignature(boolean val) {
-        client.setAttribute(SamlConfigAttributes.SAML_ASSERTION_SIGNATURE   , Boolean.toString(val));
+        client.setAttribute(SamlConfigAttributes.SAML_ASSERTION_SIGNATURE, Boolean.toString(val));
 
     }
+
     public boolean requiresEncryption() {
-       return "true".equals(resolveAttribute(SamlConfigAttributes.SAML_ENCRYPT));
+        return "true".equals(resolveAttribute(SamlConfigAttributes.SAML_ENCRYPT));
     }
 
 
@@ -162,7 +176,7 @@ public class SamlClient extends ClientConfigResolver {
     }
 
     public void setRequiresClientSignature(boolean val) {
-        client.setAttribute(SamlConfigAttributes.SAML_CLIENT_SIGNATURE_ATTRIBUTE   , Boolean.toString(val));
+        client.setAttribute(SamlConfigAttributes.SAML_CLIENT_SIGNATURE_ATTRIBUTE, Boolean.toString(val));
 
     }
 
@@ -192,6 +206,7 @@ public class SamlClient extends ClientConfigResolver {
         client.setAttribute(SamlConfigAttributes.SAML_ENCRYPTION_CERTIFICATE_ATTRIBUTE, val);
 
     }
+
     public String getClientEncryptingPrivateKey() {
         return client.getAttribute(SamlConfigAttributes.SAML_ENCRYPTION_PRIVATE_KEY_ATTRIBUTE);
     }
@@ -203,19 +218,44 @@ public class SamlClient extends ClientConfigResolver {
 
     /**
      * Always returns non-{@code null} result.
+     *
      * @return Configured ransformer of {@link #DEFAULT_XML_KEY_INFO_KEY_NAME_TRANSFORMER} if not set.
      */
     public XmlKeyInfoKeyNameTransformer getXmlSigKeyInfoKeyNameTransformer() {
         return XmlKeyInfoKeyNameTransformer.from(
-          client.getAttribute(SamlConfigAttributes.SAML_SERVER_SIGNATURE_KEYINFO_KEY_NAME_TRANSFORMER),
-          DEFAULT_XML_KEY_INFO_KEY_NAME_TRANSFORMER);
+                client.getAttribute(SamlConfigAttributes.SAML_SERVER_SIGNATURE_KEYINFO_KEY_NAME_TRANSFORMER),
+                DEFAULT_XML_KEY_INFO_KEY_NAME_TRANSFORMER);
     }
 
     public void setXmlSigKeyInfoKeyNameTransformer(XmlKeyInfoKeyNameTransformer xmlSigKeyInfoKeyNameTransformer) {
         client.setAttribute(SamlConfigAttributes.SAML_SERVER_SIGNATURE_KEYINFO_KEY_NAME_TRANSFORMER,
-          xmlSigKeyInfoKeyNameTransformer == null
-            ? null
-            : xmlSigKeyInfoKeyNameTransformer.name());
+                xmlSigKeyInfoKeyNameTransformer == null
+                        ? null
+                        : xmlSigKeyInfoKeyNameTransformer.name());
     }
 
+    public boolean includeOneTimeUseCondition() {
+        return "true".equals(resolveAttribute(SamlConfigAttributes.SAML_ONETIMEUSE_CONDITION));
+    }
+
+    public void setIncludeOneTimeUseCondition(boolean val) {
+        client.setAttribute(SamlConfigAttributes.SAML_ONETIMEUSE_CONDITION, Boolean.toString(val));
+    }
+
+    public void setAssertionLifespan(int assertionLifespan) {
+        client.setAttribute(SamlConfigAttributes.SAML_ASSERTION_LIFESPAN, Integer.toString(assertionLifespan));
+    }
+
+    public int getAssertionLifespan() {
+        String value = client.getAttribute(SamlConfigAttributes.SAML_ASSERTION_LIFESPAN);
+        if (value == null || value.isEmpty()) {
+            return -1;
+        }
+        try {
+            return Integer.parseInt(value);
+        } catch (NumberFormatException e) {
+            logger.warnf("Invalid numeric value for saml attribute \"%s\": %s", SamlConfigAttributes.SAML_ASSERTION_LIFESPAN, value);
+            return -1;
+        }
+    }
 }

@@ -88,6 +88,11 @@ public interface AuthenticationManagementResource {
     @Consumes(MediaType.APPLICATION_JSON)
     Response copy(@PathParam("flowAlias") String flowAlias, Map<String, String> data);
 
+    @Path("/flows/{id}")
+    @PUT
+    @Consumes(MediaType.APPLICATION_JSON)
+    void updateFlow(@PathParam("id") String id, AuthenticationFlowRepresentation flow);
+
     @Path("/flows/{flowAlias}/executions/flow")
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
@@ -112,6 +117,11 @@ public interface AuthenticationManagementResource {
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
     Response addExecution(AuthenticationExecutionRepresentation model);
+
+    @Path("/executions/{executionId}")
+	@GET
+    @Produces(MediaType.APPLICATION_JSON)
+    AuthenticationExecutionRepresentation getExecution(final @PathParam("executionId") String executionId);
 
     @Path("/executions/{executionId}/raise-priority")
     @POST
@@ -158,6 +168,14 @@ public interface AuthenticationManagementResource {
     @Path("required-actions/{alias}")
     @DELETE
     void removeRequiredAction(@PathParam("alias") String alias);
+
+    @Path("required-actions/{alias}/raise-priority")
+    @POST
+    void raiseRequiredActionPriority(@PathParam("alias") String alias);
+
+    @Path("required-actions/{alias}/lower-priority")
+    @POST
+    void lowerRequiredActionPriority(@PathParam("alias") String alias);
 
     @Path("config-description/{providerId}")
     @GET

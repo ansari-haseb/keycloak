@@ -23,6 +23,7 @@ import org.keycloak.models.IdentityProviderModel;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.utils.DefaultAuthenticationFlows;
+import org.keycloak.representations.idm.RealmRepresentation;
 
 public class MigrateTo2_2_0 implements Migration {
     public static final ModelVersion VERSION = new ModelVersion("2.2.0");
@@ -34,19 +35,22 @@ public class MigrateTo2_2_0 implements Migration {
     }
 
     public void migrate(KeycloakSession session) {
-        for (RealmModel realm : session.realms().getRealms()) {
-            addIdentityProviderAuthenticator(realm);
-        }
+        session.realms().getRealmsStream().forEach(this::addIdentityProviderAuthenticator);
+    }
+
+    @Override
+    public void migrateImport(KeycloakSession session, RealmModel realm, RealmRepresentation rep, boolean skipUserDependent) {
+        addIdentityProviderAuthenticator(realm);
+
     }
 
     private void addIdentityProviderAuthenticator(RealmModel realm) {
-        String defaultProvider = null;
-        for (IdentityProviderModel provider : realm.getIdentityProviders()) {
-            if (provider.isEnabled() && provider.isAuthenticateByDefault()) {
-                defaultProvider = provider.getAlias();
-                break;
-            }
-        }
+        String defaultProvider = realm.getIdentityProvidersStream()
+                .filter(IdentityProviderModel::isEnabled)
+                .filter(IdentityProviderModel::isAuthenticateByDefault)
+                .map(IdentityProviderModel::getAlias)
+                .findFirst()
+                .orElse(null);
 
         DefaultAuthenticationFlows.addIdentityProviderAuthenticator(realm, defaultProvider);
     }

@@ -17,7 +17,10 @@
 
 package org.keycloak.adapters;
 
+import org.apache.http.HttpResponse;
 import org.apache.http.client.HttpClient;
+import org.apache.http.client.methods.HttpGet;
+import org.apache.http.util.EntityUtils;
 import org.jboss.logging.Logger;
 import org.keycloak.adapters.authentication.ClientCredentialsProvider;
 import org.keycloak.adapters.authorization.PolicyEnforcer;
@@ -27,14 +30,19 @@ import org.keycloak.common.enums.SslRequired;
 import org.keycloak.common.util.KeycloakUriBuilder;
 import org.keycloak.constants.ServiceUrlConstants;
 import org.keycloak.enums.TokenStore;
+import org.keycloak.protocol.oidc.representations.OIDCConfigurationRepresentation;
 import org.keycloak.representations.adapters.config.AdapterConfig;
+import org.keycloak.util.JsonSerialization;
 
 import java.net.URI;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.Callable;
 
 /**
  * @author <a href="mailto:bill@burkecentral.com">Bill Burke</a>
+ * @author <a href="mailto:brad.culley@spartasystems.com">Brad Culley</a>
+ * @author <a href="mailto:john.ament@spartasystems.com">John D. Ament</a>
  * @version $Revision: 1 $
  */
 public class KeycloakDeployment {
@@ -62,17 +70,20 @@ public class KeycloakDeployment {
     protected boolean publicClient;
     protected Map<String, Object> resourceCredentials = new HashMap<>();
     protected ClientCredentialsProvider clientAuthenticator;
-    protected HttpClient client;
+    protected Callable<HttpClient> client;
 
     protected String scope;
     protected SslRequired sslRequired = SslRequired.ALL;
+    protected int confidentialPort = -1;
     protected TokenStore tokenStore = TokenStore.SESSION;
+    protected String adapterStateCookiePath = "";
     protected String stateCookieName = "OAuth_Token_Request_State";
     protected boolean useResourceRoleMappings;
     protected boolean cors;
     protected int corsMaxAge = -1;
     protected String corsAllowedHeaders;
     protected String corsAllowedMethods;
+    protected String corsExposedHeaders;
     protected boolean exposeToken;
     protected boolean alwaysRefreshToken;
     protected boolean registerNodeAtStartup;
@@ -83,7 +94,16 @@ public class KeycloakDeployment {
     protected int tokenMinimumTimeToLive;
     protected int minTimeBetweenJwksRequests;
     protected int publicKeyCacheTtl;
-    private PolicyEnforcer policyEnforcer;
+    protected Callable<PolicyEnforcer> policyEnforcer;
+
+    // https://tools.ietf.org/html/rfc7636
+    protected boolean pkce = false;
+    protected boolean ignoreOAuthQueryParameter;
+
+    protected Map<String, String> redirectRewriteRules;
+
+    protected boolean delegateBearerErrorResponseSending = false;
+    protected boolean verifyTokenAudience = false;
 
     public KeycloakDeployment() {
     }
@@ -120,6 +140,17 @@ public class KeycloakDeployment {
         this.authServerBaseUrl = config.getAuthServerUrl();
         if (authServerBaseUrl == null) return;
 
+        authServerBaseUrl = KeycloakUriBuilder.fromUri(authServerBaseUrl).build().toString();
+
+        authUrl = null;
+        realmInfoUrl = null;
+        tokenUrl = null;
+        logoutUrl = null;
+        accountUrl = null;
+        registerNodeUrl = null;
+        unregisterNodeUrl = null;
+        jwksUrl = null;
+
         URI authServerUri = URI.create(authServerBaseUrl);
 
         if (authServerUri.getHost() == null) {
@@ -127,16 +158,53 @@ public class KeycloakDeployment {
         } else {
             // We have absolute URI in config
             relativeUrls = RelativeUrlsUsed.NEVER;
-            KeycloakUriBuilder serverBuilder = KeycloakUriBuilder.fromUri(authServerBaseUrl);
-            resolveUrls(serverBuilder);
         }
     }
 
-
-
     /**
-     * @param authUrlBuilder absolute URI
+     * URLs are loaded lazily when used. This allows adapter to be deployed prior to Keycloak server starting, and will
+     * also allow the adapter to retry loading config for each request until the Keycloak server is ready.
+     *
+     * In the future we may want to support reloading config at a configurable interval.
      */
+    protected void resolveUrls() {
+        if (realmInfoUrl == null) {
+            synchronized (this) {
+                if (realmInfoUrl == null) {
+                    KeycloakUriBuilder authUrlBuilder = KeycloakUriBuilder
+                        .fromUri(authServerBaseUrl);
+
+                    String discoveryUrl = authUrlBuilder.clone()
+                        .path(ServiceUrlConstants.DISCOVERY_URL).build(getRealm()).toString();
+                    try {
+                        log.debugv("Resolving URLs from {0}", discoveryUrl);
+
+                        OIDCConfigurationRepresentation config = getOidcConfiguration(discoveryUrl);
+
+                        authUrl = KeycloakUriBuilder.fromUri(config.getAuthorizationEndpoint());
+                        realmInfoUrl = config.getIssuer();
+
+                        tokenUrl = config.getTokenEndpoint();
+                        logoutUrl = KeycloakUriBuilder.fromUri(config.getLogoutEndpoint());
+                        accountUrl = KeycloakUriBuilder.fromUri(config.getIssuer()).path("/account")
+                            .build().toString();
+                        registerNodeUrl = authUrlBuilder.clone()
+                            .path(ServiceUrlConstants.CLIENTS_MANAGEMENT_REGISTER_NODE_PATH)
+                            .build(getRealm()).toString();
+                        unregisterNodeUrl = authUrlBuilder.clone()
+                            .path(ServiceUrlConstants.CLIENTS_MANAGEMENT_UNREGISTER_NODE_PATH)
+                            .build(getRealm()).toString();
+                        jwksUrl = config.getJwksUri();
+
+                        log.infov("Loaded URLs from {0}", discoveryUrl);
+                    } catch (Exception e) {
+                        log.warnv(e, "Failed to load URLs from {0}", discoveryUrl);
+                    }
+                }
+            }
+        }
+    }
+
     protected void resolveUrls(KeycloakUriBuilder authUrlBuilder) {
         if (log.isDebugEnabled()) {
             log.debug("resolveUrls");
@@ -154,39 +222,63 @@ public class KeycloakDeployment {
         jwksUrl = authUrlBuilder.clone().path(ServiceUrlConstants.JWKS_URL).build(getRealm()).toString();
     }
 
+    protected OIDCConfigurationRepresentation getOidcConfiguration(String discoveryUrl) throws Exception {
+        HttpGet request = new HttpGet(discoveryUrl);
+        request.addHeader("accept", "application/json");
+
+        try {
+            HttpResponse response = getClient().execute(request);
+            if (response.getStatusLine().getStatusCode() != 200) {
+                EntityUtils.consumeQuietly(response.getEntity());
+                throw new Exception(response.getStatusLine().getReasonPhrase());
+            }
+            return JsonSerialization.readValue(response.getEntity().getContent(), OIDCConfigurationRepresentation.class);
+        } finally {
+            request.releaseConnection();
+        }
+    }
+
     public RelativeUrlsUsed getRelativeUrls() {
         return relativeUrls;
     }
 
     public String getRealmInfoUrl() {
+        resolveUrls();
         return realmInfoUrl;
     }
 
     public KeycloakUriBuilder getAuthUrl() {
+        resolveUrls();
         return authUrl;
     }
 
     public String getTokenUrl() {
+        resolveUrls();
         return tokenUrl;
     }
 
     public KeycloakUriBuilder getLogoutUrl() {
+        resolveUrls();
         return logoutUrl;
     }
 
     public String getAccountUrl() {
+        resolveUrls();
         return accountUrl;
     }
 
     public String getRegisterNodeUrl() {
+        resolveUrls();
         return registerNodeUrl;
     }
 
     public String getUnregisterNodeUrl() {
+        resolveUrls();
         return unregisterNodeUrl;
     }
 
     public String getJwksUrl() {
+        resolveUrls();
         return jwksUrl;
     }
 
@@ -243,11 +335,20 @@ public class KeycloakDeployment {
     }
 
     public HttpClient getClient() {
-        return client;
+        try {
+            return client.call();
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 
-    public void setClient(HttpClient client) {
-        this.client = client;
+    public void setClient(final HttpClient client) {
+        this.client = new Callable<HttpClient>() {
+            @Override
+            public HttpClient call() {
+                return client;
+            }
+        };
     }
 
     public String getScope() {
@@ -266,12 +367,35 @@ public class KeycloakDeployment {
         this.sslRequired = sslRequired;
     }
 
+    public boolean isSSLEnabled() {
+        if (SslRequired.NONE == sslRequired) {
+            return false;
+        }
+        return true;
+    }
+
+    public int getConfidentialPort() {
+        return confidentialPort;
+    }
+
+    public void setConfidentialPort(int confidentialPort) {
+        this.confidentialPort = confidentialPort;
+    }
+
     public TokenStore getTokenStore() {
         return tokenStore;
     }
 
     public void setTokenStore(TokenStore tokenStore) {
         this.tokenStore = tokenStore;
+    }
+
+    public String getAdapterStateCookiePath() {
+        return adapterStateCookiePath;
+    }
+
+    public void setAdapterStateCookiePath(String adapterStateCookiePath) {
+        this.adapterStateCookiePath = adapterStateCookiePath;
     }
 
     public String getStateCookieName() {
@@ -320,6 +444,14 @@ public class KeycloakDeployment {
 
     public void setCorsAllowedMethods(String corsAllowedMethods) {
         this.corsAllowedMethods = corsAllowedMethods;
+    }
+
+    public String getCorsExposedHeaders() {
+        return corsExposedHeaders;
+    }
+
+    public void setCorsExposedHeaders(String corsExposedHeaders) {
+        this.corsExposedHeaders = corsExposedHeaders;
     }
 
     public boolean isExposeToken() {
@@ -407,11 +539,63 @@ public class KeycloakDeployment {
         this.publicKeyCacheTtl = publicKeyCacheTtl;
     }
 
-    public void setPolicyEnforcer(PolicyEnforcer policyEnforcer) {
+    public void setPolicyEnforcer(Callable<PolicyEnforcer> policyEnforcer) {
         this.policyEnforcer = policyEnforcer;
     }
 
     public PolicyEnforcer getPolicyEnforcer() {
-        return policyEnforcer;
+        if (policyEnforcer == null) {
+            return null;
+        }
+        try {
+            return policyEnforcer.call();
+        } catch (Exception cause) {
+            throw new RuntimeException("Failed to obtain policy enforcer", cause);
+        }
+    }
+
+    // https://tools.ietf.org/html/rfc7636
+    public boolean isPkce() {
+        return pkce;
+    }
+
+    public void setPkce(boolean pkce) {
+        this.pkce = pkce;
+    }
+
+    public void setIgnoreOAuthQueryParameter(boolean ignoreOAuthQueryParameter) {
+        this.ignoreOAuthQueryParameter = ignoreOAuthQueryParameter;
+    }
+
+    public boolean isOAuthQueryParameterEnabled() {
+        return !this.ignoreOAuthQueryParameter;
+    }
+
+    public Map<String, String> getRedirectRewriteRules() {
+        return redirectRewriteRules;
+    }
+
+    public void setRewriteRedirectRules(Map<String, String> redirectRewriteRules) {
+        this.redirectRewriteRules = redirectRewriteRules;
+    }
+
+    public boolean isDelegateBearerErrorResponseSending() {
+        return delegateBearerErrorResponseSending;
+    }
+
+    public void setDelegateBearerErrorResponseSending(boolean delegateBearerErrorResponseSending) {
+        this.delegateBearerErrorResponseSending = delegateBearerErrorResponseSending;
+    }
+
+    public boolean isVerifyTokenAudience() {
+        return verifyTokenAudience;
+    }
+
+    public void setVerifyTokenAudience(boolean verifyTokenAudience) {
+        this.verifyTokenAudience = verifyTokenAudience;
+    }
+
+    public void setClient(Callable<HttpClient> callable) {
+        client = callable;
     }
 }

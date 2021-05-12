@@ -17,38 +17,47 @@
 
 package org.keycloak.testsuite.federation.kerberos;
 
+import java.net.URI;
 import java.util.List;
-import java.util.Map;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 
+import javax.ws.rs.client.Entity;
+import javax.ws.rs.core.MultivaluedMap;
 import javax.ws.rs.core.Response;
 
 import org.junit.Assert;
 import org.junit.ClassRule;
 import org.junit.Test;
 import org.keycloak.common.constants.KerberosConstants;
-import org.keycloak.common.util.MultivaluedHashMap;
 import org.keycloak.federation.kerberos.CommonKerberosConfig;
 import org.keycloak.federation.kerberos.KerberosConfig;
 import org.keycloak.federation.kerberos.KerberosFederationProviderFactory;
-import org.keycloak.models.utils.ModelToRepresentation;
 import org.keycloak.representations.idm.ComponentRepresentation;
 import org.keycloak.representations.idm.UserRepresentation;
 import org.keycloak.storage.UserStorageProvider;
-import org.keycloak.storage.UserStorageProviderModel;
+import org.keycloak.testsuite.ActionURIUtils;
+import org.keycloak.testsuite.arquillian.annotation.UncaughtServerErrorExpected;
 import org.keycloak.testsuite.util.KerberosRule;
+import org.keycloak.testsuite.KerberosEmbeddedServer;
 
 /**
+ * Test for the KerberosFederationProvider (kerberos without LDAP integration)
+ *
  * @author <a href="mailto:mposolda@redhat.com">Marek Posolda</a>
  */
-public class KerberosStandaloneTest extends AbstractKerberosTest {
+public class KerberosStandaloneTest extends AbstractKerberosSingleRealmTest {
 
     private static final String PROVIDER_CONFIG_LOCATION = "classpath:kerberos/kerberos-standalone-connection.properties";
 
     @ClassRule
-    public static KerberosRule kerberosRule = new KerberosRule(PROVIDER_CONFIG_LOCATION);
+    public static KerberosRule kerberosRule = new KerberosRule(PROVIDER_CONFIG_LOCATION, KerberosEmbeddedServer.DEFAULT_KERBEROS_REALM);
+
+
+    @Override
+    protected KerberosRule getKerberosRule() {
+        return kerberosRule;
+    }
+
 
     @Override
     protected CommonKerberosConfig getKerberosConfig() {
@@ -57,40 +66,16 @@ public class KerberosStandaloneTest extends AbstractKerberosTest {
 
     @Override
     protected ComponentRepresentation getUserStorageConfiguration() {
-        Map<String,String> kerberosConfig = kerberosRule.getConfig();
-        MultivaluedHashMap<String, String> config = toComponentConfig(kerberosConfig);
-
-        UserStorageProviderModel model = new UserStorageProviderModel();
-        model.setLastSync(0);
-        model.setChangedSyncPeriod(-1);
-        model.setFullSyncPeriod(-1);
-        model.setName("kerberos-standalone");
-        model.setPriority(0);
-        model.setProviderId(KerberosFederationProviderFactory.PROVIDER_NAME);
-        model.setConfig(config);
-
-        ComponentRepresentation rep = ModelToRepresentation.toRepresentationWithoutConfig(model);
-        return rep;
+        return getUserStorageConfiguration("kerberos-standalone", KerberosFederationProviderFactory.PROVIDER_NAME);
     }
 
-
-    @Override
-    protected boolean isCaseSensitiveLogin() {
-        return kerberosRule.isCaseSensitiveLogin();
-    }
-
-
-    @Override
-    protected void setKrb5ConfPath() {
-        kerberosRule.setKrb5ConfPath(testingClient.testing());
-    }
 
     @Test
     public void spnegoLoginTest() throws Exception {
-        spnegoLoginTestImpl();
+        assertSuccessfulSpnegoLogin("hnelson", "hnelson", "secret");
 
-        // Assert user was imported and hasn't any required action on him. Profile info is synced from LDAP
-        assertUser("hnelson", "hnelson@keycloak.org", null, null, false);
+        // Assert user was imported and hasn't any required action on him. Profile info is NOT synced from LDAP. Just username is filled and email is "guessed"
+        assertUser("hnelson", "hnelson@" + kerberosRule.getConfig().get(KerberosConstants.KERBEROS_REALM).toLowerCase(), null, null, false);
     }
 
 
@@ -108,11 +93,11 @@ public class KerberosStandaloneTest extends AbstractKerberosTest {
         Assert.assertEquals(200, spnegoResponse.getStatus());
         String responseText = spnegoResponse.readEntity(String.class);
         Assert.assertTrue(responseText.contains("You need to update your user profile to activate your account."));
-        Assert.assertTrue(responseText.contains("hnelson@keycloak.org"));
+        Assert.assertTrue(responseText.contains("hnelson@" + kerberosRule.getConfig().get(KerberosConstants.KERBEROS_REALM).toLowerCase()));
         spnegoResponse.close();
 
         // Assert user was imported and has required action on him
-        assertUser("hnelson", "hnelson@keycloak.org", null, null, true);
+        assertUser("hnelson", "hnelson@" + kerberosRule.getConfig().get(KerberosConstants.KERBEROS_REALM).toLowerCase(), null, null, true);
 
         // Switch updateProfileOnFirstLogin to off
         kerberosProvider.getConfig().putSingle(KerberosConstants.UPDATE_PROFILE_FIRST_LOGIN, "false");
@@ -143,15 +128,21 @@ public class KerberosStandaloneTest extends AbstractKerberosTest {
         Response spnegoResponse = spnegoLogin("hnelson", "secret");
         String context = spnegoResponse.readEntity(String.class);
         spnegoResponse.close();
-        Pattern pattern = Pattern.compile("action=\"([^\"]+)\"");
-        Matcher m = pattern.matcher(context);
-        Assert.assertTrue(m.find());
-        String url = m.group(1);
-        driver.navigate().to(url);
-        Assert.assertTrue(loginPage.isCurrent());
-        loginPage.login("test-user@localhost", "password");
-        String pageSource = driver.getPageSource();
-        assertAuthenticationSuccess(driver.getCurrentUrl());
+
+        Assert.assertTrue(context.contains("Sign in to test"));
+
+        String url = ActionURIUtils.getActionURIFromPageSource(context);
+
+
+        // Follow login with HttpClient. Improve if needed
+        MultivaluedMap<String, String> params = new javax.ws.rs.core.MultivaluedHashMap<>();
+        params.putSingle("username", "test-user@localhost");
+        params.putSingle("password", "password");
+        Response response = client.target(url).request()
+                .post(Entity.form(params));
+
+        URI redirectUri = response.getLocation();
+        assertAuthenticationSuccess(redirectUri.toString());
 
         events.clear();
         testRealmResource().components().add(kerberosProvider);
@@ -166,6 +157,7 @@ public class KerberosStandaloneTest extends AbstractKerberosTest {
      * @throws Exception
      */
     @Test
+    @UncaughtServerErrorExpected
     public void handleUnknownKerberosRealm() throws Exception {
         // Switch kerberos realm to "unavailable"
         List<ComponentRepresentation> reps = testRealmResource().components().query("test", UserStorageProvider.class.getName());

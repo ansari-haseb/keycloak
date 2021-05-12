@@ -17,14 +17,22 @@
 
 package org.keycloak.models.cache.infinispan.events;
 
+import java.util.Objects;
 import java.util.Set;
 
 import org.keycloak.models.GroupModel;
 import org.keycloak.models.cache.infinispan.RealmCacheManager;
+import java.io.IOException;
+import java.io.ObjectInput;
+import java.io.ObjectOutput;
+import org.infinispan.commons.marshall.Externalizer;
+import org.infinispan.commons.marshall.MarshallUtil;
+import org.infinispan.commons.marshall.SerializeWith;
 
 /**
  * @author <a href="mailto:mposolda@redhat.com">Marek Posolda</a>
  */
+@SerializeWith(GroupMovedEvent.ExternalizerImpl.class)
 public class GroupMovedEvent extends InvalidationEvent implements RealmCacheInvalidationEvent {
 
     private String groupId;
@@ -59,6 +67,55 @@ public class GroupMovedEvent extends InvalidationEvent implements RealmCacheInva
         }
         if (oldParentId != null) {
             invalidations.add(oldParentId);
+        }
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        if (!super.equals(o)) return false;
+        GroupMovedEvent that = (GroupMovedEvent) o;
+        return Objects.equals(groupId, that.groupId) && Objects.equals(newParentId, that.newParentId) && Objects.equals(oldParentId, that.oldParentId) && Objects.equals(realmId, that.realmId);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(super.hashCode(), groupId, newParentId, oldParentId, realmId);
+    }
+
+    public static class ExternalizerImpl implements Externalizer<GroupMovedEvent> {
+
+        private static final int VERSION_1 = 1;
+
+        @Override
+        public void writeObject(ObjectOutput output, GroupMovedEvent obj) throws IOException {
+            output.writeByte(VERSION_1);
+
+            MarshallUtil.marshallString(obj.groupId, output);
+            MarshallUtil.marshallString(obj.newParentId, output);
+            MarshallUtil.marshallString(obj.oldParentId, output);
+            MarshallUtil.marshallString(obj.realmId, output);
+        }
+
+        @Override
+        public GroupMovedEvent readObject(ObjectInput input) throws IOException, ClassNotFoundException {
+            switch (input.readByte()) {
+                case VERSION_1:
+                    return readObjectVersion1(input);
+                default:
+                    throw new IOException("Unknown version");
+            }
+        }
+
+        public GroupMovedEvent readObjectVersion1(ObjectInput input) throws IOException, ClassNotFoundException {
+            GroupMovedEvent res = new GroupMovedEvent();
+            res.groupId = MarshallUtil.unmarshallString(input);
+            res.newParentId = MarshallUtil.unmarshallString(input);
+            res.oldParentId = MarshallUtil.unmarshallString(input);
+            res.realmId = MarshallUtil.unmarshallString(input);
+
+            return res;
         }
     }
 }

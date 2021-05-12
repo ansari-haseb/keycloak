@@ -16,19 +16,19 @@
  */
 package org.keycloak.testsuite.auth.page.login;
 
-import org.keycloak.testsuite.auth.page.AuthRealm;
+import org.keycloak.testsuite.util.URLUtils;
 import org.openqa.selenium.WebElement;
 import org.openqa.selenium.support.FindBy;
 
 import javax.ws.rs.core.UriBuilder;
 
-import static org.keycloak.testsuite.util.WaitUtils.waitUntilElement;
+import static org.keycloak.testsuite.util.UIUtils.clickLink;
 
 /**
  *
  * @author tkyjovsk
  */
-public class LoginActions extends AuthRealm {
+public class LoginActions extends LoginBase {
 
     @Override
     public UriBuilder createUriBuilder() {
@@ -39,23 +39,19 @@ public class LoginActions extends AuthRealm {
     @FindBy(css = "input[type='submit']")
     private WebElement submitButton;
 
-    @FindBy(css = "div[id='kc-form-options'] span a")
-    private WebElement backToLoginForm;
-
-    @FindBy(xpath = "//span[@class='kc-feedback-text' and string-length(text())>1]")
-    private WebElement feedbackText;
-    
-    public String getFeedbackText() {
-        waitUntilElement(feedbackText, "Feedback message should be present").is().visible();
-        return feedbackText.getText();
-    }
-    
-    public void backToLoginPage() {
-        backToLoginForm.click();
-    }
+    @FindBy(css = "button[type='submit']")
+    private WebElement cancelButton;
 
     public void submit() {
-        submitButton.click();
+        clickLink(submitButton);
     }
 
+    public void cancel() {
+        clickLink(cancelButton);
+    }
+
+    @Override
+    public boolean isCurrent() {
+        return URLUtils.currentUrlStartsWith(toString() + "?"); // ignore the query string
+    }
 }

@@ -20,11 +20,16 @@ package org.keycloak.models;
 import java.util.Map;
 import java.util.Set;
 
+import org.keycloak.common.util.ObjectUtil;
+import org.keycloak.provider.ProviderEvent;
+import org.keycloak.provider.ProviderEventManager;
+import org.keycloak.storage.SearchableModelField;
+
 /**
  * @author <a href="mailto:bill@burkecentral.com">Bill Burke</a>
  * @version $Revision: 1 $
  */
-public interface ClientModel extends RoleContainerModel,  ProtocolMapperContainerModel, ScopeContainerModel {
+public interface ClientModel extends ClientScopeModel, RoleContainerModel,  ProtocolMapperContainerModel, ScopeContainerModel {
 
     // COMMON ATTRIBUTES
 
@@ -32,10 +37,59 @@ public interface ClientModel extends RoleContainerModel,  ProtocolMapperContaine
     String PUBLIC_KEY = "publicKey";
     String X509CERTIFICATE = "X509Certificate";
 
+    public static class SearchableFields {
+        public static final SearchableModelField<ClientModel> ID                 = new SearchableModelField<>("id", String.class);
+        public static final SearchableModelField<ClientModel> REALM_ID           = new SearchableModelField<>("realmId", String.class);
+        public static final SearchableModelField<ClientModel> CLIENT_ID          = new SearchableModelField<>("clientId", String.class);
+        public static final SearchableModelField<ClientModel> SCOPE_MAPPING_ROLE = new SearchableModelField<>("scopeMappingRole", String.class);
+    }
+
+    interface ClientCreationEvent extends ProviderEvent {
+        ClientModel getCreatedClient();
+    }
+
+    // Called also during client creation after client is fully initialized (including all attributes etc)
+    interface ClientUpdatedEvent extends ProviderEvent {
+        ClientModel getUpdatedClient();
+        KeycloakSession getKeycloakSession();
+    }
+
+    interface ClientRemovedEvent extends ProviderEvent {
+        ClientModel getClient();
+        KeycloakSession getKeycloakSession();
+    }
+
+    interface ClientProtocolUpdatedEvent extends ProviderEvent {
+        ClientModel getClient();
+    }
+
+    /**
+     * Notifies other providers that this client has been updated.
+     * <p>
+     * After a client is updated, providers can register for {@link ClientUpdatedEvent}.
+     * The setters in this model do not send an update for individual updates of the model.
+     * This method is here to allow for sending this event for this client,
+     * allowsing for to group multiple changes of a client and signal that
+     * all the changes in this client have been performed.
+     *
+     * @deprecated Do not use, to be removed
+     *
+     * @see ProviderEvent
+     * @see ProviderEventManager
+     * @see ClientUpdatedEvent
+     */
     void updateClient();
 
+    /**
+     * Returns client internal ID (UUID).
+     * @return
+     */
     String getId();
 
+    /**
+     * Returns client ID as defined by the user.
+     * @return
+     */
     String getClientId();
 
     void setClientId(String clientId);
@@ -51,6 +105,10 @@ public interface ClientModel extends RoleContainerModel,  ProtocolMapperContaine
     boolean isEnabled();
 
     void setEnabled(boolean enabled);
+
+    boolean isAlwaysDisplayInConsole();
+
+    void setAlwaysDisplayInConsole(boolean alwaysDisplayInConsole);
 
     boolean isSurrogateAuthRequired();
 
@@ -84,7 +142,6 @@ public interface ClientModel extends RoleContainerModel,  ProtocolMapperContaine
 
     void setBaseUrl(String url);
 
-
     boolean isBearerOnly();
     void setBearerOnly(boolean only);
 
@@ -110,8 +167,23 @@ public interface ClientModel extends RoleContainerModel,  ProtocolMapperContaine
     String getAttribute(String name);
     Map<String, String> getAttributes();
 
+    /**
+     * Get authentication flow binding override for this client.  Allows client to override an authentication flow binding.
+     *
+     * @param binding examples are "browser", "direct_grant"
+     *
+     * @return
+     */
+    String getAuthenticationFlowBindingOverride(String binding);
+    Map<String, String> getAuthenticationFlowBindingOverrides();
+    void removeAuthenticationFlowBindingOverride(String binding);
+    void setAuthenticationFlowBindingOverride(String binding, String flowId);
+
     boolean isFrontchannelLogout();
     void setFrontchannelLogout(boolean flag);
+
+    boolean isFullScopeAllowed();
+    void setFullScopeAllowed(boolean value);
 
 
     boolean isPublicClient();
@@ -134,14 +206,41 @@ public interface ClientModel extends RoleContainerModel,  ProtocolMapperContaine
 
     RealmModel getRealm();
 
-    ClientTemplateModel getClientTemplate();
-    void setClientTemplate(ClientTemplateModel template);
-    boolean useTemplateScope();
-    void setUseTemplateScope(boolean flag);
-    boolean useTemplateMappers();
-    void setUseTemplateMappers(boolean flag);
-    boolean useTemplateConfig();
-    void setUseTemplateConfig(boolean flag);
+    /**
+     * Add clientScope with this client. Add it as default scope (if parameter 'defaultScope' is true) or optional scope (if parameter 'defaultScope' is false)
+     * @param clientScope
+     * @param defaultScope
+     */
+    void addClientScope(ClientScopeModel clientScope, boolean defaultScope);
+
+    /**
+     * Add clientScopes with this client. Add as default scopes (if parameter 'defaultScope' is true) or optional scopes (if parameter 'defaultScope' is false)
+     * @param clientScopes
+     * @param defaultScope
+     */
+    void addClientScopes(Set<ClientScopeModel> clientScopes, boolean defaultScope);
+
+    void removeClientScope(ClientScopeModel clientScope);
+
+    /**
+     * Return all default scopes (if 'defaultScope' is true) or all optional scopes (if 'defaultScope' is false) linked with this client
+     *
+     * @param defaultScope
+     * @return map where key is the name of the clientScope, value is particular clientScope. Returns empty map if no scopes linked (never returns null).
+     */
+    Map<String, ClientScopeModel> getClientScopes(boolean defaultScope);
+
+    /**
+     * <p>Returns a {@link ClientScopeModel} associated with this client.
+     *
+     * <p>This method is used as a fallback in order to let clients to resolve a {@code scope} dynamically which is not listed as default or optional scope when calling {@link #getClientScopes(boolean, boolean)}.
+     *
+     * @param scope the scope name
+     * @return the client scope
+     */
+    default ClientScopeModel getDynamicClientScope(String scope) {
+        return null;
+    }
 
     /**
      * Time in seconds since epoc
@@ -163,4 +262,22 @@ public interface ClientModel extends RoleContainerModel,  ProtocolMapperContaine
     void registerNode(String nodeHost, int registrationTime);
 
     void unregisterNode(String nodeHost);
+
+
+    // Clients are not displayed on consent screen by default
+    @Override
+    default boolean isDisplayOnConsentScreen() {
+        String displayVal = getAttribute(DISPLAY_ON_CONSENT_SCREEN);
+        return displayVal==null ? false : Boolean.parseBoolean(displayVal);
+    }
+
+    // Fallback to name or clientId if consentScreenText attribute is null
+    @Override
+    default String getConsentScreenText() {
+        String consentScreenText = ClientScopeModel.super.getConsentScreenText();
+        if (ObjectUtil.isBlank(consentScreenText)) {
+            consentScreenText = getClientId();
+        }
+        return consentScreenText;
+    }
 }

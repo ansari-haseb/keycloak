@@ -17,7 +17,9 @@
 
 package org.keycloak.protocol.saml.installation;
 
+import org.jboss.logging.Logger;
 import org.keycloak.Config;
+import org.keycloak.dom.saml.v2.metadata.KeyTypes;
 import org.keycloak.models.ClientModel;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.KeycloakSessionFactory;
@@ -28,26 +30,73 @@ import org.keycloak.protocol.saml.SamlProtocol;
 import org.keycloak.saml.SPMetadataDescriptor;
 import org.keycloak.saml.common.constants.JBossSAMLURIConstants;
 
+import org.w3c.dom.Element;
+
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import java.net.URI;
-import org.keycloak.dom.saml.v2.metadata.KeyTypes;
+import java.util.Arrays;
+
 
 /**
  * @author <a href="mailto:bill@burkecentral.com">Bill Burke</a>
  * @version $Revision: 1 $
  */
 public class SamlSPDescriptorClientInstallation implements ClientInstallationProvider {
+
+    protected static final Logger logger = Logger.getLogger(SamlSPDescriptorClientInstallation.class);
+
+    public static final String SAML_CLIENT_INSTALATION_SP_DESCRIPTOR = "saml-sp-descriptor";
+    private static final String FALLBACK_ERROR_URL_STRING = "ERROR:ENDPOINT_NOT_SET";
+
     public static String getSPDescriptorForClient(ClientModel client) {
-        SamlClient samlClient = new SamlClient(client);
-        String assertionUrl = client.getAttribute(SamlProtocol.SAML_ASSERTION_CONSUMER_URL_POST_ATTRIBUTE);
-        if (assertionUrl == null) assertionUrl = client.getManagementUrl();
-        String logoutUrl = client.getAttribute(SamlProtocol.SAML_SINGLE_LOGOUT_SERVICE_URL_POST_ATTRIBUTE);
-        if (logoutUrl == null) logoutUrl = client.getManagementUrl();
-        String nameIdFormat = samlClient.getNameIDFormat();
-        if (nameIdFormat == null) nameIdFormat = SamlProtocol.SAML_DEFAULT_NAMEID_FORMAT;
-        String spCertificate = SPMetadataDescriptor.xmlKeyInfo("        ", null, samlClient.getClientSigningCertificate(), KeyTypes.SIGNING.value(), true);
-        return SPMetadataDescriptor.getSPDescriptor(JBossSAMLURIConstants.SAML_HTTP_POST_BINDING.get(), assertionUrl, logoutUrl, samlClient.requiresClientSignature(), client.getClientId(), nameIdFormat, spCertificate);
+        try {
+            SamlClient samlClient = new SamlClient(client);
+            String assertionUrl;
+            String logoutUrl;
+            URI loginBinding;
+            URI logoutBinding = null;
+
+            if (samlClient.forcePostBinding()) {
+                assertionUrl = client.getAttribute(SamlProtocol.SAML_ASSERTION_CONSUMER_URL_POST_ATTRIBUTE);
+                logoutUrl = client.getAttribute(SamlProtocol.SAML_SINGLE_LOGOUT_SERVICE_URL_POST_ATTRIBUTE);
+                loginBinding = JBossSAMLURIConstants.SAML_HTTP_POST_BINDING.getUri();
+            } else { //redirect binding
+                assertionUrl = client.getAttribute(SamlProtocol.SAML_ASSERTION_CONSUMER_URL_REDIRECT_ATTRIBUTE);
+                logoutUrl = client.getAttribute(SamlProtocol.SAML_SINGLE_LOGOUT_SERVICE_URL_REDIRECT_ATTRIBUTE);
+                loginBinding = JBossSAMLURIConstants.SAML_HTTP_REDIRECT_BINDING.getUri();
+            }
+            
+            if (samlClient.forceArtifactBinding()) {
+                if (client.getAttribute(SamlProtocol.SAML_SINGLE_LOGOUT_SERVICE_URL_ARTIFACT_ATTRIBUTE) != null) {
+                    logoutBinding = JBossSAMLURIConstants.SAML_HTTP_ARTIFACT_BINDING.getUri();
+                    logoutUrl = client.getAttribute(SamlProtocol.SAML_SINGLE_LOGOUT_SERVICE_URL_ARTIFACT_ATTRIBUTE);
+                } else {
+                    logoutBinding = loginBinding;
+                }
+                
+                assertionUrl = client.getAttribute(SamlProtocol.SAML_ASSERTION_CONSUMER_URL_ARTIFACT_ATTRIBUTE);
+                loginBinding = JBossSAMLURIConstants.SAML_HTTP_ARTIFACT_BINDING.getUri();
+
+            }
+
+            if (assertionUrl == null || assertionUrl.trim().isEmpty()) assertionUrl = client.getManagementUrl();
+            if (assertionUrl == null || assertionUrl.trim().isEmpty()) assertionUrl = FALLBACK_ERROR_URL_STRING;
+            if (logoutUrl == null || logoutUrl.trim().isEmpty()) logoutUrl = client.getManagementUrl();
+            if (logoutUrl == null || logoutUrl.trim().isEmpty()) logoutUrl = FALLBACK_ERROR_URL_STRING;
+            if (logoutBinding == null) logoutBinding = loginBinding;
+
+            String nameIdFormat = samlClient.getNameIDFormat();
+            if (nameIdFormat == null) nameIdFormat = SamlProtocol.SAML_DEFAULT_NAMEID_FORMAT;
+            Element spCertificate = SPMetadataDescriptor.buildKeyInfoElement(null, samlClient.getClientSigningCertificate());
+            Element encCertificate = SPMetadataDescriptor.buildKeyInfoElement(null, samlClient.getClientEncryptingCertificate());
+            return SPMetadataDescriptor.getSPDescriptor(loginBinding, logoutBinding, new URI(assertionUrl), new URI(logoutUrl), samlClient.requiresClientSignature(),
+                    samlClient.requiresAssertionSignature(), samlClient.requiresEncryption(),
+                    client.getClientId(), nameIdFormat, Arrays.asList(spCertificate), Arrays.asList(encCertificate));
+        } catch (Exception ex) {
+            logger.error("Cannot generate SP metadata", ex);
+            return "";
+        }
     }
 
     @Override
@@ -107,6 +156,6 @@ public class SamlSPDescriptorClientInstallation implements ClientInstallationPro
 
     @Override
     public String getId() {
-        return "saml-sp-descriptor";
+        return SAML_CLIENT_INSTALATION_SP_DESCRIPTOR;
     }
 }

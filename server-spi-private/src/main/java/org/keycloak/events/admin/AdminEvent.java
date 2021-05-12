@@ -31,7 +31,7 @@ public class AdminEvent {
     /**
      * The resource type an AdminEvent was triggered for.
      */
-    private ResourceType resourceType;
+    private String resourceType;
 
     private OperationType operationType;
 
@@ -40,6 +40,20 @@ public class AdminEvent {
     private String representation;
 
     private String error;
+    
+    public AdminEvent() {}
+    public AdminEvent(AdminEvent toCopy) {
+        this.time = toCopy.getTime();
+        this.realmId = toCopy.getRealmId();
+        this.authDetails = new AuthDetails(toCopy.getAuthDetails());
+        this.resourceType = toCopy.getResourceTypeAsString();
+        this.operationType = toCopy.getOperationType();
+        this.resourcePath = toCopy.getResourcePath();
+        this.representation = toCopy.getRepresentation();
+        this.error = toCopy.getError();
+    }
+
+
     
     /**
      * Returns the time of the event
@@ -144,10 +158,34 @@ public class AdminEvent {
      * @return
      */
     public ResourceType getResourceType() {
-        return resourceType;
+        if (resourceType == null) {
+          return null;
+        }
+        try {
+            return ResourceType.valueOf(resourceType);
+        }
+        catch (IllegalArgumentException e) {
+            return ResourceType.CUSTOM;
+        }
     }
 
     public void setResourceType(ResourceType resourceType) {
+        this.resourceType = resourceType == null ? null  : resourceType.toString();
+    }
+
+    /**
+     * Returns the type as string. Custom resource types with values different from {@link ResourceType} are possible. In this case {@link #getResourceType()} returns <code>CUSTOM</code>.
+     *
+     * @return
+     */
+    public String getResourceTypeAsString() {
+        return resourceType;
+    }
+
+    /**
+     * Setter for custom resource types with values different from {@link ResourceType}.
+     */
+    public void setResourceTypeAsString(String resourceType) {
         this.resourceType = resourceType;
     }
 }

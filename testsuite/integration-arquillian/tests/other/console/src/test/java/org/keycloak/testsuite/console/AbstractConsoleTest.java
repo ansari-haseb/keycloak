@@ -26,11 +26,13 @@ import org.keycloak.testsuite.console.page.AdminConsole;
 import org.keycloak.testsuite.console.page.AdminConsoleRealm;
 import org.keycloak.testsuite.console.page.AdminConsoleRealm.ConfigureMenu;
 import org.keycloak.testsuite.console.page.AdminConsoleRealm.ManageMenu;
-import org.keycloak.testsuite.console.page.fragment.AdminConsoleAlert;
 import org.keycloak.testsuite.console.page.fragment.ModalDialog;
+import org.keycloak.testsuite.page.PatternFlyClosableAlert;
+import org.openqa.selenium.safari.SafariDriver;
 import org.openqa.selenium.support.FindBy;
 
-import static org.junit.Assert.assertTrue;
+import static org.keycloak.testsuite.admin.Users.setPasswordFor;
+import static org.keycloak.testsuite.auth.page.AuthRealm.ADMIN;
 import static org.keycloak.testsuite.auth.page.AuthRealm.TEST;
 import static org.keycloak.testsuite.util.URLAssert.assertCurrentUrlStartsWith;
 import static org.keycloak.testsuite.util.URLAssert.assertCurrentUrlStartsWithLoginUrlOf;
@@ -53,8 +55,10 @@ public abstract class AbstractConsoleTest extends AbstractAuthTest {
     @FindBy(xpath = "//div[@class='modal-dialog']")
     protected ModalDialog modalDialog;
 
-    @FindBy(className = "alert")
-    protected AdminConsoleAlert alert;
+    @Page
+    protected PatternFlyClosableAlert alert;
+
+    protected UserRepresentation adminUser;
 
     protected boolean adminLoggedIn = false;
 
@@ -67,13 +71,33 @@ public abstract class AbstractConsoleTest extends AbstractAuthTest {
 
     @Before
     public void beforeConsoleTest() {
+        // Safari driver seemingly doesn't comply with WebDriver specs.
+        // driver.manage().deleteAllCookies() seems to delete all cookies regardless the path, i.e. when we delete cookies
+        // in the 'test' realm, they're deleted in 'master' as well resulting in admin user to be logged out.
+        if (driver instanceof SafariDriver) {
+            testContext.setAdminLoggedIn(false);
+        }
+
+        adminUser = createAdminUserRepresentation();
+
         createTestUserWithAdminClient();
         if (!testContext.isAdminLoggedIn()) {
             loginToMasterRealmAdminConsoleAs(adminUser);
             testContext.setAdminLoggedIn(true);
-        } else {
-//            adminConsoleRealmPage.navigateTo();
         }
+    }
+
+    private UserRepresentation createAdminUserRepresentation() {
+        UserRepresentation adminUserRep = new UserRepresentation();
+        adminUserRep.setUsername(ADMIN);
+        setPasswordFor(adminUserRep, ADMIN);
+        return adminUserRep;
+    }
+
+    // TODO: Fix the tests so this workaround is not necessary
+    @Override
+    protected boolean isImportAfterEachMethod() {
+        return true;
     }
 
     public void loginToMasterRealmAdminConsoleAs(UserRepresentation user) {
@@ -107,13 +131,15 @@ public abstract class AbstractConsoleTest extends AbstractAuthTest {
     }
 
     public void assertAlertSuccess() {
-        assertTrue("Alert is not success", alert.isSuccess());
-        alert.close();
+        alert.assertSuccess();
     }
 
     public void assertAlertDanger() {
-        assertTrue("Alert is not danger", alert.isDanger());
-        alert.close();
+        alert.assertDanger();
+    }
+    
+    public void assertAlertWarning() {
+        alert.assertWarning();
     }
 
     public ConfigureMenu configure() {

@@ -23,6 +23,7 @@ import org.keycloak.json.StringListMapDeserializer;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
+import java.util.ArrayList;
 import java.util.Map;
 import java.util.Set;
 
@@ -55,6 +56,7 @@ public class UserRepresentation {
     protected List<String> realmRoles;
     protected Map<String, List<String>> clientRoles;
     protected List<UserConsentRepresentation> clientConsents;
+    protected Integer notBefore;
 
     @Deprecated
     protected Map<String, List<String>> applicationRoles;
@@ -62,6 +64,7 @@ public class UserRepresentation {
     protected List<SocialLinkRepresentation> socialLinks;
 
     protected List<String> groups;
+    private Map<String, Boolean> access;
 
     public String getSelf() {
         return self;
@@ -154,9 +157,13 @@ public class UserRepresentation {
     }
 
     public UserRepresentation singleAttribute(String name, String value) {
-        if (this.attributes == null) attributes = new HashMap<>();
-        attributes.put(name, Arrays.asList(value));
+        if (this.attributes == null) this.attributes=new HashMap<>();
+        attributes.put(name, (value == null ? new ArrayList<String>() : Arrays.asList(value)));
         return this;
+    }
+
+    public String firstAttribute(String key) {
+        return this.attributes == null ? null : this.attributes.get(key) == null ? null : this.attributes.get(key).isEmpty()? null : this.attributes.get(key).get(0);
     }
 
     public List<CredentialRepresentation> getCredentials() {
@@ -215,6 +222,14 @@ public class UserRepresentation {
         this.clientConsents = clientConsents;
     }
 
+    public Integer getNotBefore() {
+        return notBefore;
+    }
+
+    public void setNotBefore(Integer notBefore) {
+        this.notBefore = notBefore;
+    }
+
     @Deprecated
     public Map<String, List<String>> getApplicationRoles() {
         return applicationRoles;
@@ -263,5 +278,13 @@ public class UserRepresentation {
 
     public void setDisableableCredentialTypes(Set<String> disableableCredentialTypes) {
         this.disableableCredentialTypes = disableableCredentialTypes;
+    }
+
+    public Map<String, Boolean> getAccess() {
+        return access;
+    }
+
+    public void setAccess(Map<String, Boolean> access) {
+        this.access = access;
     }
 }

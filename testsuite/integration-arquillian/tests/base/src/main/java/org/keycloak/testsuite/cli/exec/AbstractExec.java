@@ -1,5 +1,6 @@
 package org.keycloak.testsuite.cli.exec;
 
+import org.keycloak.client.admin.cli.util.OsUtil;
 import org.keycloak.testsuite.cli.OsArch;
 import org.keycloak.testsuite.cli.OsUtils;
 
@@ -14,6 +15,7 @@ import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 /**
  * @author <a href="mailto:mstrukel@redhat.com">Marko Strukelj</a>
@@ -32,7 +34,7 @@ public abstract class AbstractExec {
 
     private boolean logStreams = Boolean.valueOf(System.getProperty("cli.log.output", "true"));
 
-    protected boolean dumpStreams;
+    protected boolean dumpStreams = true;
 
     protected String workDir = WORK_DIR;
 
@@ -176,12 +178,17 @@ public abstract class AbstractExec {
         return new String(stdout.toByteArray());
     }
 
+
     public InputStream stderr() {
         return new ByteArrayInputStream(stderr.toByteArray());
     }
 
     public List<String> stderrLines() {
-        return parseStreamAsLines(new ByteArrayInputStream(stderr.toByteArray()));
+        return filterAgentsOutput(parseStreamAsLines(new ByteArrayInputStream(stderr.toByteArray())));
+    }
+
+    public static List<String> filterAgentsOutput(List<String> lines) {
+        return lines.stream().filter(line -> !line.contains("JAVA_TOOL_OPTIONS")).collect(Collectors.toList());
     }
 
     public String stderrString() {
@@ -219,12 +226,32 @@ public abstract class AbstractExec {
         throw new RuntimeException("Timed while waiting for content to appear in stdout");
     }
 
+    public void waitForStderr(String content) {
+        long start = System.currentTimeMillis();
+        while (System.currentTimeMillis() - start < waitTimeout) {
+            if (stderrString().indexOf(content) != -1) {
+                return;
+            }
+            try {
+                Thread.sleep(10);
+            } catch (InterruptedException e) {
+                throw new RuntimeException("Interrupted ...", e);
+            }
+        }
+
+        throw new RuntimeException("Timed while waiting for content to appear in stderr");
+    }
+
     public void sendToStdin(String s) {
         if (stdin instanceof InteractiveInputStream) {
             ((InteractiveInputStream) stdin).pushBytes(s.getBytes());
         } else {
             throw new RuntimeException("Can't push to stdin - not interactive");
         }
+    }
+
+    public void sendLine(String s) {
+        sendToStdin(s + OsUtil.EOL);
     }
 
 

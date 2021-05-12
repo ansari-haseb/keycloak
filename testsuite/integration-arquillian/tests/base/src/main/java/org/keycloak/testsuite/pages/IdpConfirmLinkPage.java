@@ -23,7 +23,7 @@ import org.openqa.selenium.support.FindBy;
 /**
  * @author <a href="mailto:mposolda@redhat.com">Marek Posolda</a>
  */
-public class IdpConfirmLinkPage extends AbstractPage {
+public class IdpConfirmLinkPage extends LanguageComboboxAwarePage {
 
     @FindBy(id = "updateProfile")
     private WebElement updateProfileButton;
@@ -36,7 +36,7 @@ public class IdpConfirmLinkPage extends AbstractPage {
 
     @Override
     public boolean isCurrent() {
-        return driver.getTitle().equals("Account already exists");
+        return PageUtils.getPageTitle(driver).equals("Account already exists");
     }
 
     public String getMessage() {

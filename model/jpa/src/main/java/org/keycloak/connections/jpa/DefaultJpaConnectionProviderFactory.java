@@ -17,13 +17,15 @@
 
 package org.keycloak.connections.jpa;
 
-import org.hibernate.ejb.AvailableSettings;
+import org.hibernate.cfg.AvailableSettings;
 import org.hibernate.engine.transaction.jta.platform.internal.AbstractJtaPlatform;
 import org.jboss.logging.Logger;
 import org.keycloak.Config;
 import org.keycloak.ServerStartupError;
+import org.keycloak.common.util.StringPropertyReplacer;
 import org.keycloak.connections.jpa.updater.JpaUpdaterProvider;
 import org.keycloak.connections.jpa.util.JpaUtils;
+import org.keycloak.migration.MigrationModelManager;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.KeycloakSessionFactory;
 import org.keycloak.models.KeycloakSessionTask;
@@ -46,6 +48,8 @@ import java.sql.Connection;
 import java.sql.DatabaseMetaData;
 import java.sql.DriverManager;
 import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -77,7 +81,7 @@ public class DefaultJpaConnectionProviderFactory implements JpaConnectionProvide
         logger.trace("Create JpaConnectionProvider");
         lazyInit(session);
 
-        EntityManager em = null;
+        EntityManager em;
         if (!jtaEnabled) {
             logger.trace("enlisting EntityManager in JpaKeycloakTransaction");
             em = emf.createEntityManager();
@@ -85,7 +89,7 @@ public class DefaultJpaConnectionProviderFactory implements JpaConnectionProvide
 
             em = emf.createEntityManager(SynchronizationType.SYNCHRONIZED);
         }
-        em = PersistenceExceptionConverter.create(em);
+        em = PersistenceExceptionConverter.create(session, em);
         if (!jtaEnabled) session.getTransactionManager().enlist(new JpaKeycloakTransaction(em));
         return new DefaultJpaConnectionProvider(em);
     }
@@ -130,28 +134,28 @@ public class DefaultJpaConnectionProviderFactory implements JpaConnectionProvide
                     KeycloakModelUtils.suspendJtaTransaction(session.getKeycloakSessionFactory(), () -> {
                         logger.debug("Initializing JPA connections");
 
-                        Map<String, Object> properties = new HashMap<String, Object>();
+                        Map<String, Object> properties = new HashMap<>();
 
                         String unitName = "keycloak-default";
 
                         String dataSource = config.get("dataSource");
                         if (dataSource != null) {
                             if (config.getBoolean("jta", jtaEnabled)) {
-                                properties.put(AvailableSettings.JTA_DATASOURCE, dataSource);
+                                properties.put(AvailableSettings.JPA_JTA_DATASOURCE, dataSource);
                             } else {
-                                properties.put(AvailableSettings.NON_JTA_DATASOURCE, dataSource);
+                                properties.put(AvailableSettings.JPA_NON_JTA_DATASOURCE, dataSource);
                             }
                         } else {
-                            properties.put(AvailableSettings.JDBC_URL, config.get("url"));
-                            properties.put(AvailableSettings.JDBC_DRIVER, config.get("driver"));
+                            properties.put(AvailableSettings.JPA_JDBC_URL, config.get("url"));
+                            properties.put(AvailableSettings.JPA_JDBC_DRIVER, config.get("driver"));
 
                             String user = config.get("user");
                             if (user != null) {
-                                properties.put(AvailableSettings.JDBC_USER, user);
+                                properties.put(AvailableSettings.JPA_JDBC_USER, user);
                             }
                             String password = config.get("password");
                             if (password != null) {
-                                properties.put(AvailableSettings.JDBC_PASSWORD, password);
+                                properties.put(AvailableSettings.JPA_JDBC_PASSWORD, password);
                             }
                         }
 
@@ -186,7 +190,7 @@ public class DefaultJpaConnectionProviderFactory implements JpaConnectionProvide
                             logger.trace("Creating EntityManagerFactory");
                             logger.tracev("***** create EMF jtaEnabled {0} ", jtaEnabled);
                             if (jtaEnabled) {
-                                properties.put(org.hibernate.cfg.AvailableSettings.JTA_PLATFORM, new AbstractJtaPlatform() {
+                                properties.put(AvailableSettings.JTA_PLATFORM, new AbstractJtaPlatform() {
                                     @Override
                                     protected TransactionManager locateTransactionManager() {
                                         return jtaLookup.getTransactionManager();
@@ -198,11 +202,29 @@ public class DefaultJpaConnectionProviderFactory implements JpaConnectionProvide
                                     }
                                 });
                             }
-                            emf = JpaUtils.createEntityManagerFactory(session, unitName, properties, getClass().getClassLoader(), jtaEnabled);
+                            Collection<ClassLoader> classLoaders = new ArrayList<>();
+                            if (properties.containsKey(AvailableSettings.CLASSLOADERS)) {
+                                classLoaders.addAll((Collection<ClassLoader>) properties.get(AvailableSettings.CLASSLOADERS));
+                            }
+                            classLoaders.add(getClass().getClassLoader());
+                            properties.put(AvailableSettings.CLASSLOADERS, classLoaders);
+                            emf = JpaUtils.createEntityManagerFactory(session, unitName, properties, jtaEnabled);
                             logger.trace("EntityManagerFactory created");
 
                             if (globalStatsInterval != -1) {
                                 startGlobalStats(session, globalStatsInterval);
+                            }
+
+                            /*
+                             * Migrate model is executed just in case following providers are "jpa".
+                             * In Map Storage, there is an assumption that migrateModel is not needed.
+                             */
+                            if ((Config.getProvider("realm") == null || "jpa".equals(Config.getProvider("realm"))) &&
+                                (Config.getProvider("client") == null || "jpa".equals(Config.getProvider("client"))) &&
+                                (Config.getProvider("clientScope") == null || "jpa".equals(Config.getProvider("clientScope")))) {
+
+                                logger.debug("Calling migrateModel");
+                                migrateModel(session);
                             }
                         } finally {
                             // Close after creating EntityManagerFactory to prevent in-mem databases from closing
@@ -234,7 +256,7 @@ public class DefaultJpaConnectionProviderFactory implements JpaConnectionProvide
             operationalInfo.put("databaseProduct", md.getDatabaseProductName() + " " + md.getDatabaseProductVersion());
             operationalInfo.put("databaseDriver", md.getDriverName() + " " + md.getDriverVersion());
 
-            logger.debugf("Database info: %s", operationalInfo.toString());
+            logger.infof("Database info: %s", operationalInfo.toString());
         } catch (SQLException e) {
             logger.warn("Unable to prepare operational info due database exception: " + e.getMessage());
         }
@@ -267,6 +289,11 @@ public class DefaultJpaConnectionProviderFactory implements JpaConnectionProvide
                         return sql2012Dialect;
                     }
                 }
+                // For Oracle19c, we may need to set dialect explicitly to workaround https://hibernate.atlassian.net/browse/HHH-13184
+                if (dbProductName.equals("Oracle") && connection.getMetaData().getDatabaseMajorVersion() > 12) {
+                    logger.debugf("Manually specify dialect for Oracle to org.hibernate.dialect.Oracle12cDialect");
+                    return "org.hibernate.dialect.Oracle12cDialect";
+                }
             } catch (SQLException e) {
                 logger.warnf("Unable to detect hibernate dialect due database exception : %s", e.getMessage());
             }
@@ -281,7 +308,7 @@ public class DefaultJpaConnectionProviderFactory implements JpaConnectionProvide
         timer.scheduleTask(new HibernateStatsReporter(emf), globalStatsIntervalSecs * 1000, "ReportHibernateGlobalStats");
     }
 
-    public void migration(MigrationStrategy strategy, boolean initializeEmpty, String schema, File databaseUpdateFile, Connection connection, KeycloakSession session) {
+    void migration(MigrationStrategy strategy, boolean initializeEmpty, String schema, File databaseUpdateFile, Connection connection, KeycloakSession session) {
         JpaUpdaterProvider updater = session.getProvider(JpaUpdaterProvider.class);
 
         JpaUpdaterProvider.Status status = updater.validate(connection, schema);
@@ -317,45 +344,35 @@ public class DefaultJpaConnectionProviderFactory implements JpaConnectionProvide
     }
 
     protected void update(Connection connection, String schema, KeycloakSession session, JpaUpdaterProvider updater) {
-        DBLockProvider dbLock = new DBLockManager(session).getDBLock();
-        if (dbLock.hasLock()) {
-            updater.update(connection, schema);
-        } else {
-            KeycloakModelUtils.runJobInTransaction(session.getKeycloakSessionFactory(), new KeycloakSessionTask() {
-                @Override
-                public void run(KeycloakSession lockSession) {
-                    DBLockManager dbLockManager = new DBLockManager(lockSession);
-                    DBLockProvider dbLock2 = dbLockManager.getDBLock();
-                    dbLock2.waitForLock();
-                    try {
-                        updater.update(connection, schema);
-                    } finally {
-                        dbLock2.releaseLock();
-                    }
+        KeycloakModelUtils.runJobInTransaction(session.getKeycloakSessionFactory(), new KeycloakSessionTask() {
+            @Override
+            public void run(KeycloakSession lockSession) {
+                DBLockManager dbLockManager = new DBLockManager(lockSession);
+                DBLockProvider dbLock2 = dbLockManager.getDBLock();
+                dbLock2.waitForLock(DBLockProvider.Namespace.DATABASE);
+                try {
+                    updater.update(connection, schema);
+                } finally {
+                    dbLock2.releaseLock();
                 }
-            });
-        }
+            }
+        });
     }
 
     protected void export(Connection connection, String schema, File databaseUpdateFile, KeycloakSession session, JpaUpdaterProvider updater) {
-        DBLockProvider dbLock = new DBLockManager(session).getDBLock();
-        if (dbLock.hasLock()) {
-            updater.export(connection, schema, databaseUpdateFile);
-        } else {
-            KeycloakModelUtils.runJobInTransaction(session.getKeycloakSessionFactory(), new KeycloakSessionTask() {
-                @Override
-                public void run(KeycloakSession lockSession) {
-                    DBLockManager dbLockManager = new DBLockManager(lockSession);
-                    DBLockProvider dbLock2 = dbLockManager.getDBLock();
-                    dbLock2.waitForLock();
-                    try {
-                        updater.export(connection, schema, databaseUpdateFile);
-                    } finally {
-                        dbLock2.releaseLock();
-                    }
+        KeycloakModelUtils.runJobInTransaction(session.getKeycloakSessionFactory(), new KeycloakSessionTask() {
+            @Override
+            public void run(KeycloakSession lockSession) {
+                DBLockManager dbLockManager = new DBLockManager(lockSession);
+                DBLockProvider dbLock2 = dbLockManager.getDBLock();
+                dbLock2.waitForLock(DBLockProvider.Namespace.DATABASE);
+                try {
+                    updater.export(connection, schema, databaseUpdateFile);
+                } finally {
+                    dbLock2.releaseLock();
                 }
-            });
-        }
+            }
+        });
     }
 
     @Override
@@ -367,7 +384,7 @@ public class DefaultJpaConnectionProviderFactory implements JpaConnectionProvide
                 return dataSource.getConnection();
             } else {
                 Class.forName(config.get("driver"));
-                return DriverManager.getConnection(config.get("url"), config.get("user"), config.get("password"));
+                return DriverManager.getConnection(StringPropertyReplacer.replaceProperties(config.get("url"), System.getProperties()), config.get("user"), config.get("password"));
             }
         } catch (Exception e) {
             throw new RuntimeException("Failed to connect to database", e);
@@ -398,4 +415,7 @@ public class DefaultJpaConnectionProviderFactory implements JpaConnectionProvide
         }
     }
 
+    private void migrateModel(KeycloakSession session) {
+        KeycloakModelUtils.runJobInTransaction(session.getKeycloakSessionFactory(), MigrationModelManager::migrate);
+    }
 }

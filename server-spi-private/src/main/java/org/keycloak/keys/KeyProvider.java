@@ -17,37 +17,38 @@
 
 package org.keycloak.keys;
 
-import org.keycloak.jose.jws.AlgorithmType;
+import org.keycloak.crypto.KeyWrapper;
 import org.keycloak.provider.Provider;
 
-import java.security.PrivateKey;
-import java.security.PublicKey;
-import java.security.cert.X509Certificate;
 import java.util.List;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * @author <a href="mailto:sthorger@redhat.com">Stian Thorgersen</a>
  */
-public interface KeyProvider<T extends KeyMetadata> extends Provider {
+public interface KeyProvider extends Provider {
+
 
     /**
-     * Returns the algorithm type the keys can be used for
+     * Returns the {@code KeyWrapper} for a {@code KeyProvider}.
      *
-     * @return
+     * @return Returns the {@code KeyWrapper} for a {@code KeyProvider}.
+     * @deprecated Use {@link #getKeysStream() getKeysStream} instead.
      */
-    AlgorithmType getType();
+    @Deprecated
+    default List<KeyWrapper> getKeys() {
+        return getKeysStream().collect(Collectors.toList());
+    }
 
     /**
-     * Return the KID for the active keypair, or <code>null</code> if no active key is available.
+     * Returns the {@code KeyWrapper} for a {@code KeyProvider}.
      *
-     * @return
+     * @return Returns the {@code KeyWrapper} for a {@code KeyProvider}.
      */
-    String getKid();
+    Stream<KeyWrapper> getKeysStream();
 
-    /**
-     * Return metadata about all keypairs held by the provider
-     * @return
-     */
-    List<T> getKeyMetadata();
+    default void close() {
+    }
 
 }

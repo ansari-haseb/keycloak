@@ -29,7 +29,9 @@ import org.keycloak.services.ServicesLogger;
 import javax.ws.rs.core.Response;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedList;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * @author <a href="mailto:mposolda@redhat.com">Marek Posolda</a>
@@ -41,6 +43,8 @@ public class ClientAuthenticationFlow implements AuthenticationFlow {
     Response alternativeChallenge = null;
     AuthenticationProcessor processor;
     AuthenticationFlowModel flow;
+
+    private boolean success;
 
     public ClientAuthenticationFlow(AuthenticationProcessor processor, AuthenticationFlowModel flow) {
         this.processor = processor;
@@ -84,6 +88,8 @@ public class ClientAuthenticationFlow implements AuthenticationFlow {
 
                     if (!context.getStatus().equals(FlowStatus.SUCCESS)) {
                         throw new AuthenticationFlowException("Expected success, but for an unknown reason the status was " + context.getStatus(), AuthenticationFlowError.INTERNAL_ERROR);
+                    } else {
+                        success = true;
                     }
 
                     logger.debugv("Client {0} authenticated by {1}", client.getClientId(), factory.getId());
@@ -98,23 +104,27 @@ public class ClientAuthenticationFlow implements AuthenticationFlow {
             processor.getEvent().error(Errors.INVALID_CLIENT);
             return alternativeChallenge;
         }
-        throw new AuthenticationFlowException("Client was not identified by any client authenticator", AuthenticationFlowError.UNKNOWN_CLIENT);
+        throw new AuthenticationFlowException("Invalid client credentials", AuthenticationFlowError.INVALID_CREDENTIALS);
     }
 
     protected List<AuthenticationExecutionModel> findExecutionsToRun() {
-        List<AuthenticationExecutionModel> executions = processor.getRealm().getAuthenticationExecutions(flow.getId());
-        List<AuthenticationExecutionModel> executionsToRun = new ArrayList<>();
+        List<AuthenticationExecutionModel> executionsToRun = new LinkedList<>();
+        List<AuthenticationExecutionModel> finalExecutionsToRun = executionsToRun;
+        Optional<AuthenticationExecutionModel> first = processor.getRealm().getAuthenticationExecutionsStream(flow.getId())
+                .filter(e -> {
+                    if (e.isRequired()) {
+                        return true;
+                    } else if (e.isAlternative()){
+                        finalExecutionsToRun.add(e);
+                        return false;
+                    }
+                    return false;
+                }).findFirst();
 
-        for (AuthenticationExecutionModel execution : executions) {
-            if (execution.isRequired()) {
-                executionsToRun = Arrays.asList(execution);
-                break;
-            }
-
-            if (execution.isAlternative()) {
-                executionsToRun.add(execution);
-            }
-        }
+        if (first.isPresent())
+            executionsToRun = Arrays.asList(first.get());
+        else
+            executionsToRun.addAll(finalExecutionsToRun);
 
         if (logger.isTraceEnabled()) {
             List<String> exIds = new ArrayList<>();
@@ -175,5 +185,10 @@ public class ClientAuthenticationFlow implements AuthenticationFlow {
         }
 
         return result.getChallenge();
+    }
+
+    @Override
+    public boolean isSuccessful() {
+        return success;
     }
 }

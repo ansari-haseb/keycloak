@@ -18,12 +18,12 @@
 
 package org.keycloak.authorization.jpa.entities;
 
-import org.keycloak.authorization.model.Resource;
-import org.keycloak.authorization.model.Scope;
-
 import javax.persistence.Access;
 import javax.persistence.AccessType;
+import javax.persistence.CascadeType;
+import javax.persistence.CollectionTable;
 import javax.persistence.Column;
+import javax.persistence.ElementCollection;
 import javax.persistence.Entity;
 import javax.persistence.FetchType;
 import javax.persistence.Id;
@@ -31,12 +31,22 @@ import javax.persistence.JoinColumn;
 import javax.persistence.JoinTable;
 import javax.persistence.ManyToMany;
 import javax.persistence.ManyToOne;
+import javax.persistence.NamedQueries;
+import javax.persistence.NamedQuery;
+import javax.persistence.OneToMany;
 import javax.persistence.Table;
 import javax.persistence.UniqueConstraint;
+
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashSet;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Set;
+
+import org.hibernate.annotations.BatchSize;
+import org.hibernate.annotations.Fetch;
+import org.hibernate.annotations.FetchMode;
 
 /**
  * @author <a href="mailto:psilva@redhat.com">Pedro Igor</a>
@@ -45,7 +55,23 @@ import java.util.Set;
 @Table(name = "RESOURCE_SERVER_RESOURCE", uniqueConstraints = {
         @UniqueConstraint(columnNames = {"NAME", "RESOURCE_SERVER_ID", "OWNER"})
 })
-public class ResourceEntity implements Resource {
+@NamedQueries(
+        {
+                @NamedQuery(name="findResourceIdByOwner", query="select r from ResourceEntity r  where r.resourceServer = :serverId and r.owner = :owner"),
+                @NamedQuery(name="findResourceIdByOwnerOrdered", query="select r from ResourceEntity r where r.resourceServer = :serverId and r.owner = :owner order by r.id"),
+                @NamedQuery(name="findAnyResourceIdByOwner", query="select r from ResourceEntity r where r.owner = :owner"),
+                @NamedQuery(name="findAnyResourceIdByOwnerOrdered", query="select r.id from ResourceEntity r where r.owner = :owner order by r.id"),
+                @NamedQuery(name="findResourceIdByUri", query="select r.id from ResourceEntity r where  r.resourceServer = :serverId  and :uri in elements(r.uris)"),
+                @NamedQuery(name="findResourceIdByName", query="select r from ResourceEntity r left join fetch r.scopes s where  r.resourceServer = :serverId  and r.owner = :ownerId and r.name = :name"),
+                @NamedQuery(name="findResourceIdByType", query="select r from ResourceEntity r left join fetch r.scopes s where  r.resourceServer = :serverId  and r.owner = :ownerId and r.type = :type"),
+                @NamedQuery(name="findResourceIdByTypeNoOwner", query="select r from ResourceEntity r left join fetch r.scopes s where  r.resourceServer = :serverId  and r.type = :type"),
+                @NamedQuery(name="findResourceIdByTypeInstance", query="select r from ResourceEntity r left join fetch r.scopes s where  r.resourceServer = :serverId and r.type = :type and r.owner <> :serverId"),
+                @NamedQuery(name="findResourceIdByServerId", query="select r.id from ResourceEntity r where  r.resourceServer = :serverId "),
+                @NamedQuery(name="findResourceIdByScope", query="select r from ResourceEntity r inner join r.scopes s where r.resourceServer = :serverId and (s.resourceServer = :serverId and s.id in (:scopeIds))"),
+                @NamedQuery(name="deleteResourceByResourceServer", query="delete from ResourceEntity r where r.resourceServer = :serverId")
+        }
+)
+public class ResourceEntity {
 
     @Id
     @Column(name="ID", length = 36)
@@ -55,8 +81,13 @@ public class ResourceEntity implements Resource {
     @Column(name = "NAME")
     private String name;
 
-    @Column(name = "URI")
-    private String uri;
+    @Column(name = "DISPLAY_NAME")
+    private String displayName;
+
+    @ElementCollection(fetch = FetchType.LAZY)
+    @Column(name = "VALUE")
+    @CollectionTable(name = "RESOURCE_URIS", joinColumns = { @JoinColumn(name="RESOURCE_ID") })
+    private Set<String> uris;
 
     @Column(name = "TYPE")
     private String type;
@@ -67,19 +98,27 @@ public class ResourceEntity implements Resource {
     @Column(name = "OWNER")
     private String owner;
 
-    @ManyToOne(optional = false, fetch = FetchType.LAZY)
-    @JoinColumn(name = "RESOURCE_SERVER_ID")
-    private ResourceServerEntity resourceServer;
+    @Column(name = "OWNER_MANAGED_ACCESS")
+    private boolean ownerManagedAccess;
 
-    @ManyToMany(fetch = FetchType.LAZY, cascade = {})
+    @Column(name = "RESOURCE_SERVER_ID")
+    private String resourceServer;
+
+    @OneToMany(fetch = FetchType.LAZY, cascade = {})
     @JoinTable(name = "RESOURCE_SCOPE", joinColumns = @JoinColumn(name = "RESOURCE_ID"), inverseJoinColumns = @JoinColumn(name = "SCOPE_ID"))
-    private List<ScopeEntity> scopes = new ArrayList<>();
+    @Fetch(FetchMode.SELECT)
+    @BatchSize(size = 20)
+    private List<ScopeEntity> scopes;
 
     @ManyToMany(fetch = FetchType.LAZY, cascade = {})
     @JoinTable(name = "RESOURCE_POLICY", joinColumns = @JoinColumn(name = "RESOURCE_ID"), inverseJoinColumns = @JoinColumn(name = "POLICY_ID"))
-    private List<PolicyEntity> policies = new ArrayList<>();
+    private List<PolicyEntity> policies;
 
-    @Override
+    @OneToMany(cascade = CascadeType.REMOVE, orphanRemoval = true, mappedBy="resource", fetch = FetchType.LAZY)
+    @Fetch(FetchMode.SELECT)
+    @BatchSize(size = 20)
+    private Collection<ResourceAttributeEntity> attributes;
+
     public String getId() {
         return id;
     }
@@ -88,57 +127,61 @@ public class ResourceEntity implements Resource {
         this.id = id;
     }
 
-    @Override
     public String getName() {
         return name;
     }
 
-    @Override
     public void setName(String name) {
         this.name = name;
     }
 
-    @Override
-    public String getUri() {
-        return uri;
+    public String getDisplayName() {
+        return displayName;
     }
 
-    @Override
-    public void setUri(String uri) {
-        this.uri = uri;
+    public void setDisplayName(String displayName) {
+        this.displayName = displayName;
     }
 
-    @Override
+    public Set<String> getUris() {
+        if (uris == null) {
+            uris = new HashSet<>();
+        }
+        return uris;
+    }
+
+    public void setUris(Set<String> uris) {
+        this.uris = uris;
+    }
+
     public String getType() {
         return type;
     }
 
-    @Override
     public void setType(String type) {
         this.type = type;
     }
 
-    @Override
     public List<ScopeEntity> getScopes() {
+        if (scopes == null) {
+            scopes = new LinkedList<>();
+        }
         return this.scopes;
     }
 
-    @Override
     public String getIconUri() {
         return iconUri;
     }
 
-    @Override
     public void setIconUri(String iconUri) {
         this.iconUri = iconUri;
     }
 
-    @Override
-    public ResourceServerEntity getResourceServer() {
+    public String getResourceServer() {
         return resourceServer;
     }
 
-    public void setResourceServer(ResourceServerEntity resourceServer) {
+    public void setResourceServer(String resourceServer) {
         this.resourceServer = resourceServer;
     }
 
@@ -150,41 +193,49 @@ public class ResourceEntity implements Resource {
         this.owner = owner;
     }
 
+    public void setOwnerManagedAccess(boolean ownerManagedAccess) {
+        this.ownerManagedAccess = ownerManagedAccess;
+    }
+
+    public boolean isOwnerManagedAccess() {
+        return ownerManagedAccess;
+    }
+
     public List<PolicyEntity> getPolicies() {
+        if (policies == null) {
+            policies = new LinkedList<>();
+        }
         return this.policies;
     }
 
-    public void updateScopes(Set<Scope> toUpdate) {
-        for (Scope scope : toUpdate) {
-            boolean hasScope = false;
-
-            for (Scope existingScope : this.scopes) {
-                if (existingScope.equals(scope)) {
-                    hasScope = true;
-                }
-            }
-
-            if (!hasScope) {
-                this.scopes.add((ScopeEntity) scope);
-            }
-        }
-
-        for (Scope scopeModel : new HashSet<Scope>(this.scopes)) {
-            boolean hasScope = false;
-
-            for (Scope scope : toUpdate) {
-                if (scopeModel.equals(scope)) {
-                    hasScope = true;
-                }
-            }
-
-            if (!hasScope) {
-                this.scopes.remove(scopeModel);
-            }
-        }
-    }
 
     public void setPolicies(List<PolicyEntity> policies) {
         this.policies = policies;
+    }
+
+    public Collection<ResourceAttributeEntity> getAttributes() {
+        if (attributes == null) {
+            attributes = new LinkedList<>();
+        }
+        return attributes;
+    }
+
+    public void setAttributes(Collection<ResourceAttributeEntity> attributes) {
+        this.attributes = attributes;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+
+        ResourceEntity that = (ResourceEntity) o;
+
+        return getId().equals(that.getId());
+    }
+
+    @Override
+    public int hashCode() {
+        return getId().hashCode();
     }
 }

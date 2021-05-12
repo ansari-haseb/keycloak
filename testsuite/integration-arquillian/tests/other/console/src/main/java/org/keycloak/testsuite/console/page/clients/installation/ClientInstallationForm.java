@@ -27,6 +27,8 @@ import org.openqa.selenium.WebElement;
 import org.openqa.selenium.support.FindBy;
 import org.openqa.selenium.support.ui.Select;
 
+import static org.keycloak.testsuite.util.UIUtils.getTextFromElement;
+
 /**
  *
  * @author <a href="mailto:vramik@redhat.com">Vlastislav Ramik</a>
@@ -41,10 +43,10 @@ public class ClientInstallationForm extends Form {
 
     public void setConfigFormat(String value) {
         configFormatsSelect.selectByVisibleText(value);
-        WaitUtils.waitForPageToLoad(driver);
+        WaitUtils.waitForPageToLoad();
     }
     
     public String getTextareaContent() {
-        return textarea.getText();
+        return getTextFromElement(textarea);
     }
 }

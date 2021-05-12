@@ -16,6 +16,7 @@
  */
 package org.keycloak.saml.common.util;
 
+import java.nio.charset.StandardCharsets;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -100,9 +101,6 @@ public class Base64 {
     /** The new line character (\n) as a byte. */
     private static final byte NEW_LINE = (byte) '\n';
 
-    /** Preferred encoding. */
-    private static final String PREFERRED_ENCODING = "UTF-8";
-
     /** The 64 valid Base64 values. */
     private static final byte[] ALPHABET;
     private static final byte[] _NATIVE_ALPHABET = /* May be something funny like EBCDIC */
@@ -118,7 +116,7 @@ public class Base64 {
     static {
         byte[] __bytes;
         try {
-            __bytes = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/".getBytes(PREFERRED_ENCODING);
+            __bytes = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/".getBytes(StandardCharsets.UTF_8.name());
         } // end try
         catch (java.io.UnsupportedEncodingException use) {
             __bytes = _NATIVE_ALPHABET; // Fall back to native encoding
@@ -330,12 +328,7 @@ public class Base64 {
         } // end finally
 
         // Return value according to relevant encoding.
-        try {
-            return new String(baos.toByteArray(), PREFERRED_ENCODING);
-        } // end try
-        catch (java.io.UnsupportedEncodingException uue) {
-            return new String(baos.toByteArray());
-        } // end catch
+        return new String(baos.toByteArray(), StandardCharsets.UTF_8);
 
     } // end encode
 
@@ -455,12 +448,7 @@ public class Base64 {
             } // end finally
 
             // Return value according to relevant encoding.
-            try {
-                return new String(baos.toByteArray(), PREFERRED_ENCODING);
-            } // end try
-            catch (java.io.UnsupportedEncodingException uue) {
-                return new String(baos.toByteArray());
-            } // end catch
+            return new String(baos.toByteArray(), StandardCharsets.UTF_8);
         } // end if: compress
 
         // Else, don't compress. Better not to use streams at all then.
@@ -493,12 +481,7 @@ public class Base64 {
             } // end if: some padding needed
 
             // Return value according to relevant encoding.
-            try {
-                return new String(outBuff, 0, e, PREFERRED_ENCODING);
-            } // end try
-            catch (java.io.UnsupportedEncodingException uue) {
-                return new String(outBuff, 0, e);
-            } // end catch
+            return new String(outBuff, 0, e, StandardCharsets.UTF_8);
 
         } // end else: don't compress
 
@@ -632,14 +615,7 @@ public class Base64 {
      * @since 1.4
      */
     public static byte[] decode(String s) {
-        byte[] bytes;
-        try {
-            bytes = s.getBytes(PREFERRED_ENCODING);
-        } // end try
-        catch (java.io.UnsupportedEncodingException uee) {
-            bytes = s.getBytes();
-        } // end catch
-        // </change>
+        byte[] bytes = s.getBytes(StandardCharsets.UTF_8);
 
         // Decode
         bytes = decode(bytes, 0, bytes.length);
@@ -693,200 +669,6 @@ public class Base64 {
         return bytes;
     } // end decode
 
-    /**
-     * Attempts to decode Base64 data and deserialize a Java Object within. Returns <tt>null</tt> if there was an error.
-     *
-     * @param encodedObject The Base64 data to decode
-     * @return The decoded and deserialized object
-     * @since 1.5
-     */
-    public static Object decodeToObject(String encodedObject) {
-        // Decode and gunzip if necessary
-        byte[] objBytes = decode(encodedObject);
-
-        java.io.ByteArrayInputStream bais = null;
-        java.io.ObjectInputStream ois = null;
-        Object obj = null;
-
-        try {
-            bais = new java.io.ByteArrayInputStream(objBytes);
-            ois = new java.io.ObjectInputStream(bais);
-
-            obj = ois.readObject();
-        } // end try
-        catch (java.io.IOException e) {
-            e.printStackTrace();
-            obj = null;
-        } // end catch
-        catch (java.lang.ClassNotFoundException e) {
-            e.printStackTrace();
-            obj = null;
-        } // end catch
-        finally {
-            try {
-                bais.close();
-            } catch (Exception e) {
-            }
-            try {
-                ois.close();
-            } catch (Exception e) {
-            }
-        } // end finally
-
-        return obj;
-    } // end decodeObject
-
-    /**
-     * Convenience method for encoding data to a file.
-     *
-     * @param dataToEncode byte array of data to encode in base64 form
-     * @param filename Filename for saving encoded data
-     * @return <tt>true</tt> if successful, <tt>false</tt> otherwise
-     *
-     * @since 2.1
-     */
-    public static boolean encodeToFile(byte[] dataToEncode, String filename) {
-        boolean success = false;
-        Base64.OutputStream bos = null;
-        try {
-            bos = new Base64.OutputStream(new java.io.FileOutputStream(filename), Base64.ENCODE);
-            bos.write(dataToEncode);
-            success = true;
-        } // end try
-        catch (java.io.IOException e) {
-
-            success = false;
-        } // end catch: IOException
-        finally {
-            try {
-                bos.close();
-            } catch (Exception e) {
-            }
-        } // end finally
-
-        return success;
-    } // end encodeToFile
-
-    /**
-     * Convenience method for decoding data to a file.
-     *
-     * @param dataToDecode Base64-encoded data as a string
-     * @param filename Filename for saving decoded data
-     * @return <tt>true</tt> if successful, <tt>false</tt> otherwise
-     *
-     * @since 2.1
-     */
-    public static boolean decodeToFile(String dataToDecode, String filename) {
-        boolean success = false;
-        Base64.OutputStream bos = null;
-        try {
-            bos = new Base64.OutputStream(new java.io.FileOutputStream(filename), Base64.DECODE);
-            bos.write(dataToDecode.getBytes(PREFERRED_ENCODING));
-            success = true;
-        } // end try
-        catch (java.io.IOException e) {
-            success = false;
-        } // end catch: IOException
-        finally {
-            try {
-                bos.close();
-            } catch (Exception e) {
-            }
-        } // end finally
-
-        return success;
-    } // end decodeToFile
-
-    /**
-     * Convenience method for reading a base64-encoded file and decoding it.
-     *
-     * @param filename Filename for reading encoded data
-     * @return decoded byte array or null if unsuccessful
-     *
-     * @since 2.1
-     */
-    public static byte[] decodeFromFile(String filename) {
-        byte[] decodedData = null;
-        Base64.InputStream bis = null;
-        try {
-            // Set up some useful variables
-            java.io.File file = new java.io.File(filename);
-            byte[] buffer = null;
-            int length = 0;
-            int numBytes = 0;
-
-            // Check for size of file
-            if (file.length() > Integer.MAX_VALUE) {
-                throw new IllegalStateException("File is too big for this convenience method (" + file.length() + " bytes).");
-            } // end if: file too big for int index
-            buffer = new byte[(int) file.length()];
-
-            // Open a stream
-            bis = new Base64.InputStream(new java.io.BufferedInputStream(new java.io.FileInputStream(file)), Base64.DECODE);
-
-            // Read until done
-            while ((numBytes = bis.read(buffer, length, 4096)) >= 0)
-                length += numBytes;
-
-            // Save in a variable to return
-            decodedData = new byte[length];
-            System.arraycopy(buffer, 0, decodedData, 0, length);
-
-        } // end try
-        catch (java.io.IOException e) {
-            throw new IllegalStateException("Error decoding from file " + filename);
-        } // end catch: IOException
-        finally {
-            try {
-                bis.close();
-            } catch (Exception e) {
-            }
-        } // end finally
-
-        return decodedData;
-    } // end decodeFromFile
-
-    /**
-     * Convenience method for reading a binary file and base64-encoding it.
-     *
-     * @param filename Filename for reading binary data
-     * @return base64-encoded string or null if unsuccessful
-     *
-     * @since 2.1
-     */
-    public static String encodeFromFile(String filename) {
-        String encodedData = null;
-        Base64.InputStream bis = null;
-        try {
-            // Set up some useful variables
-            java.io.File file = new java.io.File(filename);
-            byte[] buffer = new byte[(int) (file.length() * 1.4)];
-            int length = 0;
-            int numBytes = 0;
-
-            // Open a stream
-            bis = new Base64.InputStream(new java.io.BufferedInputStream(new java.io.FileInputStream(file)), Base64.ENCODE);
-
-            // Read until done
-            while ((numBytes = bis.read(buffer, length, 4096)) >= 0)
-                length += numBytes;
-
-            // Save in a variable to return
-            encodedData = new String(buffer, 0, length, Base64.PREFERRED_ENCODING);
-
-        } // end try
-        catch (java.io.IOException e) {
-            throw new IllegalStateException("Error encoding from file " + filename);
-        } // end catch: IOException
-        finally {
-            try {
-                bis.close();
-            } catch (Exception e) {
-            }
-        } // end finally
-
-        return encodedData;
-    } // end encodeFromFile
 
     /* ******** I N N E R C L A S S I N P U T S T R E A M ******** */
 

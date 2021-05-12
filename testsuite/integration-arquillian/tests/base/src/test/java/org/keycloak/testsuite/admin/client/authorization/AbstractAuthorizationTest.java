@@ -20,44 +20,57 @@ package org.keycloak.testsuite.admin.client.authorization;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.BeforeClass;
+import org.keycloak.admin.client.resource.AuthorizationResource;
 import org.keycloak.admin.client.resource.ClientResource;
 import org.keycloak.admin.client.resource.ResourceScopeResource;
 import org.keycloak.admin.client.resource.ResourceScopesResource;
 import org.keycloak.representations.idm.ClientRepresentation;
+import org.keycloak.representations.idm.RealmRepresentation;
+import org.keycloak.representations.idm.authorization.ResourceServerRepresentation;
 import org.keycloak.representations.idm.authorization.ScopeRepresentation;
 import org.keycloak.testsuite.ProfileAssume;
 import org.keycloak.testsuite.admin.client.AbstractClientTest;
+import org.keycloak.testsuite.arquillian.annotation.EnableFeature;
+import org.keycloak.testsuite.util.ClientBuilder;
+import org.keycloak.testsuite.util.RealmBuilder;
+import org.keycloak.testsuite.util.UserBuilder;
 
 import javax.ws.rs.core.Response;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
+import static org.keycloak.common.Profile.Feature.UPLOAD_SCRIPTS;
+
+import java.util.List;
 
 /**
  * @author <a href="mailto:psilva@redhat.com">Pedro Igor</a>
  */
+@EnableFeature(value = UPLOAD_SCRIPTS, skipRestart = true)
 public abstract class AbstractAuthorizationTest extends AbstractClientTest {
 
-    protected static final String RESOURCE_SERVER_CLIENT_ID = "test-resource-server";
+    protected static final String RESOURCE_SERVER_CLIENT_ID = "resource-server-test";
 
-    @BeforeClass
-    public static void enabled() {
-        ProfileAssume.assumePreview();
+    @Override
+    public void setDefaultPageUriParameters() {
+        super.setDefaultPageUriParameters();
+        testRealmPage.setAuthRealm("authz-test");
     }
 
-    @Before
-    public void onBeforeAuthzTests() {
-        createOidcClient(RESOURCE_SERVER_CLIENT_ID);
+    @Override
+    protected String getRealmId() {
+        return "authz-test";
+    }
 
-        ClientRepresentation resourceServer = getResourceServer();
-
-        assertEquals(RESOURCE_SERVER_CLIENT_ID, resourceServer.getName());
-        assertFalse(resourceServer.getAuthorizationServicesEnabled());
+    @Override
+    public void addTestRealms(List<RealmRepresentation> testRealms) {
+        testRealms.add(createTestRealm().build());
+        super.addTestRealms(testRealms);
     }
 
     @After
-    public void onAfterAuthzTests() {
-        getClientResource().remove();
+    public void onAfterReenableAuthorization() {
+        enableAuthorizationServices(false);
+        enableAuthorizationServices(true);
     }
 
     protected ClientResource getClientResource() {
@@ -68,13 +81,22 @@ public abstract class AbstractAuthorizationTest extends AbstractClientTest {
         return findClientRepresentation(RESOURCE_SERVER_CLIENT_ID);
     }
 
-    protected void enableAuthorizationServices() {
+    protected void enableAuthorizationServices(boolean enable) {
         ClientRepresentation resourceServer = getResourceServer();
 
-        resourceServer.setAuthorizationServicesEnabled(true);
+        resourceServer.setAuthorizationServicesEnabled(enable);
         resourceServer.setServiceAccountsEnabled(true);
+        resourceServer.setPublicClient(false);
+        resourceServer.setSecret("secret");
 
         getClientResource().update(resourceServer);
+
+        if (enable) {
+            AuthorizationResource authorization = getClientResource().authorization();
+            ResourceServerRepresentation settings = authorization.exportSettings();
+            settings.setAllowRemoteResourceManagement(true);
+            authorization.update(settings);
+        }
     }
 
     protected ResourceScopeResource createDefaultScope() {
@@ -89,12 +111,25 @@ public abstract class AbstractAuthorizationTest extends AbstractClientTest {
 
         ResourceScopesResource resources = getClientResource().authorization().scopes();
 
-        Response response = resources.create(newScope);
+        try (Response response = resources.create(newScope)) {
+            assertEquals(Response.Status.CREATED.getStatusCode(), response.getStatus());
 
-        assertEquals(Response.Status.CREATED.getStatusCode(), response.getStatus());
+            ScopeRepresentation stored = response.readEntity(ScopeRepresentation.class);
 
-        ScopeRepresentation stored = response.readEntity(ScopeRepresentation.class);
+            return resources.scope(stored.getId());
+        }
+    }
 
-        return resources.scope(stored.getId());
+    private RealmBuilder createTestRealm() {
+        return RealmBuilder.create().name("authz-test")
+                .user(UserBuilder.create().username("marta").password("password"))
+                .user(UserBuilder.create().username("kolo").password("password"))
+                .client(ClientBuilder.create().clientId(RESOURCE_SERVER_CLIENT_ID)
+                        .name(RESOURCE_SERVER_CLIENT_ID)
+                        .secret("secret")
+                        .authorizationServicesEnabled(true)
+                        .redirectUris("http://localhost/" + RESOURCE_SERVER_CLIENT_ID)
+                        .defaultRoles("uma_protection")
+                        .directAccessGrants());
     }
 }

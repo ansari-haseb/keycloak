@@ -32,49 +32,53 @@ import org.apache.http.impl.client.HttpClients;
 import org.apache.http.message.BasicNameValuePair;
 import org.junit.Test;
 import org.keycloak.admin.client.resource.ClientResource;
+import org.keycloak.models.BrowserSecurityHeaders;
 import org.keycloak.models.Constants;
 import org.keycloak.representations.idm.ClientRepresentation;
 import org.keycloak.representations.idm.RealmRepresentation;
 import org.keycloak.testsuite.AbstractKeycloakTest;
+import org.keycloak.testsuite.ActionURIUtils;
+import org.keycloak.testsuite.arquillian.annotation.AuthServerContainerExclude;
+import org.keycloak.testsuite.oidc.PkceGenerator;
+import org.keycloak.testsuite.runonserver.ServerVersion;
 
 import java.io.IOException;
 import java.net.URLEncoder;
 import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
+import org.keycloak.testsuite.arquillian.annotation.AuthServerContainerExclude.AuthServer;
 
 /**
  * @author <a href="mailto:sthorger@redhat.com">Stian Thorgersen</a>
  */
+@AuthServerContainerExclude(AuthServer.REMOTE)
 public class LoginStatusIframeEndpointTest extends AbstractKeycloakTest {
 
     @Test
     public void checkIframe() throws IOException {
         CookieStore cookieStore = new BasicCookieStore();
 
-        CloseableHttpClient client = HttpClients.custom().setDefaultCookieStore(cookieStore).build();
-        try {
+        try (CloseableHttpClient client = HttpClients.custom().setDefaultCookieStore(cookieStore).build()) {
             String redirectUri = URLEncoder.encode(suiteContext.getAuthServerInfo().getContextRoot() + "/auth/admin/master/console", "UTF-8");
+
+            PkceGenerator pkce = new PkceGenerator();
 
             HttpGet get = new HttpGet(
                     suiteContext.getAuthServerInfo().getContextRoot() + "/auth/realms/master/protocol/openid-connect/auth?response_type=code&client_id=" + Constants.ADMIN_CONSOLE_CLIENT_ID +
-                            "&redirect_uri=" + redirectUri);
+                            "&redirect_uri=" + redirectUri + "&scope=openid&code_challenge_method=S256&code_challenge=" + pkce.getCodeChallenge());
 
             CloseableHttpResponse response = client.execute(get);
-            String s = IOUtils.toString(response.getEntity().getContent());
+            String s = IOUtils.toString(response.getEntity().getContent(), "UTF-8");
             response.close();
 
-            Matcher matcher = Pattern.compile("action=\"([^\"]*)\"").matcher(s);
-            matcher.find();
-
-            String action = matcher.group(1);
+            String action = ActionURIUtils.getActionURIFromPageSource(s);
 
             HttpPost post = new HttpPost(action);
 
@@ -122,10 +126,13 @@ public class LoginStatusIframeEndpointTest extends AbstractKeycloakTest {
             response = client.execute(get);
 
             assertEquals(200, response.getStatusLine().getStatusCode());
-            s = IOUtils.toString(response.getEntity().getContent());
+            s = IOUtils.toString(response.getEntity().getContent(), "UTF-8");
             assertTrue(s.contains("function getCookie()"));
 
             assertEquals("CP=\"This is not a P3P policy!\"", response.getFirstHeader("P3P").getValue());
+            assertNull(response.getFirstHeader(BrowserSecurityHeaders.X_FRAME_OPTIONS.getHeaderName()));
+            assertEquals("frame-src 'self'; object-src 'none';", response.getFirstHeader(BrowserSecurityHeaders.CONTENT_SECURITY_POLICY.getHeaderName()).getValue());
+            assertEquals("none", response.getFirstHeader(BrowserSecurityHeaders.X_ROBOTS_TAG.getHeaderName()).getValue());
 
             response.close();
 
@@ -157,8 +164,6 @@ public class LoginStatusIframeEndpointTest extends AbstractKeycloakTest {
             response = client.execute(get);
             assertEquals(204, response.getStatusLine().getStatusCode());
             response.close();
-        } finally {
-            client.close();
         }
     }
 
@@ -168,8 +173,7 @@ public class LoginStatusIframeEndpointTest extends AbstractKeycloakTest {
         ClientResource master = adminClient.realm("master").clients().get(id);
         ClientRepresentation rep = master.toRepresentation();
         List<String> org = rep.getWebOrigins();
-        CloseableHttpClient client = HttpClients.createDefault();
-        try {
+        try (CloseableHttpClient client = HttpClients.createDefault()) {
             rep.setWebOrigins(Collections.singletonList("*"));
             master.update(rep);
 
@@ -177,13 +181,31 @@ public class LoginStatusIframeEndpointTest extends AbstractKeycloakTest {
                     + "client_id=" + Constants.ADMIN_CONSOLE_CLIENT_ID
                     + "&origin=" + "http://anything"
             );
-            CloseableHttpResponse response = client.execute(get);
-            assertEquals(204, response.getStatusLine().getStatusCode());
-            response.close();
+            try (CloseableHttpResponse response = client.execute(get)) {
+                assertEquals(204, response.getStatusLine().getStatusCode());
+            }
         } finally {
             rep.setWebOrigins(org);
             master.update(rep);
-            client.close();
+        }
+    }
+
+    @Test
+    public void checkIframeCache() throws IOException {
+        String version = testingClient.server().fetch(new ServerVersion());
+
+        try (CloseableHttpClient client = HttpClients.createDefault()) {
+            HttpGet get = new HttpGet(suiteContext.getAuthServerInfo().getContextRoot() + "/auth/realms/master/protocol/openid-connect/login-status-iframe.html");
+            CloseableHttpResponse response = client.execute(get);
+
+            assertEquals(200, response.getStatusLine().getStatusCode());
+            assertEquals("no-cache, must-revalidate, no-transform, no-store", response.getHeaders("Cache-Control")[0].getValue());
+
+            get = new HttpGet(suiteContext.getAuthServerInfo().getContextRoot() + "/auth/realms/master/protocol/openid-connect/login-status-iframe.html?version=" + version);
+            response = client.execute(get);
+
+            assertEquals(200, response.getStatusLine().getStatusCode());
+            assertTrue(response.getHeaders("Cache-Control")[0].getValue().contains("max-age"));
         }
     }
 

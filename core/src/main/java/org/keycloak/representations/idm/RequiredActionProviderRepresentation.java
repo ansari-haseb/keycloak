@@ -31,7 +31,8 @@ public class RequiredActionProviderRepresentation {
     private String providerId;
     private boolean enabled;
     private boolean defaultAction;
-    private Map<String, String> config = new HashMap<String, String>();
+    private int priority;
+    private Map<String, String> config = new HashMap<>();
 
 
     public String getAlias() {
@@ -78,6 +79,14 @@ public class RequiredActionProviderRepresentation {
 
     public void setProviderId(String providerId) {
         this.providerId = providerId;
+    }
+
+    public int getPriority() {
+        return priority;
+    }
+
+    public void setPriority(int priority) {
+        this.priority = priority;
     }
 
     public Map<String, String> getConfig() {

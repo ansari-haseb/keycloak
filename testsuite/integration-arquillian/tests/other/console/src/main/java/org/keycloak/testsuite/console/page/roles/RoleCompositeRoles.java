@@ -17,6 +17,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import static org.keycloak.testsuite.util.UIUtils.clickLink;
+import static org.keycloak.testsuite.util.UIUtils.getTextFromElement;
 import static org.keycloak.testsuite.util.WaitUtils.waitUntilElement;
 
 /**
@@ -30,6 +32,8 @@ public class RoleCompositeRoles extends Form {
     protected Select availableRealmRolesSelect;
     @FindBy(id = "assigned")
     protected Select assignedRealmRolesSelect;
+    @FindBy(id = "realm-composite")
+    protected Select effectiveRealmRolesSelect;
 
     @FindBy(id = "clients")
     protected Select clientSelect;
@@ -89,7 +93,7 @@ public class RoleCompositeRoles extends Form {
                 select.selectByVisibleText(role);
             }
         }
-        button.click();
+        clickLink(button);
     }
 
     public void addRealmRole(String role) {
@@ -109,14 +113,14 @@ public class RoleCompositeRoles extends Form {
                 }
             }
             waitUntilElement(button).is().enabled();
-            button.click();
+            clickLink(button);
         }
     }
 
     public static Set<String> getSelectValues(Select select) {
         Set<String> roles = new HashSet<>();
         for (WebElement option : select.getOptions()) {
-            roles.add(option.getText());
+            roles.add(getTextFromElement(option));
         }
         return roles;
     }
@@ -143,19 +147,24 @@ public class RoleCompositeRoles extends Form {
         waitUntilElement(By.id("available")).is().present();
         for (String role : roles) {
             availableRealmRolesSelect.selectByVisibleText(role);
-            addSelectedRealmRolesButton.click();
+            clickLink(addSelectedRealmRolesButton);
         }
     }
 
     public void removeAssignedRole(String role) {
         waitUntilElement(By.id("assigned")).is().present();
         assignedRealmRolesSelect.selectByVisibleText(role);
-        removeSelectedRealmRolesButton.click();
+        clickLink(removeSelectedRealmRolesButton);
     }
 
     public boolean isAssignedRole(String role) {
         waitUntilElement(By.id("assigned")).is().present();
         return UIUtils.selectContainsOption(assignedRealmRolesSelect, role);
+    }
+
+    public boolean isEffectiveRole(String role) {
+        waitUntilElement(By.id("realm-composite")).is().present();
+        return UIUtils.selectContainsOption(effectiveRealmRolesSelect, role);
     }
 
     public boolean isAssignedClientRole(String role) {
@@ -172,14 +181,14 @@ public class RoleCompositeRoles extends Form {
         waitUntilElement(By.id("available-client")).is().present();
         for (String role : roles) {
             availableClientRolesSelect.selectByVisibleText(role);
-            addSelectedClientRolesButton.click();
+            clickLink(addSelectedClientRolesButton);
         }
     }
 
     public void removeAssignedClientRole(String client) {
         waitUntilElement(By.id("assigned-client")).is().present();
         assignedClientRolesSelect.selectByVisibleText(client);
-        removeSelectedClientRolesButton.click();
+        clickLink(removeSelectedClientRolesButton);
     }
 
 }

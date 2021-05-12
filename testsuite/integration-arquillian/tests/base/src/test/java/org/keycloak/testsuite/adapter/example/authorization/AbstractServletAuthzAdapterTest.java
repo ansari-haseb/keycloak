@@ -16,85 +16,59 @@
  */
 package org.keycloak.testsuite.adapter.example.authorization;
 
-import org.jboss.arquillian.container.test.api.Deployer;
-import org.jboss.arquillian.container.test.api.Deployment;
-import org.jboss.arquillian.test.api.ArquillianResource;
-import org.jboss.shrinkwrap.api.spec.WebArchive;
-import org.junit.BeforeClass;
+import org.junit.Ignore;
 import org.junit.Test;
-import org.keycloak.admin.client.resource.AuthorizationResource;
-import org.keycloak.admin.client.resource.ClientResource;
-import org.keycloak.admin.client.resource.ClientsResource;
+import org.keycloak.admin.client.resource.ClientPoliciesResource;
 import org.keycloak.admin.client.resource.RealmResource;
+import org.keycloak.admin.client.resource.ResourcesResource;
+import org.keycloak.admin.client.resource.RolePoliciesResource;
+import org.keycloak.admin.client.resource.RoleScopeResource;
+import org.keycloak.admin.client.resource.RolesResource;
 import org.keycloak.admin.client.resource.UserResource;
 import org.keycloak.admin.client.resource.UsersResource;
-import org.keycloak.representations.idm.ClientRepresentation;
-import org.keycloak.representations.idm.RealmRepresentation;
 import org.keycloak.representations.idm.RoleRepresentation;
 import org.keycloak.representations.idm.UserRepresentation;
-import org.keycloak.representations.idm.authorization.PolicyRepresentation;
-import org.keycloak.representations.idm.authorization.ResourceServerRepresentation;
-import org.keycloak.testsuite.ProfileAssume;
-import org.keycloak.testsuite.adapter.AbstractExampleAdapterTest;
+import org.keycloak.representations.idm.authorization.ClientPolicyRepresentation;
+import org.keycloak.representations.idm.authorization.ResourceRepresentation;
+import org.keycloak.representations.idm.authorization.RolePolicyRepresentation;
 import org.keycloak.testsuite.util.WaitUtils;
-import org.keycloak.util.JsonSerialization;
 import org.openqa.selenium.By;
-import org.openqa.selenium.WebElement;
 
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileNotFoundException;
-import java.io.IOException;
-import java.net.MalformedURLException;
-import java.net.URL;
+import javax.ws.rs.core.Response;
 import java.util.Arrays;
-import java.util.HashMap;
 import java.util.List;
 
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
-import static org.keycloak.testsuite.util.IOUtil.loadJson;
-import static org.keycloak.testsuite.util.IOUtil.loadRealm;
-import static org.keycloak.testsuite.util.WaitUtils.pause;
+import static org.keycloak.testsuite.util.WaitUtils.waitUntilElement;
 
 /**
  * @author <a href="mailto:psilva@redhat.com">Pedro Igor</a>
  */
-public abstract class AbstractServletAuthzAdapterTest extends AbstractExampleAdapterTest {
+public abstract class AbstractServletAuthzAdapterTest extends AbstractBaseServletAuthzAdapterTest {
 
-    private static final String REALM_NAME = "servlet-authz";
-    private static final String RESOURCE_SERVER_ID = "servlet-authz-app";
+    @Test
+    public void testCanNotAccessWhenEnforcing() throws Exception {
+        performTests(() -> {
+            importResourceServerSettings();
+            ResourcesResource resources = getAuthorizationResource().resources();
+            ResourceRepresentation resource = resources.findByName("Protected Resource").get(0);
 
-    @BeforeClass
-    public static void enabled() { ProfileAssume.assumePreview(); }
+            resource.setUri("/index.jsp");
 
-    @ArquillianResource
-    private Deployer deployer;
-
-    @Override
-    public void addAdapterTestRealms(List<RealmRepresentation> testRealms) {
-        testRealms.add(
-                loadRealm(new File(TEST_APPS_HOME_DIR + "/servlet-authz-app/servlet-authz-realm.json")));
-    }
-
-    @Deployment(name = RESOURCE_SERVER_ID, managed = false)
-    public static WebArchive deployment() throws IOException {
-        return exampleDeployment(RESOURCE_SERVER_ID);
-    }
-
-    @Override
-    public void beforeAbstractKeycloakTest() throws Exception {
-        super.beforeAbstractKeycloakTest();
-        importResourceServerSettings();
+            resources.resource(resource.getId()).update(resource);
+        }, () -> {
+            login("jdoe", "jdoe");
+            driver.navigate().to(getResourceServerUrl().toString() + "/enforcing/resource");
+            assertWasDenied();
+        });
     }
 
     @Test
     public void testRegularUserPermissions() throws Exception {
-        try {
-            this.deployer.deploy(RESOURCE_SERVER_ID);
-
+        performTests(() -> {
             login("alice", "alice");
-            assertFalse(wasDenied());
+            assertWasNotDenied();
             assertTrue(hasLink("User Premium"));
             assertTrue(hasLink("Administration"));
             assertTrue(hasText("urn:servlet-authz:page:main:actionForUser"));
@@ -107,22 +81,18 @@ public abstract class AbstractServletAuthzAdapterTest extends AbstractExampleAda
             assertFalse(hasText("Do administration thing"));
 
             navigateToUserPremiumPage();
-            assertTrue(wasDenied());
+            assertWasDenied();
 
             navigateToAdminPage();
-            assertTrue(wasDenied());
-        } finally {
-            this.deployer.undeploy(RESOURCE_SERVER_ID);
-        }
+            assertWasDenied();
+        });
     }
 
     @Test
     public void testUserPremiumPermissions() throws Exception {
-        try {
-            this.deployer.deploy(RESOURCE_SERVER_ID);
-
+        performTests(() -> {
             login("jdoe", "jdoe");
-            assertFalse(wasDenied());
+            assertWasNotDenied();
             assertTrue(hasLink("User Premium"));
             assertTrue(hasLink("Administration"));
             assertTrue(hasText("urn:servlet-authz:page:main:actionForUser"));
@@ -135,22 +105,18 @@ public abstract class AbstractServletAuthzAdapterTest extends AbstractExampleAda
             assertFalse(hasText("Do administration thing"));
 
             navigateToUserPremiumPage();
-            assertFalse(wasDenied());
+            assertWasNotDenied();
 
             navigateToAdminPage();
-            assertTrue(wasDenied());
-        } finally {
-            this.deployer.undeploy(RESOURCE_SERVER_ID);
-        }
+            assertWasDenied();
+        });
     }
 
     @Test
     public void testAdminPermissions() throws Exception {
-        try {
-            this.deployer.deploy(RESOURCE_SERVER_ID);
-
+        performTests(() -> {
             login("admin", "admin");
-            assertFalse(wasDenied());
+            assertWasNotDenied();
             assertTrue(hasLink("User Premium"));
             assertTrue(hasLink("Administration"));
             assertTrue(hasText("urn:servlet-authz:page:main:actionForUser"));
@@ -163,90 +129,54 @@ public abstract class AbstractServletAuthzAdapterTest extends AbstractExampleAda
             assertFalse(hasText("Do  user premium thing"));
 
             navigateToUserPremiumPage();
-            assertTrue(wasDenied());
+            assertWasDenied();
 
             navigateToAdminPage();
-            assertFalse(wasDenied());
-        } finally {
-            this.deployer.undeploy(RESOURCE_SERVER_ID);
-        }
+            assertWasNotDenied();
+        });
     }
 
     @Test
     public void testGrantPremiumAccessToUser() throws Exception {
-        try {
-            this.deployer.deploy(RESOURCE_SERVER_ID);
-
+        performTests(() -> {
             login("alice", "alice");
-            assertFalse(wasDenied());
+            assertWasNotDenied();
 
             navigateToUserPremiumPage();
-            assertTrue(wasDenied());
+            assertWasDenied();
 
-            for (PolicyRepresentation policy : getAuthorizationResource().policies().policies()) {
-                if ("Premium Resource Permission".equals(policy.getName())) {
-                    policy.getConfig().put("applyPolicies", "[\"Any User Policy\"]");
-                    getAuthorizationResource().policies().policy(policy.getId()).update(policy);
-                }
-            }
+            updatePermissionPolicies("Premium Resource Permission", "Any User Policy");
 
             login("alice", "alice");
 
             navigateToUserPremiumPage();
-            assertFalse(wasDenied());
+            assertWasNotDenied();
 
-            for (PolicyRepresentation policy : getAuthorizationResource().policies().policies()) {
-                if ("Premium Resource Permission".equals(policy.getName())) {
-                    policy.getConfig().put("applyPolicies", "[\"Only Premium User Policy\"]");
-                    getAuthorizationResource().policies().policy(policy.getId()).update(policy);
-                }
-            }
+            updatePermissionPolicies("Premium Resource Permission", "Only Premium User Policy");
 
             login("alice", "alice");
 
             navigateToUserPremiumPage();
-            assertTrue(wasDenied());
+            assertWasDenied();
 
-            PolicyRepresentation onlyAlicePolicy = new PolicyRepresentation();
+            createUserPolicy("Temporary Premium Access Policy", "alice");
 
-            onlyAlicePolicy.setName("Temporary Premium Access Policy");
-            onlyAlicePolicy.setType("user");
-            HashMap<String, String> config = new HashMap<>();
-            UsersResource usersResource = realmsResouce().realm(REALM_NAME).users();
-            List<UserRepresentation> users = usersResource.search("alice", null, null, null, null, null);
-
-            assertFalse(users.isEmpty());
-
-            config.put("users", JsonSerialization.writeValueAsString(Arrays.asList(users.get(0).getId())));
-
-            onlyAlicePolicy.setConfig(config);
-            getAuthorizationResource().policies().create(onlyAlicePolicy);
-
-            for (PolicyRepresentation policy : getAuthorizationResource().policies().policies()) {
-                if ("Premium Resource Permission".equals(policy.getName())) {
-                    policy.getConfig().put("applyPolicies", "[\"Temporary Premium Access Policy\"]");
-                    getAuthorizationResource().policies().policy(policy.getId()).update(policy);
-                }
-            }
+            updatePermissionPolicies("Premium Resource Permission", "Temporary Premium Access Policy");
 
             login("alice", "alice");
 
             navigateToUserPremiumPage();
-            assertFalse(wasDenied());
-        } finally {
-            this.deployer.undeploy(RESOURCE_SERVER_ID);
-        }
+            assertWasNotDenied();
+        });
     }
 
     @Test
     public void testGrantAdministrativePermissions() throws Exception {
-        try {
-            this.deployer.deploy(RESOURCE_SERVER_ID);
-
+        performTests(() -> {
             login("jdoe", "jdoe");
 
             navigateToAdminPage();
-            assertTrue(wasDenied());
+            assertWasDenied();
 
             RealmResource realmResource = realmsResouce().realm(REALM_NAME);
             UsersResource usersResource = realmResource.users();
@@ -262,104 +192,180 @@ public abstract class AbstractServletAuthzAdapterTest extends AbstractExampleAda
             login("jdoe", "jdoe");
 
             navigateToAdminPage();
-            assertFalse(wasDenied());
-        } finally {
-            this.deployer.undeploy(RESOURCE_SERVER_ID);
-        }
+            assertWasNotDenied();
+        });
     }
     
     //KEYCLOAK-3830
     @Test
+    @Ignore // Ignored because: KEYCLOAK-7941
     public void testAccessPublicResource() throws Exception {
-        try {
-            this.deployer.deploy(RESOURCE_SERVER_ID);
-            
+        performTests(() -> {
             driver.navigate().to(getResourceServerUrl() + "/public-html.html");
-            WaitUtils.waitForPageToLoad(driver);
+            WaitUtils.waitForPageToLoad();
             assertTrue(hasText("This is public resource that should be accessible without login."));
-            
-        } finally {
-            this.deployer.undeploy(RESOURCE_SERVER_ID);
-        }
+        });
     }
 
-    private boolean hasLink(String text) {
-        return getLink(text) != null;
+    @Test
+    public void testRequiredRole() throws Exception {
+        performTests(() -> {
+            login("jdoe", "jdoe");
+            navigateToUserPremiumPage();
+            assertWasNotDenied();
+
+            RolesResource rolesResource = getClientResource(RESOURCE_SERVER_ID).roles();
+
+            rolesResource.create(new RoleRepresentation("required-role", "", false));
+
+            RolePolicyRepresentation policy = new RolePolicyRepresentation();
+
+            policy.setName("Required Role Policy");
+            policy.addRole("user_premium", false);
+            policy.addRole("required-role", false);
+
+            RolePoliciesResource rolePolicy = getAuthorizationResource().policies().role();
+
+            rolePolicy.create(policy);
+            policy = rolePolicy.findByName(policy.getName());
+
+            updatePermissionPolicies("Premium Resource Permission", policy.getName());
+
+            login("jdoe", "jdoe");
+            navigateToUserPremiumPage();
+            assertWasNotDenied();
+
+            policy.getRoles().clear();
+            policy.addRole("user_premium", false);
+            policy.addRole("required-role", true);
+
+            rolePolicy.findById(policy.getId()).update(policy);
+
+            login("jdoe", "jdoe");
+            navigateToUserPremiumPage();
+            assertWasDenied();
+
+            UsersResource users = realmsResouce().realm(REALM_NAME).users();
+            UserRepresentation user = users.search("jdoe").get(0);
+
+            RoleScopeResource roleScopeResource = users.get(user.getId()).roles().clientLevel(getClientResource(RESOURCE_SERVER_ID).toRepresentation().getId());
+            RoleRepresentation requiredRole = rolesResource.get("required-role").toRepresentation();
+            roleScopeResource.add(Arrays.asList(requiredRole));
+
+            login("jdoe", "jdoe");
+            navigateToUserPremiumPage();
+            assertWasNotDenied();
+
+            policy.getRoles().clear();
+            policy.addRole("user_premium", false);
+            policy.addRole("required-role", false);
+
+            rolePolicy.findById(policy.getId()).update(policy);
+
+            login("jdoe", "jdoe");
+            navigateToUserPremiumPage();
+            assertWasNotDenied();
+
+            roleScopeResource.remove(Arrays.asList(requiredRole));
+
+            login("jdoe", "jdoe");
+            navigateToUserPremiumPage();
+            assertWasNotDenied();
+        });
     }
 
-    private boolean hasText(String text) {
-        return this.driver.getPageSource().contains(text);
+    @Test
+    public void testOnlySpecificClient() throws Exception {
+        performTests(() -> {
+            login("jdoe", "jdoe");
+            assertWasNotDenied();
+
+            ClientPolicyRepresentation policy = new ClientPolicyRepresentation();
+
+            policy.setName("Only Client Policy");
+            policy.addClient("admin-cli");
+
+            ClientPoliciesResource policyResource = getAuthorizationResource().policies().client();
+            Response response = policyResource.create(policy);
+            response.close();
+            policy = policyResource.findByName(policy.getName());
+
+            updatePermissionPolicies("Protected Resource Permission", policy.getName());
+
+            login("jdoe", "jdoe");
+            assertWasDenied();
+
+            policy.addClient("servlet-authz-app");
+            policyResource.findById(policy.getId()).update(policy);
+
+            login("jdoe", "jdoe");
+            assertWasNotDenied();
+        });
     }
 
-    private WebElement getLink(String text) {
-        return this.driver.findElement(By.xpath("//a[text() = '" + text + "']"));
+    @Test
+    public void testAccessResourceWithAnyScope() throws Exception {
+        performTests(() -> {
+            login("jdoe", "jdoe");
+            driver.navigate().to(getResourceServerUrl() + "/protected/scopes.jsp");
+            WaitUtils.waitForPageToLoad();
+            assertTrue(hasText("Granted"));
+        });
     }
 
-    private void importResourceServerSettings() throws FileNotFoundException {
-        getAuthorizationResource().importSettings(loadJson(new FileInputStream(new File(TEST_APPS_HOME_DIR + "/servlet-authz-app/servlet-authz-app-authz-service.json")), ResourceServerRepresentation.class));
-    }
+    @Test
+    public void testMultipleURLsForResourceRealmConfig() throws Exception {
+        performTests(() -> {
+            login("jdoe", "jdoe");
+            driver.navigate().to(getResourceServerUrl() + "/keycloak-7269/sub-resource1/index1.jsp");
+            waitUntilElement(By.tagName("h2")).text().contains("sub-resource1 index1.jsp");
+            driver.navigate().to(getResourceServerUrl() + "/keycloak-7269/sub-resource1/index2.jsp");
+            waitUntilElement(By.tagName("h2")).text().contains("sub-resource1 index2.jsp");
+            driver.navigate().to(getResourceServerUrl() + "/keycloak-7269/sub-resource2/pattern1/page.jsp");
+            waitUntilElement(By.tagName("h2")).text().contains("sub-resource2/pattern1");
+            driver.navigate().to(getResourceServerUrl() + "/keycloak-7269/sub-resource2/pattern2/page.jsp");
+            waitUntilElement(By.tagName("h2")).text().contains("sub-resource2/pattern2");
 
-    private AuthorizationResource getAuthorizationResource() throws FileNotFoundException {
-        return getClientResource(RESOURCE_SERVER_ID).authorization();
-    }
+            driver.navigate().to(getResourceServerUrl() + "/keycloak-7269/test.jsp");
+            waitUntilElement(By.tagName("h2")).text().contains("keycloak-7269/test");
+            driver.navigate().to(getResourceServerUrl() + "/keycloak-7269/sub-resource2/test.jsp");
+            waitUntilElement(By.tagName("h2")).text().contains("keycloak-7269/sub-resource2/test");
 
-    private ClientResource getClientResource(String clientId) {
-        ClientsResource clients = this.realmsResouce().realm(REALM_NAME).clients();
-        ClientRepresentation resourceServer = clients.findByClientId(clientId).get(0);
-        return clients.get(resourceServer.getId());
-    }
+            updatePermissionPolicies("Permission for multiple url resource", "Deny Policy");
+            login("jdoe", "jdoe");
+            driver.navigate().to(getResourceServerUrl() + "/keycloak-7269/sub-resource1/index1.jsp");
+            waitUntilElement(By.tagName("h2")).text().not().contains("sub-resource1 index1.jsp");
+            waitUntilElement(By.tagName("h2")).text().contains("You can not access this resource.");
+            driver.navigate().to(getResourceServerUrl() + "/keycloak-7269/sub-resource1/index2.jsp");
+            waitUntilElement(By.tagName("h2")).text().not().contains("sub-resource1 index2.jsp");
+            waitUntilElement(By.tagName("h2")).text().contains("You can not access this resource.");
+            driver.navigate().to(getResourceServerUrl() + "/keycloak-7269/sub-resource2/pattern1/page.jsp");
+            waitUntilElement(By.tagName("h2")).text().not().contains("sub-resource2/pattern1");
+            waitUntilElement(By.tagName("h2")).text().contains("You can not access this resource.");
+            driver.navigate().to(getResourceServerUrl() + "/keycloak-7269/sub-resource2/pattern2/page.jsp");
+            waitUntilElement(By.tagName("h2")).text().not().contains("sub-resource2/pattern2");
+            waitUntilElement(By.tagName("h2")).text().contains("You can not access this resource.");
 
-    private void logOut() {
-        navigateTo();
-        By by = By.xpath("//a[text() = 'Sign Out']");
-        WaitUtils.waitUntilElement(by);
-        this.driver.findElement(by).click();
-        pause(500);
-    }
+            driver.navigate().to(getResourceServerUrl() + "/keycloak-7269/test.jsp");
+            waitUntilElement(By.tagName("h2")).text().contains("keycloak-7269/test");
+            driver.navigate().to(getResourceServerUrl() + "/keycloak-7269/sub-resource2/test.jsp");
+            waitUntilElement(By.tagName("h2")).text().contains("keycloak-7269/sub-resource2/test");
 
-    private void login(String username, String password) throws InterruptedException {
-        navigateTo();
-        Thread.sleep(2000);
-        if (this.driver.getCurrentUrl().startsWith(getResourceServerUrl().toString())) {
-            Thread.sleep(2000);
-            logOut();
-            navigateTo();
-        }
+            updatePermissionPolicies("Permission for multiple url resource", "All Users Policy");
+            login("jdoe", "jdoe");
+            driver.navigate().to(getResourceServerUrl() + "/keycloak-7269/sub-resource1/index1.jsp");
+            waitUntilElement(By.tagName("h2")).text().contains("sub-resource1 index1.jsp");
+            driver.navigate().to(getResourceServerUrl() + "/keycloak-7269/sub-resource1/index2.jsp");
+            waitUntilElement(By.tagName("h2")).text().contains("sub-resource1 index2.jsp");
+            driver.navigate().to(getResourceServerUrl() + "/keycloak-7269/sub-resource2/pattern1/page.jsp");
+            waitUntilElement(By.tagName("h2")).text().contains("sub-resource2/pattern1");
+            driver.navigate().to(getResourceServerUrl() + "/keycloak-7269/sub-resource2/pattern2/page.jsp");
+            waitUntilElement(By.tagName("h2")).text().contains("sub-resource2/pattern2");
 
-        Thread.sleep(2000);
-
-        this.loginPage.form().login(username, password);
-    }
-
-    private void navigateTo() {
-        this.driver.navigate().to(getResourceServerUrl());
-        WaitUtils.waitUntilElement(By.xpath("//a[text() = 'Dynamic Menu']"));
-    }
-
-    private  boolean wasDenied() {
-        return this.driver.getPageSource().contains("You can not access this resource.");
-    }
-
-    private URL getResourceServerUrl() {
-        try {
-            return new URL(this.appServerContextRootPage + "/" + RESOURCE_SERVER_ID);
-        } catch (MalformedURLException e) {
-            throw new RuntimeException("Could not obtain resource server url.", e);
-        }
-    }
-
-    private void navigateToDynamicMenuPage() {
-        navigateTo();
-        getLink("Dynamic Menu").click();
-    }
-
-    private void navigateToUserPremiumPage() {
-        navigateTo();
-        getLink("User Premium").click();
-    }
-
-    private void navigateToAdminPage() {
-        navigateTo();
-        getLink("Administration").click();
+            driver.navigate().to(getResourceServerUrl() + "/keycloak-7269/test.jsp");
+            waitUntilElement(By.tagName("h2")).text().contains("keycloak-7269/test");
+            driver.navigate().to(getResourceServerUrl() + "/keycloak-7269/sub-resource2/test.jsp");
+            waitUntilElement(By.tagName("h2")).text().contains("keycloak-7269/sub-resource2/test");
+        });
     }
 }

@@ -110,7 +110,7 @@ public class CompositeKeyLocator implements KeyLocator, Iterable<Key> {
         return Collections.unmodifiableCollection(res);
     }
 
-    private class JointKeyIterator implements Iterable<Key> {
+    private static class JointKeyIterator implements Iterable<Key> {
 
         // based on http://stackoverflow.com/a/34126154/6930869
         private final Iterator<Iterable<Key>> iterablesIterator;
@@ -152,6 +152,11 @@ public class CompositeKeyLocator implements KeyLocator, Iterable<Key> {
                         currentIterator = nextIterator();
                     }
                     return this;
+                }
+
+                @Override
+                public void remove() {
+                    throw new UnsupportedOperationException("remove");  // Same as default implementation in JDK 8 - to support JDK 7 compilation
                 }
             }.findNext();
         }

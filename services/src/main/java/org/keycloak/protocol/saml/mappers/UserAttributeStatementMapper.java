@@ -18,7 +18,7 @@
 package org.keycloak.protocol.saml.mappers;
 
 import org.keycloak.dom.saml.v2.assertion.AttributeStatementType;
-import org.keycloak.models.ClientSessionModel;
+import org.keycloak.models.AuthenticatedClientSessionModel;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.ProtocolMapperModel;
 import org.keycloak.models.UserModel;
@@ -27,6 +27,7 @@ import org.keycloak.models.utils.KeycloakModelUtils;
 import org.keycloak.protocol.ProtocolMapperUtils;
 import org.keycloak.provider.ProviderConfigProperty;
 
+import java.util.Collection;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -48,6 +49,12 @@ public class UserAttributeStatementMapper extends AbstractSAMLProtocolMapper imp
         configProperties.add(property);
         AttributeStatementHelper.setConfigProperties(configProperties);
 
+        property = new ProviderConfigProperty();
+        property.setName(ProtocolMapperUtils.AGGREGATE_ATTRS);
+        property.setLabel(ProtocolMapperUtils.AGGREGATE_ATTRS_LABEL);
+        property.setHelpText(ProtocolMapperUtils.AGGREGATE_ATTRS_HELP_TEXT);
+        property.setType(ProviderConfigProperty.BOOLEAN_TYPE);
+        configProperties.add(property);
     }
 
     public static final String PROVIDER_ID = "saml-user-attribute-mapper";
@@ -77,20 +84,20 @@ public class UserAttributeStatementMapper extends AbstractSAMLProtocolMapper imp
     }
 
     @Override
-    public void transformAttributeStatement(AttributeStatementType attributeStatement, ProtocolMapperModel mappingModel, KeycloakSession session, UserSessionModel userSession, ClientSessionModel clientSession) {
+    public void transformAttributeStatement(AttributeStatementType attributeStatement, ProtocolMapperModel mappingModel, KeycloakSession session, UserSessionModel userSession, AuthenticatedClientSessionModel clientSession) {
         UserModel user = userSession.getUser();
         String attributeName = mappingModel.getConfig().get(ProtocolMapperUtils.USER_ATTRIBUTE);
-        List<String> attributeValues = KeycloakModelUtils.resolveAttribute(user, attributeName);
+        boolean aggregateAttrs = Boolean.valueOf(mappingModel.getConfig().get(ProtocolMapperUtils.AGGREGATE_ATTRS));
+        Collection<String> attributeValues = KeycloakModelUtils.resolveAttribute(user, attributeName, aggregateAttrs);
         if (attributeValues.isEmpty()) return;
         AttributeStatementHelper.addAttributes(attributeStatement, mappingModel, attributeValues);
     }
 
     public static ProtocolMapperModel createAttributeMapper(String name, String userAttribute,
-                                                            String samlAttributeName, String nameFormat, String friendlyName,
-                                                            boolean consentRequired, String consentText) {
+                                                            String samlAttributeName, String nameFormat, String friendlyName) {
         String mapperId = PROVIDER_ID;
         return AttributeStatementHelper.createAttributeMapper(name, userAttribute, samlAttributeName, nameFormat, friendlyName,
-                consentRequired, consentText, mapperId);
+                mapperId);
 
     }
 

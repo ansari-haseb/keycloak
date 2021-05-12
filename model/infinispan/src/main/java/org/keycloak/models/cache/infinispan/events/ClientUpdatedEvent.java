@@ -17,13 +17,21 @@
 
 package org.keycloak.models.cache.infinispan.events;
 
+import java.util.Objects;
 import java.util.Set;
 
 import org.keycloak.models.cache.infinispan.RealmCacheManager;
+import java.io.IOException;
+import java.io.ObjectInput;
+import java.io.ObjectOutput;
+import org.infinispan.commons.marshall.Externalizer;
+import org.infinispan.commons.marshall.MarshallUtil;
+import org.infinispan.commons.marshall.SerializeWith;
 
 /**
  * @author <a href="mailto:mposolda@redhat.com">Marek Posolda</a>
  */
+@SerializeWith(ClientUpdatedEvent.ExternalizerImpl.class)
 public class ClientUpdatedEvent extends InvalidationEvent implements RealmCacheInvalidationEvent {
 
     private String clientUuid;
@@ -51,5 +59,52 @@ public class ClientUpdatedEvent extends InvalidationEvent implements RealmCacheI
     @Override
     public void addInvalidations(RealmCacheManager realmCache, Set<String> invalidations) {
         realmCache.clientUpdated(realmId, clientUuid, clientId, invalidations);
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        if (!super.equals(o)) return false;
+        ClientUpdatedEvent that = (ClientUpdatedEvent) o;
+        return Objects.equals(clientUuid, that.clientUuid) && Objects.equals(clientId, that.clientId) && Objects.equals(realmId, that.realmId);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(super.hashCode(), clientUuid, clientId, realmId);
+    }
+
+    public static class ExternalizerImpl implements Externalizer<ClientUpdatedEvent> {
+
+        private static final int VERSION_1 = 1;
+
+        @Override
+        public void writeObject(ObjectOutput output, ClientUpdatedEvent obj) throws IOException {
+            output.writeByte(VERSION_1);
+
+            MarshallUtil.marshallString(obj.clientUuid, output);
+            MarshallUtil.marshallString(obj.clientId, output);
+            MarshallUtil.marshallString(obj.realmId, output);
+        }
+
+        @Override
+        public ClientUpdatedEvent readObject(ObjectInput input) throws IOException, ClassNotFoundException {
+            switch (input.readByte()) {
+                case VERSION_1:
+                    return readObjectVersion1(input);
+                default:
+                    throw new IOException("Unknown version");
+            }
+        }
+
+        public ClientUpdatedEvent readObjectVersion1(ObjectInput input) throws IOException, ClassNotFoundException {
+            ClientUpdatedEvent res = new ClientUpdatedEvent();
+            res.clientUuid = MarshallUtil.unmarshallString(input);
+            res.clientId = MarshallUtil.unmarshallString(input);
+            res.realmId = MarshallUtil.unmarshallString(input);
+
+            return res;
+        }
     }
 }

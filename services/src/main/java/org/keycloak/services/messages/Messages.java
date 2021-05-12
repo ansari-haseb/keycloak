@@ -21,9 +21,16 @@ package org.keycloak.services.messages;
  */
 public class Messages {
 
+    public static final String DISPLAY_UNSUPPORTED = "displayUnsupported";
     public static final String LOGIN_TIMEOUT = "loginTimeout";
 
     public static final String INVALID_USER = "invalidUserMessage";
+
+    public static final String INVALID_USERNAME = "invalidUsernameMessage";
+
+    public static final String INVALID_USERNAME_OR_EMAIL = "invalidUsernameOrEmailMessage";
+
+    public static final String INVALID_PASSWORD = "invalidPasswordMessage";
 
     public static final String INVALID_EMAIL = "invalidEmailMessage";
 
@@ -33,6 +40,12 @@ public class Messages {
 
     public static final String EXPIRED_CODE = "expiredCodeMessage";
 
+    public static final String EXPIRED_ACTION = "expiredActionMessage";
+
+    public static final String EXPIRED_ACTION_TOKEN_NO_SESSION = "expiredActionTokenNoSessionMessage";
+
+    public static final String EXPIRED_ACTION_TOKEN_SESSION_EXISTS = "expiredActionTokenSessionExistsMessage";
+
     public static final String MISSING_FIRST_NAME = "missingFirstNameMessage";
 
     public static final String MISSING_LAST_NAME = "missingLastNameMessage";
@@ -41,9 +54,13 @@ public class Messages {
 
     public static final String MISSING_USERNAME = "missingUsernameMessage";
 
+    public static final String UPDATE_READ_ONLY_ATTRIBUTES_REJECTED = "updateReadOnlyAttributesRejectedMessage";
+
     public static final String MISSING_PASSWORD = "missingPasswordMessage";
 
     public static final String MISSING_TOTP = "missingTotpMessage";
+
+    public static final String MISSING_TOTP_DEVICE_NAME = "missingTotpDeviceNameMessage";
 
     public static final String NOTMATCH_PASSWORD = "notMatchPasswordMessage";
 
@@ -61,15 +78,19 @@ public class Messages {
 
     public static final String FEDERATED_IDENTITY_EXISTS = "federatedIdentityExistsMessage";
 
+    public static final String FEDERATED_IDENTITY_UNAVAILABLE = "federatedIdentityUnavailableMessage";
+
     public static final String FEDERATED_IDENTITY_CONFIRM_LINK_MESSAGE = "federatedIdentityConfirmLinkMessage";
 
     public static final String FEDERATED_IDENTITY_CONFIRM_REAUTHENTICATE_MESSAGE = "federatedIdentityConfirmReauthenticateMessage";
 
-    public static final String IDENTITY_PROVIDER_DIFFERENT_USER_MESSAGE = "identityProviderDifferentUserMessage";
+    public static final String NESTED_FIRST_BROKER_FLOW_MESSAGE = "nestedFirstBrokerFlowMessage";
 
     public static final String CONFIGURE_TOTP = "configureTotpMessage";
 
     public static final String UPDATE_PROFILE = "updateProfileMessage";
+
+    public static final String RESET_PASSWORD = "resetPasswordMessage";
 
     public static final String UPDATE_PASSWORD = "updatePasswordMessage";
 
@@ -150,9 +171,17 @@ public class Messages {
 
     public static final String IDENTITY_PROVIDER_UNEXPECTED_ERROR = "identityProviderUnexpectedErrorMessage";
 
+    public static final String IDENTITY_PROVIDER_MISSING_STATE_ERROR = "identityProviderMissingStateMessage";
+
     public static final String IDENTITY_PROVIDER_NOT_FOUND = "identityProviderNotFoundMessage";
 
     public static final String IDENTITY_PROVIDER_LINK_SUCCESS = "identityProviderLinkSuccess";
+
+    public static final String CONFIRM_ACCOUNT_LINKING = "confirmAccountLinking";
+
+    public static final String CONFIRM_EMAIL_ADDRESS_VERIFICATION = "confirmEmailAddressVerification";
+
+    public static final String CONFIRM_EXECUTION_OF_ACTIONS = "confirmExecutionOfActions";
 
     public static final String STALE_CODE = "staleCodeMessage";
 
@@ -162,7 +191,11 @@ public class Messages {
 
     public static final String REALM_SUPPORTS_NO_CREDENTIALS = "realmSupportsNoCredentialsMessage";
 
+    public static final String CREDENTIAL_SETUP_REQUIRED ="credentialSetupRequired";
+
     public static final String READ_ONLY_USER = "readOnlyUserMessage";
+
+    public static final String READ_ONLY_USERNAME = "readOnlyUsernameMessage";
 
     public static final String READ_ONLY_PASSWORD = "readOnlyPasswordMessage";
 
@@ -197,5 +230,51 @@ public class Messages {
     public static final String FAILED_LOGOUT = "failedLogout";
 
     public static final String CONSENT_DENIED="consentDenied";
+
     public static final String ALREADY_LOGGED_IN="alreadyLoggedIn";
+
+    public static final String DIFFERENT_USER_AUTHENTICATED = "differentUserAuthenticated";
+
+    public static final String BROKER_LINKING_SESSION_EXPIRED = "brokerLinkingSessionExpired";
+
+    public static final String PAGE_NOT_FOUND = "pageNotFound";
+
+    public static final String INTERNAL_SERVER_ERROR = "internalServerError";
+
+    public static final String DELEGATION_COMPLETE = "delegationCompleteMessage";
+    public static final String DELEGATION_COMPLETE_HEADER = "delegationCompleteHeader";
+    public static final String DELEGATION_FAILED = "delegationFailedMessage";
+    public static final String DELEGATION_FAILED_HEADER = "delegationFailedHeader";
+
+    public static final String ARTIFACT_RESOLUTION_SERVICE_ERROR = "artifactResolutionServiceError";
+    public static final String ARTIFACT_RESOLUTION_SERVICE_INVALID_RESPONSE = "saml.artifactResolutionServiceInvalidResponse";
+
+    // WebAuthn
+    public static final String WEBAUTHN_REGISTER_TITLE = "webauthn-registration-title";
+    public static final String WEBAUTHN_LOGIN_TITLE = "webauthn-login-title";
+    public static final String WEBAUTHN_ERROR_TITLE = "webauthn-error-title";
+
+    // WebAuthn Error
+    public static final String WEBAUTHN_ERROR_REGISTRATION = "webauthn-error-registration";
+    public static final String WEBAUTHN_ERROR_API_GET = "webauthn-error-api-get";
+    public static final String WEBAUTHN_ERROR_DIFFERENT_USER = "webauthn-error-different-user";
+    public static final String WEBAUTHN_ERROR_AUTH_VERIFICATION = "webauthn-error-auth-verification";
+    public static final String WEBAUTHN_ERROR_REGISTER_VERIFICATION = "webauthn-error-register-verification";
+    public static final String WEBAUTHN_ERROR_USER_NOT_FOUND = "webauthn-error-user-not-found";
+
+    // Conditions in Conditional Flow
+    public static final String ACCESS_DENIED = "access-denied";
+
+    public static final String DELETE_ACCOUNT_LACK_PRIVILEDGES = "deletingAccountForbidden";
+    public static final String DELETE_ACCOUNT_ERROR = "errorDeletingAccount";
+
+    // OAuth 2.0 Device Authorization Grant
+    public static final String OAUTH2_DEVICE_AUTHORIZATION_GRANT_DISABLED = "oauth2DeviceAuthorizationGrantDisabledMessage";
+    public static final String OAUTH2_DEVICE_INVALID_USER_CODE = "oauth2DeviceInvalidUserCodeMessage";
+    public static final String OAUTH2_DEVICE_EXPIRED_USER_CODE = "oauth2DeviceExpiredUserCodeMessage";
+    public static final String OAUTH2_DEVICE_VERIFICATION_COMPLETE = "oauth2DeviceVerificationCompleteMessage";
+    public static final String OAUTH2_DEVICE_VERIFICATION_COMPLETE_HEADER = "oauth2DeviceVerificationCompleteHeader";
+    public static final String OAUTH2_DEVICE_VERIFICATION_FAILED = "oauth2DeviceVerificationFailedMessage";
+    public static final String OAUTH2_DEVICE_VERIFICATION_FAILED_HEADER = "oauth2DeviceVerificationFailedHeader";
+    public static final String OAUTH2_DEVICE_CONSENT_DENIED = "oauth2DeviceConsentDeniedMessage";
 }

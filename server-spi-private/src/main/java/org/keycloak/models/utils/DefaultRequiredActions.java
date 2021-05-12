@@ -34,6 +34,7 @@ public class DefaultRequiredActions {
             verifyEmail.setName("Verify Email");
             verifyEmail.setProviderId(UserModel.RequiredAction.VERIFY_EMAIL.name());
             verifyEmail.setDefaultAction(false);
+            verifyEmail.setPriority(50);
             realm.addRequiredActionProvider(verifyEmail);
 
         }
@@ -45,6 +46,7 @@ public class DefaultRequiredActions {
             updateProfile.setName("Update Profile");
             updateProfile.setProviderId(UserModel.RequiredAction.UPDATE_PROFILE.name());
             updateProfile.setDefaultAction(false);
+            updateProfile.setPriority(40);
             realm.addRequiredActionProvider(updateProfile);
         }
 
@@ -55,6 +57,7 @@ public class DefaultRequiredActions {
             totp.setName("Configure OTP");
             totp.setProviderId(UserModel.RequiredAction.CONFIGURE_TOTP.name());
             totp.setDefaultAction(false);
+            totp.setPriority(10);
             realm.addRequiredActionProvider(totp);
         }
 
@@ -65,6 +68,7 @@ public class DefaultRequiredActions {
             updatePassword.setName("Update Password");
             updatePassword.setProviderId(UserModel.RequiredAction.UPDATE_PASSWORD.name());
             updatePassword.setDefaultAction(false);
+            updatePassword.setPriority(30);
             realm.addRequiredActionProvider(updatePassword);
         }
 
@@ -75,9 +79,37 @@ public class DefaultRequiredActions {
             termsAndConditions.setName("Terms and Conditions");
             termsAndConditions.setProviderId("terms_and_conditions");
             termsAndConditions.setDefaultAction(false);
+            termsAndConditions.setPriority(20);
             realm.addRequiredActionProvider(termsAndConditions);
         }
 
+        addUpdateLocaleAction(realm);
+        addDeleteAccountAction(realm);
+    }
 
+    public static void addDeleteAccountAction(RealmModel realm) {
+        if (realm.getRequiredActionProviderByAlias("delete_account") == null) {
+            RequiredActionProviderModel deleteAccount = new RequiredActionProviderModel();
+            deleteAccount.setEnabled(false);
+            deleteAccount.setAlias("delete_account");
+            deleteAccount.setName("Delete Account");
+            deleteAccount.setProviderId("delete_account");
+            deleteAccount.setDefaultAction(false);
+            deleteAccount.setPriority(60);
+            realm.addRequiredActionProvider(deleteAccount);
+        }
+    }
+
+    public static void addUpdateLocaleAction(RealmModel realm) {
+        if (realm.getRequiredActionProviderByAlias("update_user_locale") == null) {
+            RequiredActionProviderModel updateUserLocale = new RequiredActionProviderModel();
+            updateUserLocale.setEnabled(true);
+            updateUserLocale.setAlias("update_user_locale");
+            updateUserLocale.setName("Update User Locale");
+            updateUserLocale.setProviderId("update_user_locale");
+            updateUserLocale.setDefaultAction(false);
+            updateUserLocale.setPriority(1000);
+            realm.addRequiredActionProvider(updateUserLocale);
+        }
     }
 }

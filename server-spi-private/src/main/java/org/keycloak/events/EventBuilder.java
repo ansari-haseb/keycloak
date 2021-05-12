@@ -27,8 +27,10 @@ import org.keycloak.models.UserModel;
 import org.keycloak.models.UserSessionModel;
 
 import java.util.HashMap;
-import java.util.LinkedList;
 import java.util.List;
+import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * @author <a href="mailto:sthorger@redhat.com">Stian Thorgersen</a>
@@ -56,17 +58,19 @@ public class EventBuilder {
             }
         }
 
-        if (realm.getEventsListeners() != null && !realm.getEventsListeners().isEmpty()) {
-            this.listeners = new LinkedList<>();
-            for (String id : realm.getEventsListeners()) {
-                EventListenerProvider listener = session.getProvider(EventListenerProvider.class, id);
-                if (listener != null) {
-                    listeners.add(listener);
-                } else {
-                    log.error("Event listener '" + id + "' registered, but provider not found");
-                }
-            }
-        }
+
+        this.listeners = realm.getEventsListenersStream()
+                .map(id -> {
+                    EventListenerProvider listener = session.getProvider(EventListenerProvider.class, id);
+                    if (listener != null) {
+                        return listener;
+                    } else {
+                        log.error("Event listener '" + id + "' registered, but provider not found");
+                        return null;
+                    }
+                })
+                .filter(Objects::nonNull)
+                .collect(Collectors.toList());
 
         realm(realm);
         ipAddress(clientConnection.getRemoteAddr());
@@ -80,7 +84,7 @@ public class EventBuilder {
     }
 
     public EventBuilder realm(RealmModel realm) {
-        event.setRealmId(realm.getId());
+        event.setRealmId(realm == null ? null : realm.getId());
         return this;
     }
 
@@ -90,7 +94,7 @@ public class EventBuilder {
     }
 
     public EventBuilder client(ClientModel client) {
-        event.setClientId(client.getClientId());
+        event.setClientId(client == null ? null : client.getClientId());
         return this;
     }
 
@@ -100,7 +104,7 @@ public class EventBuilder {
     }
 
     public EventBuilder user(UserModel user) {
-        event.setUserId(user.getId());
+        event.setUserId(user == null ? null : user.getId());
         return this;
     }
 
@@ -110,7 +114,7 @@ public class EventBuilder {
     }
 
     public EventBuilder session(UserSessionModel session) {
-        event.setSessionId(session.getId());
+        event.setSessionId(session == null ? null : session.getId());
         return this;
     }
 
@@ -135,7 +139,7 @@ public class EventBuilder {
         }
 
         if (event.getDetails() == null) {
-            event.setDetails(new HashMap<String, String>());
+            event.setDetails(new HashMap<>());
         }
         event.getDetails().put(key, value);
         return this;
@@ -157,6 +161,10 @@ public class EventBuilder {
     }
 
     public void error(String error) {
+        if (Objects.isNull(event.getType())) {
+            throw new IllegalStateException("Attempted to define event error without first setting the event type");
+        }
+
         if (!event.getType().name().endsWith("_ERROR")) {
             event.setType(EventType.valueOf(event.getType().name() + "_ERROR"));
         }
@@ -172,7 +180,8 @@ public class EventBuilder {
         event.setTime(Time.currentTimeMillis());
 
         if (store != null) {
-            if (realm.getEnabledEventTypes() != null && !realm.getEnabledEventTypes().isEmpty() ? realm.getEnabledEventTypes().contains(event.getType().name()) : event.getType().isSaveByDefault()) {
+            Set<String> eventTypes = realm.getEnabledEventTypesStream().collect(Collectors.toSet());
+            if (!eventTypes.isEmpty() ? eventTypes.contains(event.getType().name()) : event.getType().isSaveByDefault()) {
                 try {
                     store.onEvent(event);
                 } catch (Throwable t) {

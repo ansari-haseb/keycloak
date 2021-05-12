@@ -80,13 +80,25 @@ public interface ComponentFactory<CreatedType, ProviderType extends Provider> ex
     }
 
     /**
+     * Called before the component is removed.
+     *
+     * @param session
+     * @param realm
+     * @param model model of the component, which is going to be removed
+     */
+    default
+    void preRemove(KeycloakSession session, RealmModel realm, ComponentModel model) {
+
+    }
+
+    /**
      * These are config properties that are common across all implementation of this component type
      *
      * @return
      */
     default
     List<ProviderConfigProperty> getCommonProviderConfigProperties() {
-        return Collections.EMPTY_LIST;
+        return Collections.emptyList();
     }
 
     /**
@@ -97,7 +109,7 @@ public interface ComponentFactory<CreatedType, ProviderType extends Provider> ex
      */
     default
     Map<String, Object> getTypeMetadata() {
-        return Collections.EMPTY_MAP;
+        return Collections.emptyMap();
 
     }
 

@@ -18,7 +18,9 @@
 
 package org.keycloak.authorization.model;
 
+import org.keycloak.representations.idm.authorization.DecisionStrategy;
 import org.keycloak.representations.idm.authorization.PolicyEnforcementMode;
+import org.keycloak.storage.SearchableModelField;
 
 /**
  * Represents a resource server, whose resources are managed and protected. A resource server is basically an existing
@@ -28,20 +30,16 @@ import org.keycloak.representations.idm.authorization.PolicyEnforcementMode;
  */
 public interface ResourceServer {
 
+    public static class SearchableFields {
+        public static final SearchableModelField<ResourceServer> ID = new SearchableModelField<>("id", String.class);
+    }
+
     /**
      * Returns the unique identifier for this instance.
      *
      * @return the unique identifier for this instance
      */
     String getId();
-
-    /**
-     * Returns the identifier of the client application (which already exists in Keycloak) that is also acting as a resource
-     * server.
-     *
-     * @return the identifier of the client application associated with this instance.
-     */
-    String getClientId();
 
     /**
      * Indicates if the resource server is allowed to manage its own resources remotely using the Protection API.
@@ -70,4 +68,19 @@ public interface ResourceServer {
      * @param enforcementMode one of the available options in {@code PolicyEnforcementMode}
      */
     void setPolicyEnforcementMode(PolicyEnforcementMode enforcementMode);
+
+    /**
+     * Defines a {@link DecisionStrategy} for this instance, indicating how permissions should be granted depending on the given
+     * {@code decisionStrategy}.
+     * 
+     * @param decisionStrategy the decision strategy
+     */
+    void setDecisionStrategy(DecisionStrategy decisionStrategy);
+
+    /**
+     * Returns the {@link DecisionStrategy} configured for this instance.
+     * 
+     * @return the decision strategy
+     */
+    DecisionStrategy getDecisionStrategy();
 }

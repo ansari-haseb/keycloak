@@ -21,20 +21,20 @@ import org.jboss.logging.Logger;
 import org.keycloak.credential.CredentialInput;
 import org.keycloak.credential.CredentialInputUpdater;
 import org.keycloak.credential.CredentialInputValidator;
-import org.keycloak.credential.CredentialModel;
 import org.keycloak.federation.sssd.api.Sssd;
 import org.keycloak.federation.sssd.api.Sssd.User;
 import org.keycloak.federation.sssd.impl.PAMAuthenticator;
 import org.keycloak.models.*;
+import org.keycloak.models.credential.PasswordCredentialModel;
 import org.keycloak.models.utils.KeycloakModelUtils;
 import org.keycloak.storage.UserStorageProvider;
 import org.keycloak.storage.UserStorageProviderModel;
 import org.keycloak.storage.user.ImportedUserValidation;
 import org.keycloak.storage.user.UserLookupProvider;
 
-import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.stream.Stream;
 
 /**
  * SPI provider implementation to retrieve data from SSSD and authenticate
@@ -44,8 +44,8 @@ import java.util.Set;
  * @version $Revision: 1 $
  */
 public class SSSDFederationProvider implements UserStorageProvider,
-        UserLookupProvider,
-        CredentialInputUpdater,
+        UserLookupProvider.Streams,
+        CredentialInputUpdater.Streams,
         CredentialInputValidator,
         ImportedUserValidation {
 
@@ -63,12 +63,12 @@ public class SSSDFederationProvider implements UserStorageProvider,
     }
 
     static {
-        supportedCredentialTypes.add(UserCredentialModel.PASSWORD);
+        supportedCredentialTypes.add(PasswordCredentialModel.TYPE);
     }
 
 
     @Override
-    public UserModel getUserByUsername(String username, RealmModel realm) {
+    public UserModel getUserByUsername(RealmModel realm, String username) {
         return findOrCreateAuthenticatedUser(realm, username);
     }
 
@@ -85,7 +85,7 @@ public class SSSDFederationProvider implements UserStorageProvider,
          * @return user if found or successfully created. Null if user with same username already exists, but is not linked to this provider
          */
     protected UserModel findOrCreateAuthenticatedUser(RealmModel realm, String username) {
-        UserModel user = session.userLocalStorage().getUserByUsername(username, realm);
+        UserModel user = session.userLocalStorage().getUserByUsername(realm, username);
         if (user != null) {
             logger.debug("SSSD authenticated user " + username + " found in Keycloak storage");
 
@@ -121,7 +121,7 @@ public class SSSDFederationProvider implements UserStorageProvider,
         for (String s : sssd.getGroups()) {
             GroupModel group = KeycloakModelUtils.findGroupByPath(realm, "/" + s);
             if (group == null) {
-                group = session.realms().createGroup(realm, s);
+                group = session.groups().createGroup(realm, s);
             }
             user.joinGroup(group);
         }
@@ -130,12 +130,12 @@ public class SSSDFederationProvider implements UserStorageProvider,
     }
 
     @Override
-    public UserModel getUserById(String id, RealmModel realm) {
+    public UserModel getUserById(RealmModel realm, String id) {
         return null;
     }
 
     @Override
-    public UserModel getUserByEmail(String email, RealmModel realm) {
+    public UserModel getUserByEmail(RealmModel realm, String email) {
         return null;
     }
 
@@ -163,12 +163,12 @@ public class SSSDFederationProvider implements UserStorageProvider,
 
     @Override
     public boolean supportsCredentialType(String credentialType) {
-        return CredentialModel.PASSWORD.equals(credentialType);
+        return PasswordCredentialModel.TYPE.equals(credentialType);
     }
 
     @Override
     public boolean isConfiguredFor(RealmModel realm, UserModel user, String credentialType) {
-        return CredentialModel.PASSWORD.equals(credentialType);
+        return PasswordCredentialModel.TYPE.equals(credentialType);
     }
 
     @Override
@@ -176,7 +176,7 @@ public class SSSDFederationProvider implements UserStorageProvider,
         if (!supportsCredentialType(input.getType()) || !(input instanceof UserCredentialModel)) return false;
 
         UserCredentialModel cred = (UserCredentialModel)input;
-        PAMAuthenticator pam = factory.createPAMAuthenticator(user.getUsername(), cred.getValue());
+        PAMAuthenticator pam = factory.createPAMAuthenticator(user.getUsername(), cred.getChallengeResponse());
         return (pam.authenticate() != null);
     }
 
@@ -203,7 +203,7 @@ public class SSSDFederationProvider implements UserStorageProvider,
     }
 
     @Override
-    public Set<String> getDisableableCredentialTypes(RealmModel realm, UserModel user) {
-        return Collections.EMPTY_SET;
+    public Stream<String> getDisableableCredentialTypesStream(RealmModel realm, UserModel user) {
+        return Stream.empty();
     }
 }

@@ -19,30 +19,43 @@ package org.keycloak.events;
 
 import java.util.Date;
 import java.util.List;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * @author <a href="mailto:sthorger@redhat.com">Stian Thorgersen</a>
  */
 public interface EventQuery {
 
-    public EventQuery type(EventType... types);
+    EventQuery type(EventType... types);
 
-    public EventQuery realm(String realmId);
+    EventQuery realm(String realmId);
 
-    public EventQuery client(String clientId);
+    EventQuery client(String clientId);
 
-    public EventQuery user(String userId);
+    EventQuery user(String userId);
 
-    public EventQuery fromDate(Date fromDate);
+    EventQuery fromDate(Date fromDate);
 
-    public EventQuery toDate(Date toDate);
+    EventQuery toDate(Date toDate);
 
-    public EventQuery ipAddress(String ipAddress);
+    EventQuery ipAddress(String ipAddress);
 
-    public EventQuery firstResult(int result);
+    EventQuery firstResult(int result);
 
-    public EventQuery maxResults(int results);
+    EventQuery maxResults(int results);
 
-    public List<Event> getResultList();
+    /**
+     * @deprecated Use {@link #getResultStream() getResultStream} instead.
+     */
+    @Deprecated
+    default List<Event> getResultList() {
+        return getResultStream().collect(Collectors.toList());
+    }
 
+    /**
+     * Returns requested results that match given criteria as a stream.
+     * @return Stream of events. Never returns {@code null}.
+     */
+    Stream<Event> getResultStream();
 }

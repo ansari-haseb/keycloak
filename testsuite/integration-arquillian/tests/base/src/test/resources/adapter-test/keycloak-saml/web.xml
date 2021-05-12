@@ -23,6 +23,10 @@
 
     <module-name>%CONTEXT_PATH%</module-name>
 
+    <servlet>
+        <servlet-name>javax.ws.rs.core.Application</servlet-name>
+        <load-on-startup>1</load-on-startup>
+    </servlet>
     <servlet-mapping>
         <servlet-name>javax.ws.rs.core.Application</servlet-name>
         <url-pattern>/*</url-pattern>
@@ -40,6 +44,18 @@
         <auth-constraint>
             <role-name>manager</role-name>
         </auth-constraint>
+    </security-constraint>
+    <security-constraint>
+        <web-resource-collection>
+            <web-resource-name>Unsecured-setCheckRoles</web-resource-name>
+            <url-pattern>/setCheckRoles/*</url-pattern>
+        </web-resource-collection>
+    </security-constraint>
+    <security-constraint>
+        <web-resource-collection>
+            <web-resource-name>Unsecured-uncheckRoles</web-resource-name>
+            <url-pattern>/uncheckRoles/*</url-pattern>
+        </web-resource-collection>
     </security-constraint>
 
     <login-config>

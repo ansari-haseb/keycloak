@@ -24,8 +24,9 @@ import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.PasswordPolicy;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.UserModel;
+import org.keycloak.models.credential.PasswordCredentialModel;
 
-import java.util.List;
+import java.util.stream.Stream;
 
 /**
  * @author <a href="mailto:sthorger@redhat.com">Stian Thorgersen</a>
@@ -51,29 +52,41 @@ public class HistoryPasswordPolicyProvider implements PasswordPolicyProvider {
         PasswordPolicy policy = session.getContext().getRealm().getPasswordPolicy();
         int passwordHistoryPolicyValue = policy.getPolicyConfig(PasswordPolicy.PASSWORD_HISTORY_ID);
         if (passwordHistoryPolicyValue != -1) {
-            List<CredentialModel> storedPasswords = session.userCredentialManager().getStoredCredentialsByType(realm, user, CredentialModel.PASSWORD);
-            for (CredentialModel cred : storedPasswords) {
-                PasswordHashProvider hash = session.getProvider(PasswordHashProvider.class, cred.getAlgorithm());
-                if (hash == null) continue;
-                if (hash.verify(password, cred)) {
-                    return new PolicyError(ERROR_MESSAGE, passwordHistoryPolicyValue);
-                }
+            if (session.userCredentialManager().getStoredCredentialsByTypeStream(realm, user, PasswordCredentialModel.TYPE)
+                    .map(PasswordCredentialModel::createFromCredentialModel)
+                    .anyMatch(passwordCredential -> {
+                        PasswordHashProvider hash = session.getProvider(PasswordHashProvider.class,
+                                passwordCredential.getPasswordCredentialData().getAlgorithm());
+                        return hash != null && hash.verify(password, passwordCredential);
+                    })) {
+                return new PolicyError(ERROR_MESSAGE, passwordHistoryPolicyValue);
             }
-            List<CredentialModel> passwordHistory = session.userCredentialManager().getStoredCredentialsByType(realm, user, CredentialModel.PASSWORD_HISTORY);
-            for (CredentialModel cred : passwordHistory) {
-                PasswordHashProvider hash = session.getProvider(PasswordHashProvider.class, cred.getAlgorithm());
-                if (hash.verify(password, cred)) {
+
+            if (passwordHistoryPolicyValue > 0) {
+                if (this.getRecent(session.userCredentialManager().getStoredCredentialsByTypeStream(realm, user, PasswordCredentialModel.PASSWORD_HISTORY),
+                        passwordHistoryPolicyValue - 1)
+                        .map(PasswordCredentialModel::createFromCredentialModel)
+                        .anyMatch(passwordCredential -> {
+                            PasswordHashProvider hash = session.getProvider(PasswordHashProvider.class,
+                                    passwordCredential.getPasswordCredentialData().getAlgorithm());
+                            return hash.verify(password, passwordCredential);
+                        })) {
                     return new PolicyError(ERROR_MESSAGE, passwordHistoryPolicyValue);
                 }
-
             }
         }
         return null;
     }
 
+    private Stream<CredentialModel> getRecent(Stream<CredentialModel> passwordHistory, int limit) {
+        return passwordHistory
+                .sorted(CredentialModel.comparingByStartDateDesc())
+                .limit(limit);
+    }
+
     @Override
     public Object parseConfig(String value) {
-        return value != null ? Integer.parseInt(value) : HistoryPasswordPolicyProviderFactory.DEFAULT_VALUE;
+        return parseInteger(value, HistoryPasswordPolicyProviderFactory.DEFAULT_VALUE);
     }
 
     @Override

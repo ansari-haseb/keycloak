@@ -35,14 +35,14 @@ public class RealmSynchronizer implements Synchronizer<RealmRemovedEvent> {
         AuthorizationProvider authorizationProvider = providerFactory.create(event.getKeycloakSession());
         StoreFactory storeFactory = authorizationProvider.getStoreFactory();
 
-        event.getRealm().getClients().forEach(clientModel -> {
-            ResourceServer resourceServer = storeFactory.getResourceServerStore().findByClient(clientModel.getId());
+        event.getRealm().getClientsStream().forEach(clientModel -> {
+            ResourceServer resourceServer = storeFactory.getResourceServerStore().findById(clientModel.getId());
 
             if (resourceServer != null) {
                 String id = resourceServer.getId();
-                storeFactory.getResourceStore().findByResourceServer(id).forEach(resource -> storeFactory.getResourceStore().delete(resource.getId()));
-                storeFactory.getScopeStore().findByResourceServer(id).forEach(scope -> storeFactory.getScopeStore().delete(scope.getId()));
-                storeFactory.getPolicyStore().findByResourceServer(id).forEach(scope -> storeFactory.getPolicyStore().delete(scope.getId()));
+                //storeFactory.getResourceStore().findByResourceServer(id).forEach(resource -> storeFactory.getResourceStore().delete(resource.getId()));
+                //storeFactory.getScopeStore().findByResourceServer(id).forEach(scope -> storeFactory.getScopeStore().delete(scope.getId()));
+                //storeFactory.getPolicyStore().findByResourceServer(id).forEach(scope -> storeFactory.getPolicyStore().delete(scope.getId()));
                 storeFactory.getResourceServerStore().delete(id);
             }
         });

@@ -53,7 +53,7 @@ public class IdpCreateUserIfUniqueAuthenticator extends AbstractIdpAuthenticator
         KeycloakSession session = context.getSession();
         RealmModel realm = context.getRealm();
 
-        if (context.getClientSession().getNote(EXISTING_USER_INFO) != null) {
+        if (context.getAuthenticationSession().getAuthNote(EXISTING_USER_INFO) != null) {
             context.attempted();
             return;
         }
@@ -61,7 +61,7 @@ public class IdpCreateUserIfUniqueAuthenticator extends AbstractIdpAuthenticator
         String username = getUsername(context, serializedCtx, brokerContext);
         if (username == null) {
             ServicesLogger.LOGGER.resetFlow(realm.isRegistrationEmailAsUsername() ? "Email" : "Username");
-            context.getClientSession().setNote(ENFORCE_UPDATE_PROFILE, "true");
+            context.getAuthenticationSession().setAuthNote(ENFORCE_UPDATE_PROFILE, "true");
             context.resetFlow();
             return;
         }
@@ -74,12 +74,11 @@ public class IdpCreateUserIfUniqueAuthenticator extends AbstractIdpAuthenticator
 
             UserModel federatedUser = session.users().addUser(realm, username);
             federatedUser.setEnabled(true);
-            federatedUser.setEmail(brokerContext.getEmail());
-            federatedUser.setFirstName(brokerContext.getFirstName());
-            federatedUser.setLastName(brokerContext.getLastName());
 
             for (Map.Entry<String, List<String>> attr : serializedCtx.getAttributes().entrySet()) {
-                federatedUser.setAttribute(attr.getKey(), attr.getValue());
+                if (!UserModel.USERNAME.equalsIgnoreCase(attr.getKey())) {
+                    federatedUser.setAttribute(attr.getKey(), attr.getValue());
+                }
             }
 
             AuthenticatorConfigModel config = context.getAuthenticatorConfig();
@@ -91,27 +90,28 @@ public class IdpCreateUserIfUniqueAuthenticator extends AbstractIdpAuthenticator
             userRegisteredSuccess(context, federatedUser, serializedCtx, brokerContext);
 
             context.setUser(federatedUser);
-            context.getClientSession().setNote(BROKER_REGISTERED_NEW_USER, "true");
+            context.getAuthenticationSession().setAuthNote(BROKER_REGISTERED_NEW_USER, "true");
             context.success();
         } else {
             logger.debugf("Duplication detected. There is already existing user with %s '%s' .",
                     duplication.getDuplicateAttributeName(), duplication.getDuplicateAttributeValue());
 
             // Set duplicated user, so next authenticators can deal with it
-            context.getClientSession().setNote(EXISTING_USER_INFO, duplication.serialize());
-
-            Response challengeResponse = context.form()
-                    .setError(Messages.FEDERATED_IDENTITY_EXISTS, duplication.getDuplicateAttributeName(), duplication.getDuplicateAttributeValue())
-                    .createErrorPage();
-            context.challenge(challengeResponse);
-
+            context.getAuthenticationSession().setAuthNote(EXISTING_USER_INFO, duplication.serialize());
+            //Only show error message if the authenticator was required
             if (context.getExecution().isRequired()) {
+                Response challengeResponse = context.form()
+                        .setError(Messages.FEDERATED_IDENTITY_EXISTS, duplication.getDuplicateAttributeName(), duplication.getDuplicateAttributeValue())
+                        .createErrorPage(Response.Status.CONFLICT);
+                context.challenge(challengeResponse);
                 context.getEvent()
                         .user(duplication.getExistingUserId())
                         .detail("existing_" + duplication.getDuplicateAttributeName(), duplication.getDuplicateAttributeValue())
                         .removeDetail(Details.AUTH_METHOD)
                         .removeDetail(Details.AUTH_TYPE)
                         .error(Errors.FEDERATED_IDENTITY_EXISTS);
+            } else {
+                context.attempted();
             }
         }
     }
@@ -120,13 +120,13 @@ public class IdpCreateUserIfUniqueAuthenticator extends AbstractIdpAuthenticator
     protected ExistingUserInfo checkExistingUser(AuthenticationFlowContext context, String username, SerializedBrokeredIdentityContext serializedCtx, BrokeredIdentityContext brokerContext) {
 
         if (brokerContext.getEmail() != null && !context.getRealm().isDuplicateEmailsAllowed()) {
-            UserModel existingUser = context.getSession().users().getUserByEmail(brokerContext.getEmail(), context.getRealm());
+            UserModel existingUser = context.getSession().users().getUserByEmail(context.getRealm(), brokerContext.getEmail());
             if (existingUser != null) {
                 return new ExistingUserInfo(existingUser.getId(), UserModel.EMAIL, existingUser.getEmail());
             }
         }
 
-        UserModel existingUser = context.getSession().users().getUserByUsername(username, context.getRealm());
+        UserModel existingUser = context.getSession().users().getUserByUsername(context.getRealm(), username);
         if (existingUser != null) {
             return new ExistingUserInfo(existingUser.getId(), UserModel.USERNAME, existingUser.getUsername());
         }

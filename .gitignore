@@ -1,3 +1,7 @@
+# OS stuff
+###################
+.DS_Store
+
 # Intellij
 ###################
 .idea
@@ -8,6 +12,11 @@
 .project
 .settings
 .classpath
+# reverting this as e.g. /distribution/feature-packs/server-feature-pack/src/main/resources/content/bin/
+# should not be ignored
+#bin/
+.factorypath
+
 
 # NetBeans #
 ############
@@ -15,6 +24,10 @@ nbactions.xml
 nb-configuration.xml
 catalog.xml
 nbproject
+
+# VS Code #
+###########
+*.code-workspace
 
 # Compiled source #
 ###################
@@ -38,9 +51,14 @@ nbproject
 *.tar
 *.zip
 
+# Python byte-compiled files #
+##############################
+*.pyc
+
 # Logs and databases #
 ######################
 *.log
+.attach_pid*
 
 # Maven #
 #########
@@ -49,3 +67,17 @@ target
 # Maven shade
 #############
 *dependency-reduced-pom.xml
+
+# nodejs #
+##########
+# KEYCLOAK-5391: We will re-exclude node_modules when node_modules handling is worked out.
+# For now, we keep our js libraries checked into GitHub, so we don't ignore.
+#node_modules
+
+# testsuite #
+#############
+*offline-token.txt
+
+# Quarkus ephemeral data #
+##########################
+quarkus/data/*.db

@@ -17,7 +17,16 @@
 
 package org.keycloak.adapters.springsecurity.authentication;
 
+import java.io.IOException;
+
+import javax.servlet.ServletException;
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+
 import org.apache.http.HttpHeaders;
+import org.keycloak.adapters.AdapterDeploymentContext;
+import org.keycloak.adapters.spi.HttpFacade;
+import org.keycloak.adapters.springsecurity.facade.SimpleHttpFacade;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -25,17 +34,7 @@ import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.util.matcher.RequestMatcher;
 import org.springframework.util.Assert;
-
-import javax.servlet.ServletException;
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
-import java.io.IOException;
-import org.keycloak.adapters.AdapterDeploymentContext;
-import org.keycloak.adapters.spi.HttpFacade;
-import org.keycloak.adapters.springsecurity.config.KeycloakWebSecurityConfigurerAdapter;
-import org.keycloak.adapters.springsecurity.facade.SimpleHttpFacade;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.context.annotation.AnnotationConfigApplicationContext;
+import org.springframework.util.StringUtils;
 
 /**
  * Provides a Keycloak {@link AuthenticationEntryPoint authentication entry point}. Uses a
@@ -62,15 +61,14 @@ public class KeycloakAuthenticationEntryPoint implements AuthenticationEntryPoin
     private final RequestMatcher apiRequestMatcher;
     private String loginUri = DEFAULT_LOGIN_URI;
     private String realm = DEFAULT_REALM;
- 
+
     private AdapterDeploymentContext adapterDeploymentContext;
 
     /**
      * Creates a new Keycloak authentication entry point.
      */
     public KeycloakAuthenticationEntryPoint(AdapterDeploymentContext adapterDeploymentContext) {
-        this(DEFAULT_API_REQUEST_MATCHER);
-        this.adapterDeploymentContext = adapterDeploymentContext;
+        this(adapterDeploymentContext, DEFAULT_API_REQUEST_MATCHER);
     }
 
     /**
@@ -80,14 +78,15 @@ public class KeycloakAuthenticationEntryPoint implements AuthenticationEntryPoin
      * @param apiRequestMatcher the <code>RequestMatcher</code> to use to determine
      * if the current request is an API request or a browser request (required)
      */
-    public KeycloakAuthenticationEntryPoint(RequestMatcher apiRequestMatcher) {
+    public KeycloakAuthenticationEntryPoint(AdapterDeploymentContext adapterDeploymentContext, RequestMatcher apiRequestMatcher) {
         Assert.notNull(apiRequestMatcher, "apiRequestMatcher required");
+        Assert.notNull(adapterDeploymentContext, "adapterDeploymentContext required");
+        this.adapterDeploymentContext = adapterDeploymentContext;
         this.apiRequestMatcher = apiRequestMatcher;
     }
 
     @Override
-    public void commence(HttpServletRequest request, HttpServletResponse response, AuthenticationException authException) throws IOException, ServletException
-    {
+    public void commence(HttpServletRequest request, HttpServletResponse response, AuthenticationException authException) throws IOException, ServletException {
         HttpFacade facade = new SimpleHttpFacade(request, response);
         if (apiRequestMatcher.matches(request) || adapterDeploymentContext.resolveDeployment(facade).isBearerOnly()) {
             commenceUnauthorizedResponse(request, response);
@@ -96,8 +95,24 @@ public class KeycloakAuthenticationEntryPoint implements AuthenticationEntryPoin
         }
     }
 
+    /**
+     * Redirects to the login page. If HTTP sessions are disabled, the redirect URL is saved in a
+     * cookie now, to be retrieved by the {@link KeycloakAuthenticationSuccessHandler} or the
+     * {@link KeycloakAuthenticationFailureHandler} when the login sequence completes.
+     */
     protected void commenceLoginRedirect(HttpServletRequest request, HttpServletResponse response) throws IOException {
-        String contextAwareLoginUri = request.getContextPath() + loginUri;
+        if (request.getSession(false) == null && KeycloakCookieBasedRedirect.getRedirectUrlFromCookie(request) == null) {
+            // If no session exists yet at this point, then apparently the redirect URL is not
+            // stored in a session. We'll store it in a cookie instead.
+            response.addCookie(KeycloakCookieBasedRedirect.createCookieFromRedirectUrl(request.getRequestURI()));
+        }
+
+        String queryParameters = "";
+        if (!StringUtils.isEmpty(request.getQueryString())) {
+            queryParameters = "?" + request.getQueryString();
+        }
+
+        String contextAwareLoginUri = request.getContextPath() + loginUri + queryParameters;
         log.debug("Redirecting to login URI {}", contextAwareLoginUri);
         response.sendRedirect(contextAwareLoginUri);
     }

@@ -31,17 +31,23 @@ import org.keycloak.models.ClientModel;
 import org.keycloak.models.Constants;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
+import org.keycloak.models.RoleModel;
+import org.keycloak.models.UserModel;
 import org.keycloak.protocol.oidc.utils.AuthorizeClientUtil;
 import org.keycloak.representations.JsonWebToken;
 import org.keycloak.services.ErrorResponseException;
-import org.keycloak.services.clientregistration.policy.RegistrationAuth;
+import org.keycloak.services.clientpolicy.ClientPolicyException;
+import org.keycloak.services.clientpolicy.context.DynamicClientRegisterContext;
+import org.keycloak.services.clientpolicy.context.DynamicClientUnregisterContext;
+import org.keycloak.services.clientpolicy.context.DynamicClientUpdateContext;
+import org.keycloak.services.clientpolicy.context.DynamicClientViewContext;
 import org.keycloak.services.clientregistration.policy.ClientRegistrationPolicyException;
 import org.keycloak.services.clientregistration.policy.ClientRegistrationPolicyManager;
+import org.keycloak.services.clientregistration.policy.RegistrationAuth;
 import org.keycloak.util.TokenUtil;
 
 import javax.ws.rs.core.HttpHeaders;
 import javax.ws.rs.core.Response;
-import javax.ws.rs.core.UriInfo;
 import java.util.List;
 import java.util.Map;
 
@@ -57,16 +63,19 @@ public class ClientRegistrationAuth {
     private RealmModel realm;
     private JsonWebToken jwt;
     private ClientInitialAccessModel initialAccessModel;
+    private String kid;
+    private String token;
+    private String endpoint;
 
-    public ClientRegistrationAuth(KeycloakSession session, ClientRegistrationProvider provider, EventBuilder event) {
+    public ClientRegistrationAuth(KeycloakSession session, ClientRegistrationProvider provider, EventBuilder event, String endpoint) {
         this.session = session;
         this.provider = provider;
         this.event = event;
+        this.endpoint = endpoint;
     }
 
     private void init() {
         realm = session.getContext().getRealm();
-        UriInfo uri = session.getContext().getUri();
 
         String authorizationHeader = session.getContext().getRequestHeaders().getRequestHeaders().getFirst(HttpHeaders.AUTHORIZATION);
         if (authorizationHeader == null) {
@@ -78,18 +87,33 @@ public class ClientRegistrationAuth {
             return;
         }
 
-        ClientRegistrationTokenUtils.TokenVerification tokenVerification = ClientRegistrationTokenUtils.verifyToken(session, realm, uri, split[1]);
+        token = split[1];
+
+        ClientRegistrationTokenUtils.TokenVerification tokenVerification = ClientRegistrationTokenUtils.verifyToken(session, realm, token);
         if (tokenVerification.getError() != null) {
             throw unauthorized(tokenVerification.getError().getMessage());
         }
+        kid = tokenVerification.getKid();
         jwt = tokenVerification.getJwt();
 
         if (isInitialAccessToken()) {
-            initialAccessModel = session.sessions().getClientInitialAccessModel(session.getContext().getRealm(), jwt.getId());
+            initialAccessModel = session.realms().getClientInitialAccessModel(session.getContext().getRealm(), jwt.getId());
             if (initialAccessModel == null) {
                 throw unauthorized("Initial Access Token not found");
             }
         }
+    }
+
+    public String getToken() {
+        return token;
+    }
+
+    public String getKid() {
+        return kid;
+    }
+
+    public JsonWebToken getJwt() {
+        return jwt;
     }
 
     private boolean isBearerToken() {
@@ -110,6 +134,8 @@ public class ClientRegistrationAuth {
         RegistrationAuth registrationAuth = RegistrationAuth.ANONYMOUS;
 
         if (isBearerToken()) {
+            checkClientProtocol();
+
             if (hasRole(AdminRoles.MANAGE_CLIENTS, AdminRoles.CREATE_CLIENT)) {
                 registrationAuth = RegistrationAuth.AUTHENTICATED;
             } else {
@@ -128,8 +154,9 @@ public class ClientRegistrationAuth {
         }
 
         try {
+            session.clientPolicy().triggerOnEvent(new DynamicClientRegisterContext(context, jwt, realm));
             ClientRegistrationPolicyManager.triggerBeforeRegister(context, registrationAuth);
-        } catch (ClientRegistrationPolicyException crpe) {
+        } catch (ClientRegistrationPolicyException | ClientPolicyException crpe) {
             throw forbidden(crpe.getMessage());
         }
 
@@ -137,12 +164,18 @@ public class ClientRegistrationAuth {
     }
 
     public void requireView(ClientModel client) {
+        requireView(client, false);
+    }
+
+    public void requireView(ClientModel client, boolean allowPublicClient) {
         RegistrationAuth authType = null;
         boolean authenticated = false;
 
         init();
 
         if (isBearerToken()) {
+            checkClientProtocol();
+
             if (hasRole(AdminRoles.MANAGE_CLIENTS, AdminRoles.VIEW_CLIENTS)) {
                 if (client == null) {
                     throw notFound();
@@ -155,22 +188,22 @@ public class ClientRegistrationAuth {
             }
         } else if (isRegistrationAccessToken()) {
             if (client != null && client.getRegistrationToken() != null && client.getRegistrationToken().equals(jwt.getId())) {
+                checkClientProtocol(client);
                 authenticated = true;
                 authType = getRegistrationAuth();
             }
         } else if (isInitialAccessToken()) {
             throw unauthorized("Not initial access token allowed");
-        } else {
-            if (authenticateClient(client)) {
-                authenticated = true;
-                authType = RegistrationAuth.AUTHENTICATED;
-            }
+        } else if (allowPublicClient && authenticatePublicClient(client)) {
+            authenticated = true;
+            authType = RegistrationAuth.AUTHENTICATED;
         }
 
         if (authenticated) {
             try {
+                session.clientPolicy().triggerOnEvent(new DynamicClientViewContext(session, client, jwt, realm));
                 ClientRegistrationPolicyManager.triggerBeforeView(session, provider, authType, client);
-            } catch (ClientRegistrationPolicyException crpe) {
+            } catch (ClientRegistrationPolicyException | ClientPolicyException crpe) {
                 throw forbidden(crpe.getMessage());
             }
         } else {
@@ -187,8 +220,9 @@ public class ClientRegistrationAuth {
         RegistrationAuth regAuth = requireUpdateAuth(client);
 
         try {
+            session.clientPolicy().triggerOnEvent(new DynamicClientUpdateContext(context, client, jwt, realm));
             ClientRegistrationPolicyManager.triggerBeforeUpdate(context, regAuth, client);
-        } catch (ClientRegistrationPolicyException crpe) {
+        } catch (ClientRegistrationPolicyException | ClientPolicyException crpe) {
             throw forbidden(crpe.getMessage());
         }
 
@@ -199,9 +233,24 @@ public class ClientRegistrationAuth {
         RegistrationAuth chainType = requireUpdateAuth(client);
 
         try {
+            session.clientPolicy().triggerOnEvent(new DynamicClientUnregisterContext(session, client, jwt, realm));
             ClientRegistrationPolicyManager.triggerBeforeRemove(session, provider, chainType, client);
-        } catch (ClientRegistrationPolicyException crpe) {
+        } catch (ClientRegistrationPolicyException | ClientPolicyException crpe) {
             throw forbidden(crpe.getMessage());
+        }
+    }
+
+    private void checkClientProtocol() {
+        ClientModel client = session.getContext().getRealm().getClientByClientId(jwt.getIssuedFor());
+
+        checkClientProtocol(client);
+    }
+
+    private void checkClientProtocol(ClientModel client) {
+        if (endpoint.equals("openid-connect") || endpoint.equals("saml2-entity-descriptor")) {
+            if (client != null && !endpoint.contains(client.getProtocol())) {
+                throw new ErrorResponseException(Errors.INVALID_CLIENT, "Wrong client protocol.", Response.Status.BAD_REQUEST);
+            }
         }
     }
 
@@ -209,6 +258,8 @@ public class ClientRegistrationAuth {
         init();
 
         if (isBearerToken()) {
+            checkClientProtocol();
+
             if (hasRole(AdminRoles.MANAGE_CLIENTS)) {
                 if (client == null) {
                     throw notFound();
@@ -231,45 +282,73 @@ public class ClientRegistrationAuth {
         return initialAccessModel;
     }
 
-    private boolean hasRole(String... role) {
+    private boolean hasRole(String... roles) {
         try {
-            Map<String, Object> otherClaims = jwt.getOtherClaims();
-            if (otherClaims != null) {
-                Map<String, Map<String, List<String>>> resourceAccess = (Map<String, Map<String, List<String>>>) jwt.getOtherClaims().get("resource_access");
-                if (resourceAccess == null) {
-                    return false;
-                }
+            if (jwt.getIssuedFor().equals(Constants.ADMIN_CLI_CLIENT_ID)
+                    || jwt.getIssuedFor().equals(Constants.ADMIN_CONSOLE_CLIENT_ID)) {
+                return hasRoleInModel(roles);
 
-                List<String> roles = null;
-
-                Map<String, List<String>> map;
-                if (realm.getName().equals(Config.getAdminRealm())) {
-                    map = resourceAccess.get(realm.getMasterAdminClient().getClientId());
-                } else {
-                    map = resourceAccess.get(Constants.REALM_MANAGEMENT_CLIENT_ID);
-                }
-
-                if (map != null) {
-                    roles = map.get("roles");
-                }
-
-                if (roles == null) {
-                    return false;
-                }
-
-                for (String r : role) {
-                    if (roles.contains(r)) {
-                        return true;
-                    }
-                }
+            } else {
+                return hasRoleInToken(roles);
             }
-            return false;
         } catch (Throwable t) {
             return false;
         }
     }
 
-    private boolean authenticateClient(ClientModel client) {
+    private boolean hasRoleInModel(String[] roles) {
+        ClientModel roleNamespace;
+        UserModel user = session.users().getUserById(realm, jwt.getSubject());
+        if (user == null) {
+            return false;
+        }
+        if (realm.getName().equals(Config.getAdminRealm())) {
+            roleNamespace = realm.getMasterAdminClient();
+        } else {
+            roleNamespace = realm.getClientByClientId(Constants.REALM_MANAGEMENT_CLIENT_ID);
+        }
+        for (String role : roles) {
+            RoleModel roleModel = roleNamespace.getRole(role);
+            if (user.hasRole(roleModel)) return true;
+        }
+        return false;
+    }
+
+    private boolean hasRoleInToken(String[] role) {
+        Map<String, Object> otherClaims = jwt.getOtherClaims();
+        if (otherClaims != null) {
+            Map<String, Map<String, List<String>>> resourceAccess = (Map<String, Map<String, List<String>>>) jwt.getOtherClaims().get("resource_access");
+            if (resourceAccess == null) {
+                return false;
+            }
+
+            List<String> roles = null;
+
+            Map<String, List<String>> map;
+            if (realm.getName().equals(Config.getAdminRealm())) {
+                map = resourceAccess.get(realm.getMasterAdminClient().getClientId());
+            } else {
+                map = resourceAccess.get(Constants.REALM_MANAGEMENT_CLIENT_ID);
+            }
+
+            if (map != null) {
+                roles = map.get("roles");
+            }
+
+            if (roles == null) {
+                return false;
+            }
+
+            for (String r : role) {
+                if (roles.contains(r)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private boolean authenticatePublicClient(ClientModel client) {
         if (client == null) {
             return false;
         }
@@ -296,6 +375,8 @@ public class ClientRegistrationAuth {
             event.client(client.getClientId()).error(Errors.NOT_ALLOWED);
             throw unauthorized("Different client authenticated");
         }
+
+        checkClientProtocol(authClient);
 
         return true;
     }

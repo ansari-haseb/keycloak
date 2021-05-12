@@ -23,7 +23,9 @@ package org.keycloak.testsuite.console.clients;
 
 import org.jboss.arquillian.graphene.page.Page;
 import org.junit.Before;
+import org.junit.Ignore;
 import org.junit.Test;
+import org.keycloak.protocol.oidc.mappers.OIDCAttributeMapperHelper;
 import org.keycloak.representations.idm.ClientRepresentation;
 import org.keycloak.representations.idm.ProtocolMapperRepresentation;
 import org.keycloak.testsuite.console.page.clients.mappers.ClientMapper;
@@ -34,6 +36,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import static org.hamcrest.CoreMatchers.is;
+import static org.hamcrest.core.IsEqual.equalTo;
 import static org.junit.Assert.*;
 import static org.keycloak.testsuite.auth.page.login.Login.OIDC;
 import static org.keycloak.testsuite.console.clients.AbstractClientTest.createClientRep;
@@ -65,19 +69,15 @@ public class ClientMappersOIDCTest extends AbstractClientTest {
         clientMappersPage.navigateTo();
     }
     
-    private void setInitialValues(String name, boolean consentRequired, String consentText) {
+    private void setInitialValues(String name) {
         createClientMappersPage.form().setName(name);
-        createClientMappersPage.form().setConsentRequired(consentRequired);
-        if (consentRequired) {
-            createClientMappersPage.form().setConsentText(consentText);
-        }
     }
     
     @Test
     public void testHardcodedRole() {
         //create
         clientMappersPage.mapperTable().createMapper();
-        setInitialValues("hardcoded role", true, "Consent Text");
+        setInitialValues("hardcoded role");
         createClientMappersPage.form().setMapperType(HARDCODED_ROLE);
         createClientMappersPage.form().selectRole(REALM_ROLE, "offline_access", null);
         createClientMappersPage.form().save();
@@ -86,13 +86,10 @@ public class ClientMappersOIDCTest extends AbstractClientTest {
         //check
         ProtocolMapperRepresentation found = findClientMapperByName(id, "hardcoded role");
         assertNotNull(found);
-        
-        assertTrue(found.isConsentRequired());
-        assertEquals("Consent Text", found.getConsentText());
+
         assertEquals("oidc-hardcoded-role-mapper", found.getProtocolMapper());
         Map<String, String> config = found.getConfig();
         
-        assertEquals(1, config.size());
         assertEquals("offline_access", config.get("role"));
         
         //edit
@@ -117,7 +114,7 @@ public class ClientMappersOIDCTest extends AbstractClientTest {
     public void testHardcodedClaim() {
         //create
         clientMappersPage.mapperTable().createMapper();
-        setInitialValues("hardcoded claim", false, null);
+        setInitialValues("hardcoded claim");
         createClientMappersPage.form().setMapperType(HARDCODED_CLAIM);
         createClientMappersPage.form().setTokenClaimName("claim name");
         createClientMappersPage.form().setTokenClaimValue("claim value");
@@ -130,8 +127,7 @@ public class ClientMappersOIDCTest extends AbstractClientTest {
         //check
         ProtocolMapperRepresentation found = findClientMapperByName(id, "hardcoded claim");
         assertNotNull(found);
-        
-        assertFalse(found.isConsentRequired());
+
         assertEquals("oidc-hardcoded-claim-mapper", found.getProtocolMapper());
         
         Map<String, String> config = found.getConfig();
@@ -146,7 +142,7 @@ public class ClientMappersOIDCTest extends AbstractClientTest {
     public void testUserSessionNote() {
         //create
         clientMappersPage.mapperTable().createMapper();
-        setInitialValues("user session note", false, null);
+        setInitialValues("user session note");
         createClientMappersPage.form().setMapperType(USER_SESSION_NOTE);
         createClientMappersPage.form().setUserSessionNote("session note");
         createClientMappersPage.form().setTokenClaimName("claim name");
@@ -159,13 +155,10 @@ public class ClientMappersOIDCTest extends AbstractClientTest {
         //check
         ProtocolMapperRepresentation found = findClientMapperByName(id, "user session note");
         assertNotNull(found);
-        
-        assertFalse(found.isConsentRequired());
+
         assertEquals("oidc-usersessionmodel-note-mapper", found.getProtocolMapper());
         
         Map<String, String> config = found.getConfig();
-        assertNull(config.get("id.token.claim"));
-        assertNull(config.get("access.token.claim"));
         assertEquals("claim name", config.get("claim.name"));
         assertEquals("session note", config.get("user.session.note"));
         assertEquals("int", config.get("jsonType.label"));
@@ -175,7 +168,7 @@ public class ClientMappersOIDCTest extends AbstractClientTest {
     public void testRoleName() {
         //create
         clientMappersPage.mapperTable().createMapper();
-        setInitialValues("role name", false, null);
+        setInitialValues("role name");
         createClientMappersPage.form().setMapperType(ROLE_NAME_MAPPER);
         createClientMappersPage.form().setRole("offline_access");
         createClientMappersPage.form().setNewRole("new role");
@@ -195,7 +188,7 @@ public class ClientMappersOIDCTest extends AbstractClientTest {
     public void testUserAddress() {
         //create
         clientMappersPage.mapperTable().createMapper();
-        setInitialValues("user address", false, null);
+        setInitialValues("user address");
         createClientMappersPage.form().setMapperType(USERS_FULL_NAME);
         createClientMappersPage.form().save();
         assertAlertSuccess();
@@ -209,7 +202,7 @@ public class ClientMappersOIDCTest extends AbstractClientTest {
     public void testUserFullName() {
         //create
         clientMappersPage.mapperTable().createMapper();
-        setInitialValues("user full name", false, null);
+        setInitialValues("user full name");
         createClientMappersPage.form().setMapperType(USERS_FULL_NAME);
         createClientMappersPage.form().save();
         assertAlertSuccess();
@@ -223,7 +216,7 @@ public class ClientMappersOIDCTest extends AbstractClientTest {
     public void testUserAttribute() {
         //create
         clientMappersPage.mapperTable().createMapper();
-        setInitialValues("user attribute", false, null);
+        setInitialValues("user attribute");
         createClientMappersPage.form().setMapperType(USER_ATTRIBUTE);
         createClientMappersPage.form().setUserAttribute("user attribute");
         createClientMappersPage.form().setMultivalued(true);
@@ -243,7 +236,7 @@ public class ClientMappersOIDCTest extends AbstractClientTest {
     public void testUserProperty() {
         //create
         clientMappersPage.mapperTable().createMapper();
-        setInitialValues("user property", false, null);
+        setInitialValues("user property");
         createClientMappersPage.form().setMapperType(USER_PROPERTY);
         createClientMappersPage.form().setProperty("property");
         createClientMappersPage.form().save();
@@ -261,7 +254,7 @@ public class ClientMappersOIDCTest extends AbstractClientTest {
     public void testGroupMembership() {
         //create
         clientMappersPage.mapperTable().createMapper();
-        setInitialValues("group membership", false, null);
+        setInitialValues("group membership");
         createClientMappersPage.form().setMapperType(GROUP_MEMBERSHIP);
         createClientMappersPage.form().setFullGroupPath(true);
         createClientMappersPage.form().save();
@@ -280,8 +273,8 @@ public class ClientMappersOIDCTest extends AbstractClientTest {
         //prepare data
         ProtocolMapperRepresentation mapper = new ProtocolMapperRepresentation();
         mapper.setName("mapper name");
-        mapper.setConsentRequired(true);
-        mapper.setConsentText("consent text");
+        //mapper.setConsentRequired(true);
+        //mapper.setConsentText("consent text");
         mapper.setProtocol("openid-connect");
         mapper.setProtocolMapper("oidc-usersessionmodel-note-mapper");
         
@@ -306,8 +299,6 @@ public class ClientMappersOIDCTest extends AbstractClientTest {
         assertEquals("openid-connect", clientMapperPage.form().getProtocol());
         assertEquals(mapperId, clientMapperPage.form().getMapperId());
         assertEquals("mapper name", clientMapperPage.form().getName());
-        assertTrue(clientMapperPage.form().isConsentRequired());
-        assertEquals("consent text", clientMapperPage.form().getConsentText());
         assertEquals("User Session Note", clientMapperPage.form().getMapperType());
         assertEquals("session note", clientMapperPage.form().getUserSessionNote());
         assertEquals("claim name", clientMapperPage.form().getTokenClaimName());
@@ -316,12 +307,18 @@ public class ClientMappersOIDCTest extends AbstractClientTest {
         assertTrue(clientMapperPage.form().isAddToAccessToken());
         
         //edit
-        clientMapperPage.form().setConsentRequired(false);
+        clientMapperPage.form().setAddToAccessToken(false);
         clientMapperPage.form().save();
         assertAlertSuccess();
         
         //check
-        assertFalse(findClientMapperByName(id, "mapper name").isConsentRequired());
+        assertTrue(clientMapperPage.form().isAddToIDToken());
+        assertFalse(clientMapperPage.form().isAddToAccessToken());
+
+        ProtocolMapperRepresentation rep = findClientMapperByName(id, "mapper name");
+        assertEquals("false", rep.getConfig().get(OIDCAttributeMapperHelper.INCLUDE_IN_ACCESS_TOKEN));
+        assertEquals("true", rep.getConfig().get(OIDCAttributeMapperHelper.INCLUDE_IN_ID_TOKEN));
+
     }
     
     @Test
@@ -353,7 +350,16 @@ public class ClientMappersOIDCTest extends AbstractClientTest {
     
     @Test
     public void testCreateMapperInvalidValues() {
+        //create some mapper, so we have some existing
+        clientMappersPage.mapperTable().createMapper();
+        setInitialValues("hardcoded role - existing");
+        createClientMappersPage.form().setMapperType(HARDCODED_ROLE);
+        createClientMappersPage.form().selectRole(REALM_ROLE, "offline_access", null);
+        createClientMappersPage.form().save();
+        assertAlertSuccess();
+
         //empty mapper type
+        clientMappersPage.navigateTo();
         clientMappersPage.mapperTable().createMapper();
         createClientMappersPage.form().save();
         assertAlertDanger();
@@ -373,8 +379,28 @@ public class ClientMappersOIDCTest extends AbstractClientTest {
         assertAlertDanger();
         
         //existing name
-        createClientMappersPage.form().setName("email");
+        createClientMappersPage.form().setName("hardcoded role - existing");
         createClientMappersPage.form().save();
         assertAlertDanger();
+    }
+
+    @Test
+    public void testUpdateTokenClaimName() {
+        clientMappersPage.mapperTable().createMapper();
+
+        createClientMappersPage.form().setName("test");
+        createClientMappersPage.form().setMapperType(USER_ATTRIBUTE);
+        createClientMappersPage.form().setTokenClaimName("test");
+        createClientMappersPage.form().save();
+        assertAlertSuccess();
+
+        createClientMappersPage.form().setTokenClaimName("test2");
+        createClientMappersPage.form().save();
+        assertAlertSuccess();
+
+        ProtocolMapperRepresentation mapper = testRealmResource().clients().get(id).getProtocolMappers().getMappers()
+                .stream().filter(m -> m.getName().equals("test")).findFirst().get();
+
+        assertThat(mapper.getConfig().get("claim.name"), is(equalTo("test2")));
     }
 }

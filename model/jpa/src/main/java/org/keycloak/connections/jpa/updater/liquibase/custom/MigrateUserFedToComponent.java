@@ -18,18 +18,11 @@
 package org.keycloak.connections.jpa.updater.liquibase.custom;
 
 import liquibase.exception.CustomChangeException;
-import liquibase.statement.core.InsertStatement;
-import liquibase.structure.core.Table;
-import org.keycloak.keys.KeyProvider;
-import org.keycloak.models.KeycloakSessionFactory;
 import org.keycloak.models.LDAPConstants;
-import org.keycloak.models.utils.KeycloakModelUtils;
 import org.keycloak.provider.ProviderFactory;
 import org.keycloak.storage.UserStorageProvider;
 
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.util.List;
+import java.util.function.Predicate;
 
 /**
  * @author <a href="mailto:bburke@redhat.com">Bill Burke</a>
@@ -37,17 +30,23 @@ import java.util.List;
 public class MigrateUserFedToComponent extends AbstractUserFedToComponent {
 
     @Override
-    protected void generateStatementsImpl() throws CustomChangeException {
-        List<ProviderFactory> factories = kcSession.getKeycloakSessionFactory().getProviderFactories(UserStorageProvider.class);
-        for (ProviderFactory factory : factories) {
-            if (!factory.getId().equals(LDAPConstants.LDAP_PROVIDER)) {
-                convertFedProviderToComponent(factory.getId(), null);
-            }
-        }
+    protected void generateStatementsImpl() {
+        kcSession.getKeycloakSessionFactory().getProviderFactoriesStream(UserStorageProvider.class)
+                .map(ProviderFactory::getId)
+                .filter(Predicate.isEqual(LDAPConstants.LDAP_PROVIDER).negate())
+                .forEach(this::convertFedProviderToComponent);
     }
 
     @Override
     protected String getTaskId() {
         return "Update 2.5.0.Final";
+    }
+
+    private void convertFedProviderToComponent(String id) {
+        try {
+            convertFedProviderToComponent(id, null);
+        } catch (CustomChangeException ex) {
+            throw new RuntimeException(ex);
+        }
     }
 }

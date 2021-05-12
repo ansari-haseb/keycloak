@@ -24,7 +24,12 @@ public interface AccountRoles {
 
     String VIEW_PROFILE = "view-profile";
     String MANAGE_ACCOUNT = "manage-account";
+    String MANAGE_ACCOUNT_LINKS = "manage-account-links";
+    String VIEW_APPLICATIONS = "view-applications";
+    String VIEW_CONSENT = "view-consent";
+    String MANAGE_CONSENT = "manage-consent";
+    String DELETE_ACCOUNT = "delete-account";
 
-    String[] ALL = {VIEW_PROFILE, MANAGE_ACCOUNT};
+    String[] DEFAULT = {VIEW_PROFILE, MANAGE_ACCOUNT};
 
 }

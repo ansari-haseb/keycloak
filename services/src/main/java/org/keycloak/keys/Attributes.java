@@ -17,9 +17,8 @@
 
 package org.keycloak.keys;
 
+import org.keycloak.crypto.Algorithm;
 import org.keycloak.provider.ProviderConfigProperty;
-
-import java.util.LinkedList;
 
 import static org.keycloak.provider.ProviderConfigProperty.*;
 
@@ -51,6 +50,18 @@ public interface Attributes {
     String SECRET_KEY = "secret";
 
     String SECRET_SIZE_KEY = "secretSize";
-    ProviderConfigProperty SECRET_SIZE_PROPERTY = new ProviderConfigProperty(SECRET_SIZE_KEY, "Secret size", "Size in bytes for the generated secret", LIST_TYPE, "32", "32", "64", "128", "256", "512");
+    ProviderConfigProperty SECRET_SIZE_PROPERTY = new ProviderConfigProperty(SECRET_SIZE_KEY, "Secret size", "Size in bytes for the generated secret", LIST_TYPE,
+            String.valueOf(GeneratedHmacKeyProviderFactory.DEFAULT_HMAC_KEY_SIZE),
+            "16", "24", "32", "64", "128", "256", "512");
+
+    String ALGORITHM_KEY = "algorithm";
+
+    ProviderConfigProperty RS_ALGORITHM_PROPERTY = new ProviderConfigProperty(ALGORITHM_KEY, "Algorithm", "Intended algorithm for the key", LIST_TYPE,
+            Algorithm.RS256,
+            Algorithm.RS256, Algorithm.RS384, Algorithm.RS512, Algorithm.PS256, Algorithm.PS384, Algorithm.PS512);
+
+    ProviderConfigProperty HS_ALGORITHM_PROPERTY = new ProviderConfigProperty(ALGORITHM_KEY, "Algorithm", "Intended algorithm for the key", LIST_TYPE,
+            Algorithm.HS256,
+            Algorithm.HS256, Algorithm.HS384, Algorithm.HS512);
 
 }

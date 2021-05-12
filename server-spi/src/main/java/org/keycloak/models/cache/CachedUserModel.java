@@ -17,8 +17,9 @@
 package org.keycloak.models.cache;
 
 import org.keycloak.models.UserModel;
+import org.keycloak.models.UserProvider;
 
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 /**
  * Cached users will implement this interface
@@ -55,5 +56,13 @@ public interface CachedUserModel extends UserModel {
      *
      * @return
      */
-    ConcurrentHashMap getCachedWith();
+    ConcurrentMap getCachedWith();
+
+    /**
+     * The {@link CachedUserModel.Streams} interface differs from {@link CachedUserModel} in that it extends the
+     * {@link UserModel.Streams} interface, allowing implementations of {@link CachedUserModel} to focus on the
+     * {@link java.util.stream.Stream}-based methods in the {@link UserModel} interface.
+     */
+    interface Streams extends CachedUserModel, UserModel.Streams {
+    }
 }

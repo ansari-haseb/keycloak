@@ -16,16 +16,35 @@
  */
 package org.keycloak.credential;
 
+import org.keycloak.models.KeycloakSession;
+import org.keycloak.models.RealmModel;
+import org.keycloak.models.UserModel;
 import org.keycloak.provider.Provider;
 
 /**
  * @author <a href="mailto:bill@burkecentral.com">Bill Burke</a>
  * @version $Revision: 1 $
  */
-public interface CredentialProvider extends Provider {
+public interface CredentialProvider<T extends CredentialModel> extends Provider {
+
     @Override
-    default
-    void close() {
+    default void close() {
 
     }
+
+    String getType();
+
+    CredentialModel createCredential(RealmModel realm, UserModel user, T credentialModel);
+
+    boolean deleteCredential(RealmModel realm, UserModel user, String credentialId);
+
+    T getCredentialFromModel(CredentialModel model);
+
+    default T getDefaultCredential(KeycloakSession session, RealmModel realm, UserModel user) {
+        CredentialModel model = session.userCredentialManager().getStoredCredentialsByTypeStream(realm, user, getType())
+                .findFirst().orElse(null);
+        return model != null ? getCredentialFromModel(model) : null;
+    }
+
+    CredentialTypeMetadata getCredentialTypeMetadata(CredentialTypeMetadataContext metadataContext);
 }

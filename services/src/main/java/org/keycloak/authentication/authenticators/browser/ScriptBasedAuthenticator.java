@@ -20,6 +20,7 @@ import org.jboss.logging.Logger;
 import org.keycloak.authentication.AuthenticationFlowContext;
 import org.keycloak.authentication.AuthenticationFlowError;
 import org.keycloak.authentication.Authenticator;
+import org.keycloak.models.AuthenticatorConfigModel;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.ScriptModel;
@@ -47,7 +48,7 @@ import java.util.Map;
  * <li>{@code realm} the {@link RealmModel}</li>
  * <li>{@code user} the current {@link UserModel}</li>
  * <li>{@code session} the active {@link KeycloakSession}</li>
- * <li>{@code clientSession} the current {@link org.keycloak.models.ClientSessionModel}</li>
+ * <li>{@code authenticationSession} the current {@link org.keycloak.sessions.AuthenticationSessionModel}</li>
  * <li>{@code httpRequest} the current {@link org.jboss.resteasy.spi.HttpRequest}</li>
  * <li>{@code LOG} a {@link org.jboss.logging.Logger} scoped to {@link ScriptBasedAuthenticator}/li>
  * </ol>
@@ -132,15 +133,21 @@ public class ScriptBasedAuthenticator implements Authenticator {
     }
 
     private boolean hasAuthenticatorConfig(AuthenticationFlowContext context) {
-        return context != null
-                && context.getAuthenticatorConfig() != null
-                && context.getAuthenticatorConfig().getConfig() != null
-                && !context.getAuthenticatorConfig().getConfig().isEmpty();
+        if (context == null)
+            return false;
+        AuthenticatorConfigModel config = getAuthenticatorConfig(context);
+        return config != null
+                && config.getConfig() != null
+                && !config.getConfig().isEmpty();
+    }
+
+    protected AuthenticatorConfigModel getAuthenticatorConfig(AuthenticationFlowContext context) {
+        return context.getAuthenticatorConfig();
     }
 
     private InvocableScriptAdapter getInvocableScriptAdapter(AuthenticationFlowContext context) {
 
-        Map<String, String> config = context.getAuthenticatorConfig().getConfig();
+        Map<String, String> config = getAuthenticatorConfig(context).getConfig();
 
         String scriptName = config.get(SCRIPT_NAME);
         String scriptCode = config.get(SCRIPT_CODE);
@@ -160,7 +167,7 @@ public class ScriptBasedAuthenticator implements Authenticator {
             bindings.put("user", context.getUser());
             bindings.put("session", context.getSession());
             bindings.put("httpRequest", context.getHttpRequest());
-            bindings.put("clientSession", context.getClientSession());
+            bindings.put("authenticationSession", context.getAuthenticationSession());
             bindings.put("LOG", LOGGER);
         });
     }

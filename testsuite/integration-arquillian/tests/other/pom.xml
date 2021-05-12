@@ -24,7 +24,7 @@
     <parent>
         <groupId>org.keycloak.testsuite</groupId>
         <artifactId>integration-arquillian-tests</artifactId>
-        <version>3.0.0.CR1-SNAPSHOT</version>
+        <version>14.0.0-SNAPSHOT</version>
     </parent>
 
     <artifactId>integration-arquillian-tests-other</artifactId>
@@ -59,8 +59,8 @@
                                         <groupId>org.keycloak.testsuite</groupId>
                                         <artifactId>integration-arquillian-tests-base</artifactId>
                                         <version>${project.version}</version>
-                                        <type>test-jar</type>
-                                        <includes>arquillian.xml,keycloak-add-user.json,test-constants.properties,kerberos/*,keystore/keycloak.truststore</includes>
+                                        <classifier>tests</classifier>
+                                        <includes>arquillian.xml,wildfly-config.xml,keycloak-add-user.json,test-constants.properties,kerberos/*,keystore/*,password-blacklists/*,log4j.properties,vault/*</includes>
                                     </artifactItem>
                                 </artifactItems>
                             </configuration>
@@ -77,6 +77,7 @@
                                 <goal>copy-resources</goal>
                             </goals>
                             <configuration>
+                                <skip>${skip.add.user.json}</skip>
                                 <outputDirectory>${auth.server.config.dir}</outputDirectory>
                                 <resources>
                                     <resource>
@@ -131,12 +132,6 @@
             </modules>
         </profile>
         <profile>
-            <id>console-ui-no-users-tests</id>
-            <modules>
-                <module>console_no_users</module>
-            </modules>
-        </profile>
-        <profile>
             <id>mod_auth_mellon</id>
             <modules>
                 <module>mod_auth_mellon</module>
@@ -149,15 +144,21 @@
             </modules>
         </profile>
         <profile>
-            <id>nodejs-adapter-tests</id>
-            <modules>
-                <module>nodejs_adapter</module>
-            </modules>
-        </profile>
-        <profile>
             <id>server-config-migration</id>
             <modules>
                 <module>server-config-migration</module>
+            </modules>
+        </profile>
+        <profile>
+            <id>base-ui</id>
+            <modules>
+                <module>base-ui</module>
+            </modules>
+        </profile>
+        <profile>
+            <id>springboot</id>
+            <modules>
+                <module>springboot-tests</module>
             </modules>
         </profile>
     </profiles>

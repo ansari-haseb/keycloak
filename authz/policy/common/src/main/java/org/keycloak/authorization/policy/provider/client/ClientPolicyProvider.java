@@ -1,6 +1,6 @@
 package org.keycloak.authorization.policy.provider.client;
 
-import static org.keycloak.authorization.policy.provider.client.ClientPolicyProviderFactory.getClients;
+import java.util.function.BiFunction;
 
 import org.keycloak.authorization.AuthorizationProvider;
 import org.keycloak.authorization.model.Policy;
@@ -9,24 +9,29 @@ import org.keycloak.authorization.policy.evaluation.EvaluationContext;
 import org.keycloak.authorization.policy.provider.PolicyProvider;
 import org.keycloak.models.ClientModel;
 import org.keycloak.models.RealmModel;
+import org.keycloak.representations.idm.authorization.ClientPolicyRepresentation;
 
 public class ClientPolicyProvider implements PolicyProvider {
 
+    private final BiFunction<Policy, AuthorizationProvider, ClientPolicyRepresentation> representationFunction;
+
+    public ClientPolicyProvider(BiFunction<Policy, AuthorizationProvider, ClientPolicyRepresentation> representationFunction) {
+        this.representationFunction = representationFunction;
+    }
+
     @Override
     public void evaluate(Evaluation evaluation) {
-        Policy policy = evaluation.getPolicy();
-        EvaluationContext context = evaluation.getContext();
-        String[] clients = getClients(policy);
+        ClientPolicyRepresentation representation = representationFunction.apply(evaluation.getPolicy(), evaluation.getAuthorizationProvider());
         AuthorizationProvider authorizationProvider = evaluation.getAuthorizationProvider();
         RealmModel realm = authorizationProvider.getKeycloakSession().getContext().getRealm();
+        EvaluationContext context = evaluation.getContext();
 
-        if (clients.length > 0) {
-            for (String client : clients) {
-                ClientModel clientModel = realm.getClientById(client);
-                if (context.getAttributes().containsValue("kc.client.id", clientModel.getClientId())) {
-                    evaluation.grant();
-                    return;
-                }
+        for (String client : representation.getClients()) {
+            ClientModel clientModel = realm.getClientById(client);
+
+            if (context.getAttributes().containsValue("kc.client.id", clientModel.getClientId())) {
+                evaluation.grant();
+                return;
             }
         }
     }

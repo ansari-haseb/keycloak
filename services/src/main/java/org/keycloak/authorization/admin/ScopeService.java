@@ -25,12 +25,16 @@ import org.keycloak.authorization.model.ResourceServer;
 import org.keycloak.authorization.model.Scope;
 import org.keycloak.authorization.store.PolicyStore;
 import org.keycloak.authorization.store.StoreFactory;
+import org.keycloak.events.admin.OperationType;
+import org.keycloak.events.admin.ResourceType;
 import org.keycloak.models.Constants;
+import org.keycloak.models.KeycloakSession;
 import org.keycloak.representations.idm.authorization.PolicyRepresentation;
 import org.keycloak.representations.idm.authorization.ResourceRepresentation;
 import org.keycloak.representations.idm.authorization.ScopeRepresentation;
 import org.keycloak.services.ErrorResponse;
-import org.keycloak.services.resources.admin.RealmAuth;
+import org.keycloak.services.resources.admin.permissions.AdminPermissionEvaluator;
+import org.keycloak.services.resources.admin.AdminEventBuilder;
 
 import javax.ws.rs.Consumes;
 import javax.ws.rs.DELETE;
@@ -41,11 +45,12 @@ import javax.ws.rs.Path;
 import javax.ws.rs.PathParam;
 import javax.ws.rs.Produces;
 import javax.ws.rs.QueryParam;
+import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import javax.ws.rs.core.Response.Status;
 
 import java.util.Arrays;
-import java.util.HashMap;
+import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -59,33 +64,40 @@ import static org.keycloak.models.utils.RepresentationToModel.toModel;
 public class ScopeService {
 
     private final AuthorizationProvider authorization;
-    private final RealmAuth auth;
+    private final AdminPermissionEvaluator auth;
+    private final AdminEventBuilder adminEvent;
+    private KeycloakSession session;
     private ResourceServer resourceServer;
 
-    public ScopeService(ResourceServer resourceServer, AuthorizationProvider authorization, RealmAuth auth) {
+    public ScopeService(KeycloakSession session, ResourceServer resourceServer, AuthorizationProvider authorization, AdminPermissionEvaluator auth, AdminEventBuilder adminEvent) {
+        this.session = session;
         this.resourceServer = resourceServer;
         this.authorization = authorization;
         this.auth = auth;
+        this.adminEvent = adminEvent.resource(ResourceType.AUTHORIZATION_SCOPE);
     }
 
     @POST
-    @Consumes("application/json")
-    @Produces("application/json")
+    @NoCache
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.APPLICATION_JSON)
     public Response create(ScopeRepresentation scope) {
-        this.auth.requireManage();
+            this.auth.realm().requireManageAuthorization();
         Scope model = toModel(scope, this.resourceServer, authorization);
 
         scope.setId(model.getId());
+
+        audit(scope, scope.getId(), OperationType.CREATE);
 
         return Response.status(Status.CREATED).entity(scope).build();
     }
 
     @Path("{id}")
     @PUT
-    @Consumes("application/json")
-    @Produces("application/json")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.APPLICATION_JSON)
     public Response update(@PathParam("id") String id, ScopeRepresentation scope) {
-        this.auth.requireManage();
+            this.auth.realm().requireManageAuthorization();
         scope.setId(id);
         StoreFactory storeFactory = authorization.getStoreFactory();
         Scope model = storeFactory.getScopeStore().findById(scope.getId(), resourceServer.getId());
@@ -96,18 +108,20 @@ public class ScopeService {
 
         toModel(scope, resourceServer, authorization);
 
+        audit(scope, OperationType.UPDATE);
+
         return Response.noContent().build();
     }
 
     @Path("{id}")
     @DELETE
     public Response delete(@PathParam("id") String id) {
-        this.auth.requireManage();
+        this.auth.realm().requireManageAuthorization();
         StoreFactory storeFactory = authorization.getStoreFactory();
         List<Resource> resources = storeFactory.getResourceStore().findByScope(Arrays.asList(id), resourceServer.getId());
 
         if (!resources.isEmpty()) {
-            return ErrorResponse.exists("Scopes can not be removed while associated with resources.");
+            return ErrorResponse.error("Scopes can not be removed while associated with resources.", Status.BAD_REQUEST);
         }
 
         Scope scope = storeFactory.getScopeStore().findById(id, resourceServer.getId());
@@ -129,28 +143,32 @@ public class ScopeService {
 
         storeFactory.getScopeStore().delete(id);
 
+        audit(toRepresentation(scope), OperationType.DELETE);
+
         return Response.noContent().build();
     }
 
     @Path("{id}")
     @GET
-    @Produces("application/json")
+    @NoCache
+    @Produces(MediaType.APPLICATION_JSON)
     public Response findById(@PathParam("id") String id) {
-        this.auth.requireView();
+        this.auth.realm().requireViewAuthorization();
         Scope model = this.authorization.getStoreFactory().getScopeStore().findById(id, resourceServer.getId());
 
         if (model == null) {
             return Response.status(Status.NOT_FOUND).build();
         }
 
-        return Response.ok(toRepresentation(model, this.authorization)).build();
+        return Response.ok(toRepresentation(model)).build();
     }
 
     @Path("{id}/resources")
     @GET
-    @Produces("application/json")
+    @NoCache
+    @Produces(MediaType.APPLICATION_JSON)
     public Response getResources(@PathParam("id") String id) {
-        this.auth.requireView();
+        this.auth.realm().requireViewAuthorization();
         StoreFactory storeFactory = this.authorization.getStoreFactory();
         Scope model = storeFactory.getScopeStore().findById(id, resourceServer.getId());
 
@@ -170,9 +188,10 @@ public class ScopeService {
 
     @Path("{id}/permissions")
     @GET
-    @Produces("application/json")
+    @NoCache
+    @Produces(MediaType.APPLICATION_JSON)
     public Response getPermissions(@PathParam("id") String id) {
-        this.auth.requireView();
+        this.auth.realm().requireViewAuthorization();
         StoreFactory storeFactory = this.authorization.getStoreFactory();
         Scope model = storeFactory.getScopeStore().findById(id, resourceServer.getId());
 
@@ -195,10 +214,10 @@ public class ScopeService {
 
     @Path("/search")
     @GET
-    @Produces("application/json")
+    @Produces(MediaType.APPLICATION_JSON)
     @NoCache
     public Response find(@QueryParam("name") String name) {
-        this.auth.requireView();
+        this.auth.realm().requireViewAuthorization();
         StoreFactory storeFactory = authorization.getStoreFactory();
 
         if (name == null) {
@@ -208,40 +227,47 @@ public class ScopeService {
         Scope model = storeFactory.getScopeStore().findByName(name, this.resourceServer.getId());
 
         if (model == null) {
-            return Response.status(Status.OK).build();
+            return Response.status(Status.NO_CONTENT).build();
         }
 
-        return Response.ok(toRepresentation(model, authorization)).build();
+        return Response.ok(toRepresentation(model)).build();
     }
 
     @GET
+    @NoCache
     @Produces("application/json")
     public Response findAll(@QueryParam("scopeId") String id,
                             @QueryParam("name") String name,
-                            @QueryParam("deep") Boolean deep,
                             @QueryParam("first") Integer firstResult,
                             @QueryParam("max") Integer maxResult) {
-        this.auth.requireView();
+        this.auth.realm().requireViewAuthorization();
 
-        if (deep == null) {
-            deep = true;
-        }
-
-        Map<String, String[]> search = new HashMap<>();
+        Map<Scope.FilterOption, String[]> search = new EnumMap<>(Scope.FilterOption.class);
 
         if (id != null && !"".equals(id.trim())) {
-            search.put("id", new String[] {id});
+            search.put(Scope.FilterOption.ID, new String[] {id});
         }
 
         if (name != null && !"".equals(name.trim())) {
-            search.put("name", new String[] {name});
+            search.put(Scope.FilterOption.NAME, new String[] {name});
         }
 
-        Boolean finalDeep = deep;
         return Response.ok(
                 this.authorization.getStoreFactory().getScopeStore().findByResourceServer(search, this.resourceServer.getId(), firstResult != null ? firstResult : -1, maxResult != null ? maxResult : Constants.DEFAULT_MAX_RESULTS).stream()
-                        .map(scope -> toRepresentation(scope, this.authorization, finalDeep))
+                        .map(scope -> toRepresentation(scope))
                         .collect(Collectors.toList()))
                 .build();
+    }
+
+    private void audit(ScopeRepresentation resource, OperationType operation) {
+        audit(resource, null, operation);
+    }
+
+    private void audit(ScopeRepresentation resource, String id, OperationType operation) {
+        if (id != null) {
+            adminEvent.operation(operation).resourcePath(session.getContext().getUri(), id).representation(resource).success();
+        } else {
+            adminEvent.operation(operation).resourcePath(session.getContext().getUri()).representation(resource).success();
+        }
     }
 }

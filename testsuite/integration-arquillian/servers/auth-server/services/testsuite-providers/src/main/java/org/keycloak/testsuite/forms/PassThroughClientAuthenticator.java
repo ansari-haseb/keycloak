@@ -40,9 +40,8 @@ public class PassThroughClientAuthenticator extends AbstractClientAuthenticator 
     public static final String PROVIDER_ID = "testsuite-client-passthrough";
     public static String clientId = "test-app";
 
-    public static final AuthenticationExecutionModel.Requirement[] REQUIREMENT_CHOICES = {
-            AuthenticationExecutionModel.Requirement.REQUIRED
-    };
+    // If this parameter is present in the HTTP request, the error will be thrown during authentication
+    public static final String TEST_ERROR_PARAM = "test_error_param";
 
     private static final List<ProviderConfigProperty> clientConfigProperties = new ArrayList<ProviderConfigProperty>();
 
@@ -65,6 +64,11 @@ public class PassThroughClientAuthenticator extends AbstractClientAuthenticator 
 
     @Override
     public void authenticateClient(ClientAuthenticationFlowContext context) {
+        String testErrorParamVal = context.getHttpRequest().getFormParameters().getFirst(TEST_ERROR_PARAM);
+        if (testErrorParamVal != null) {
+            throw new RuntimeException(testErrorParamVal);
+        }
+
         ClientModel client = context.getRealm().getClientByClientId(clientId);
         if (client == null) {
             context.failure(AuthenticationFlowError.CLIENT_NOT_FOUND, null);

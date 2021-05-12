@@ -42,12 +42,20 @@ public class FolderThemeProvider implements ThemeProvider {
 
     @Override
     public Theme getTheme(String name, Theme.Type type) throws IOException {
+        if (themesDir == null) {
+            return null;
+        }
+
         File themeDir = getThemeDir(name, type);
         return themeDir.isDirectory() ? new FolderTheme(themeDir, name, type) : null;
     }
 
     @Override
     public Set<String> nameSet(Theme.Type type) {
+        if (themesDir == null) {
+            return Collections.emptySet();
+        }
+
         final String typeName = type.name().toLowerCase();
         File[] themeDirs = themesDir.listFiles(new FileFilter() {
             @Override
@@ -68,7 +76,7 @@ public class FolderThemeProvider implements ThemeProvider {
 
     @Override
     public boolean hasTheme(String name, Theme.Type type) {
-        return getThemeDir(name, type).isDirectory();
+        return themesDir != null ? getThemeDir(name, type).isDirectory() : false;
     }
 
     @Override
@@ -76,7 +84,15 @@ public class FolderThemeProvider implements ThemeProvider {
     }
 
     private File getThemeDir(String name, Theme.Type type) {
-        return new File(themesDir, name + File.separator + type.name().toLowerCase());
+        File f = new File(themesDir, name + File.separator + type.name().toLowerCase());
+        try {
+            if (!f.getCanonicalPath().startsWith(themesDir.getCanonicalPath() + File.separator)) {
+                return null;
+            }
+        } catch (IOException e) {
+            return null;
+        }
+        return f;
     }
 
 }

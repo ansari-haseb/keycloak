@@ -22,6 +22,7 @@ import org.keycloak.models.AdminRoles;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.utils.KeycloakModelUtils;
+import org.keycloak.representations.idm.RealmRepresentation;
 
 public class MigrateTo2_0_0 implements Migration {
 
@@ -32,9 +33,13 @@ public class MigrateTo2_0_0 implements Migration {
     }
 
     public void migrate(KeycloakSession session) {
-        for (RealmModel realm : session.realms().getRealms()) {
-            migrateAuthorizationServices(realm);
-        }
+        session.realms().getRealmsStream().forEach(this::migrateAuthorizationServices);
+    }
+
+    @Override
+    public void migrateImport(KeycloakSession session, RealmModel realm, RealmRepresentation rep, boolean skipUserDependent) {
+        migrateAuthorizationServices(realm);
+
     }
 
     private void migrateAuthorizationServices(RealmModel realm) {

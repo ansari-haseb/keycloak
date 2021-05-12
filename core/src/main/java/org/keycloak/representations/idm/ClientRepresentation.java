@@ -36,9 +36,11 @@ public class ClientRepresentation {
     protected String baseUrl;
     protected Boolean surrogateAuthRequired;
     protected Boolean enabled;
+    protected Boolean alwaysDisplayInConsole;
     protected String clientAuthenticatorType;
     protected String secret;
     protected String registrationAccessToken;
+    @Deprecated
     protected String[] defaultRoles;
     protected List<String> redirectUris;
     protected List<String> webOrigins;
@@ -49,6 +51,7 @@ public class ClientRepresentation {
     protected Boolean implicitFlowEnabled;
     protected Boolean directAccessGrantsEnabled;
     protected Boolean serviceAccountsEnabled;
+    protected Boolean oauth2DeviceAuthorizationGrantEnabled;
     protected Boolean authorizationServicesEnabled;
     @Deprecated
     protected Boolean directGrantsOnly;
@@ -56,15 +59,27 @@ public class ClientRepresentation {
     protected Boolean frontchannelLogout;
     protected String protocol;
     protected Map<String, String> attributes;
+    protected Map<String, String> authenticationFlowBindingOverrides;
     protected Boolean fullScopeAllowed;
     protected Integer nodeReRegistrationTimeout;
     protected Map<String, Integer> registeredNodes;
     protected List<ProtocolMapperRepresentation> protocolMappers;
+
+    @Deprecated
     protected String clientTemplate;
+    @Deprecated
     private Boolean useTemplateConfig;
+    @Deprecated
     private Boolean useTemplateScope;
+    @Deprecated
     private Boolean useTemplateMappers;
+
+    protected List<String> defaultClientScopes;
+    protected List<String> optionalClientScopes;
+
     private ResourceServerRepresentation authorizationSettings;
+    private Map<String, Boolean> access;
+    protected String origin;
 
 
     public String getId() {
@@ -105,6 +120,14 @@ public class ClientRepresentation {
 
     public void setEnabled(Boolean enabled) {
         this.enabled = enabled;
+    }
+
+    public Boolean isAlwaysDisplayInConsole() {
+        return alwaysDisplayInConsole;
+    }
+
+    public void setAlwaysDisplayInConsole(Boolean alwaysDisplayInConsole) {
+        this.alwaysDisplayInConsole = alwaysDisplayInConsole;
     }
 
     public Boolean isSurrogateAuthRequired() {
@@ -179,10 +202,12 @@ public class ClientRepresentation {
         this.webOrigins = webOrigins;
     }
 
+    @Deprecated
     public String[] getDefaultRoles() {
         return defaultRoles;
     }
 
+    @Deprecated
     public void setDefaultRoles(String[] defaultRoles) {
         this.defaultRoles = defaultRoles;
     }
@@ -295,6 +320,14 @@ public class ClientRepresentation {
         this.attributes = attributes;
     }
 
+    public Map<String, String> getAuthenticationFlowBindingOverrides() {
+        return authenticationFlowBindingOverrides;
+    }
+
+    public void setAuthenticationFlowBindingOverrides(Map<String, String> authenticationFlowBindingOverrides) {
+        this.authenticationFlowBindingOverrides = authenticationFlowBindingOverrides;
+    }
+
     public Integer getNodeReRegistrationTimeout() {
         return nodeReRegistrationTimeout;
     }
@@ -327,36 +360,40 @@ public class ClientRepresentation {
         this.protocolMappers = protocolMappers;
     }
 
+    @Deprecated
     public String getClientTemplate() {
         return clientTemplate;
     }
 
-    public void setClientTemplate(String clientTemplate) {
-        this.clientTemplate = clientTemplate;
-    }
-
+    @Deprecated
     public Boolean isUseTemplateConfig() {
         return useTemplateConfig;
     }
 
-    public void setUseTemplateConfig(Boolean useTemplateConfig) {
-        this.useTemplateConfig = useTemplateConfig;
-    }
-
+    @Deprecated
     public Boolean isUseTemplateScope() {
         return useTemplateScope;
     }
 
-    public void setUseTemplateScope(Boolean useTemplateScope) {
-        this.useTemplateScope = useTemplateScope;
-    }
-
+    @Deprecated
     public Boolean isUseTemplateMappers() {
         return useTemplateMappers;
     }
 
-    public void setUseTemplateMappers(Boolean useTemplateMappers) {
-        this.useTemplateMappers = useTemplateMappers;
+    public List<String> getDefaultClientScopes() {
+        return defaultClientScopes;
+    }
+
+    public void setDefaultClientScopes(List<String> defaultClientScopes) {
+        this.defaultClientScopes = defaultClientScopes;
+    }
+
+    public List<String> getOptionalClientScopes() {
+        return optionalClientScopes;
+    }
+
+    public void setOptionalClientScopes(List<String> optionalClientScopes) {
+        this.optionalClientScopes = optionalClientScopes;
     }
 
     public ResourceServerRepresentation getAuthorizationSettings() {
@@ -366,4 +403,27 @@ public class ClientRepresentation {
     public void setAuthorizationSettings(ResourceServerRepresentation authorizationSettings) {
         this.authorizationSettings = authorizationSettings;
     }
+
+    public Map<String, Boolean> getAccess() {
+        return access;
+    }
+
+    public void setAccess(Map<String, Boolean> access) {
+        this.access = access;
+    }
+
+
+    /**
+     * Returns id of ClientStorageProvider that loaded this user
+     *
+     * @return NULL if user stored locally
+     */
+    public String getOrigin() {
+        return origin;
+    }
+
+    public void setOrigin(String origin) {
+        this.origin = origin;
+    }
+
 }

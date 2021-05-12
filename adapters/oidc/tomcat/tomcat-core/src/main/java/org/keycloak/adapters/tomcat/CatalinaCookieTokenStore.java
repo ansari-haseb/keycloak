@@ -43,11 +43,11 @@ public class CatalinaCookieTokenStore implements AdapterTokenStore {
     private Request request;
     private HttpFacade facade;
     private KeycloakDeployment deployment;
-    private GenericPrincipalFactory principalFactory;
+    private PrincipalFactory principalFactory;
 
     private KeycloakPrincipal<RefreshableKeycloakSecurityContext> authenticatedPrincipal;
 
-    public CatalinaCookieTokenStore(Request request, HttpFacade facade, KeycloakDeployment deployment, GenericPrincipalFactory principalFactory) {
+    public CatalinaCookieTokenStore(Request request, HttpFacade facade, KeycloakDeployment deployment, PrincipalFactory principalFactory) {
         this.request = request;
         this.facade = facade;
         this.deployment = deployment;
@@ -93,7 +93,7 @@ public class CatalinaCookieTokenStore implements AdapterTokenStore {
 
     @Override
     public void logout() {
-        CookieTokenStore.removeCookie(facade);
+        CookieTokenStore.removeCookie(deployment, facade);
     }
 
     @Override
@@ -132,7 +132,7 @@ public class CatalinaCookieTokenStore implements AdapterTokenStore {
         log.fine("Cleanup and expire cookie for user " + principal.getName() + " after failed refresh");
         request.setUserPrincipal(null);
         request.setAuthType(null);
-        CookieTokenStore.removeCookie(facade);
+        CookieTokenStore.removeCookie(deployment, facade);
         return null;
     }
 }

@@ -27,7 +27,7 @@ import org.jboss.security.SecurityContextAssociation;
 import org.jboss.security.SimpleGroup;
 import org.jboss.security.SimplePrincipal;
 import org.keycloak.adapters.spi.KeycloakAccount;
-import org.keycloak.adapters.tomcat.GenericPrincipalFactory;
+import org.keycloak.adapters.tomcat.PrincipalFactory;
 
 import javax.security.auth.Subject;
 import java.lang.reflect.Constructor;
@@ -44,14 +44,9 @@ import java.util.Set;
  * @author <a href="mailto:bill@burkecentral.com">Bill Burke</a>
  * @version $Revision: 1 $
  */
-public class JBossWebPrincipalFactory extends GenericPrincipalFactory {
+public class JBossWebPrincipalFactory implements PrincipalFactory {
 
     private static Constructor jbossWebPrincipalConstructor = findJBossGenericPrincipalConstructor();
-
-    @Override
-    protected GenericPrincipal createPrincipal(Principal userPrincipal, List<String> roles) {
-        return null;
-    }
 
     @Override
     public GenericPrincipal createPrincipal(Realm realm, final Principal identity, final Set<String> roleSet) {
@@ -96,8 +91,7 @@ public class JBossWebPrincipalFactory extends GenericPrincipalFactory {
         SecurityContext sc = SecurityContextAssociation.getSecurityContext();
         Principal userPrincipal = getPrincipal(subject);
         sc.getUtil().createSubjectInfo(userPrincipal, account, subject);
-        List<String> rolesAsStringList = new ArrayList<String>();
-        rolesAsStringList.addAll(roleSet);
+        List<String> rolesAsStringList = new ArrayList<>(roleSet);
 
         try {
             return (GenericPrincipal) jbossWebPrincipalConstructor.newInstance(realm, userPrincipal.getName(), null, rolesAsStringList, userPrincipal, null, account, null, subject);

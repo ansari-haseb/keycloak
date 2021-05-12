@@ -17,9 +17,7 @@
 
 package org.keycloak.authentication.forms;
 
-import org.apache.http.HttpResponse;
 import org.apache.http.NameValuePair;
-import org.apache.http.client.HttpClient;
 import org.apache.http.client.entity.UrlEncodedFormEntity;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.message.BasicNameValuePair;
@@ -47,12 +45,16 @@ import org.keycloak.services.messages.Messages;
 import org.keycloak.services.validation.Validation;
 import org.keycloak.util.JsonSerialization;
 
-import javax.ws.rs.core.MultivaluedMap;
 import java.io.InputStream;
+import javax.ws.rs.core.MultivaluedMap;
 import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import org.apache.http.client.methods.CloseableHttpResponse;
+import org.apache.http.impl.client.CloseableHttpClient;
+import org.apache.http.util.EntityUtils;
 
 /**
  * @author <a href="mailto:bill@burkecentral.com">Bill Burke</a>
@@ -63,6 +65,7 @@ public class RegistrationRecaptcha implements FormAction, FormActionFactory, Con
     public static final String RECAPTCHA_REFERENCE_CATEGORY = "recaptcha";
     public static final String SITE_KEY = "site.key";
     public static final String SITE_SECRET = "secret";
+    public static final String USE_RECAPTCHA_NET = "useRecaptchaNet";
     private static final Logger logger = Logger.getLogger(RegistrationRecaptcha.class);
 
     public static final String PROVIDER_ID = "registration-recaptcha-action";
@@ -93,6 +96,7 @@ public class RegistrationRecaptcha implements FormAction, FormActionFactory, Con
     @Override
     public void buildPage(FormContext context, LoginFormsProvider form) {
         AuthenticatorConfigModel captchaConfig = context.getAuthenticatorConfig();
+        String userLanguageTag = context.getSession().getContext().resolveLocale(context.getUser()).toLanguageTag();
         if (captchaConfig == null || captchaConfig.getConfig() == null
                 || captchaConfig.getConfig().get(SITE_KEY) == null
                 || captchaConfig.getConfig().get(SITE_SECRET) == null
@@ -103,7 +107,7 @@ public class RegistrationRecaptcha implements FormAction, FormActionFactory, Con
         String siteKey = captchaConfig.getConfig().get(SITE_KEY);
         form.setAttribute("recaptchaRequired", true);
         form.setAttribute("recaptchaSiteKey", siteKey);
-        form.addScript("https://www.google.com/recaptcha/api.js");
+        form.addScript("https://www." + getRecaptchaDomain(captchaConfig) + "/recaptcha/api.js?hl=" + userLanguageTag);
     }
 
     @Override
@@ -127,15 +131,28 @@ public class RegistrationRecaptcha implements FormAction, FormActionFactory, Con
             formData.remove(G_RECAPTCHA_RESPONSE);
             context.error(Errors.INVALID_REGISTRATION);
             context.validationError(formData, errors);
+            context.excludeOtherErrors();
             return;
 
 
         }
     }
 
+    private String getRecaptchaDomain(AuthenticatorConfigModel config) {
+        Boolean useRecaptcha = Optional.ofNullable(config)
+                .map(configModel -> configModel.getConfig())
+                .map(cfg -> Boolean.valueOf(cfg.get(USE_RECAPTCHA_NET)))
+                .orElse(false);
+        if (useRecaptcha) {
+            return "recaptcha.net";
+        }
+
+        return "google.com";
+    }
+
     protected boolean validateRecaptcha(ValidationContext context, boolean success, String captcha, String secret) {
-        HttpClient httpClient = context.getSession().getProvider(HttpClientProvider.class).getHttpClient();
-        HttpPost post = new HttpPost("https://www.google.com/recaptcha/api/siteverify");
+        CloseableHttpClient httpClient = context.getSession().getProvider(HttpClientProvider.class).getHttpClient();
+        HttpPost post = new HttpPost("https://www." + getRecaptchaDomain(context.getAuthenticatorConfig()) + "/recaptcha/api/siteverify");
         List<NameValuePair> formparams = new LinkedList<>();
         formparams.add(new BasicNameValuePair("secret", secret));
         formparams.add(new BasicNameValuePair("response", captcha));
@@ -143,14 +160,15 @@ public class RegistrationRecaptcha implements FormAction, FormActionFactory, Con
         try {
             UrlEncodedFormEntity form = new UrlEncodedFormEntity(formparams, "UTF-8");
             post.setEntity(form);
-            HttpResponse response = httpClient.execute(post);
-            InputStream content = response.getEntity().getContent();
-            try {
-                Map json = JsonSerialization.readValue(content, Map.class);
-                Object val = json.get("success");
-                success = Boolean.TRUE.equals(val);
-            } finally {
-                content.close();
+            try (CloseableHttpResponse response = httpClient.execute(post)) {
+                InputStream content = response.getEntity().getContent();
+                try {
+                    Map json = JsonSerialization.readValue(content, Map.class);
+                    Object val = json.get("success");
+                    success = Boolean.TRUE.equals(val);
+                } finally {
+                    EntityUtils.consumeQuietly(response.getEntity());
+                }
             }
         } catch (Exception e) {
             ServicesLogger.LOGGER.recaptchaFailed(e);
@@ -214,7 +232,7 @@ public class RegistrationRecaptcha implements FormAction, FormActionFactory, Con
         return "Adds Google Recaptcha button.  Recaptchas verify that the entity that is registering is a human.  This can only be used on the internet and must be configured after you add it.";
     }
 
-    private static final List<ProviderConfigProperty> configProperties = new ArrayList<ProviderConfigProperty>();
+    private static final List<ProviderConfigProperty> CONFIG_PROPERTIES = new ArrayList<ProviderConfigProperty>();
 
     static {
         ProviderConfigProperty property;
@@ -223,19 +241,25 @@ public class RegistrationRecaptcha implements FormAction, FormActionFactory, Con
         property.setLabel("Recaptcha Site Key");
         property.setType(ProviderConfigProperty.STRING_TYPE);
         property.setHelpText("Google Recaptcha Site Key");
-        configProperties.add(property);
+        CONFIG_PROPERTIES.add(property);
         property = new ProviderConfigProperty();
         property.setName(SITE_SECRET);
         property.setLabel("Recaptcha Secret");
         property.setType(ProviderConfigProperty.STRING_TYPE);
         property.setHelpText("Google Recaptcha Secret");
-        configProperties.add(property);
+        CONFIG_PROPERTIES.add(property);
 
+        property = new ProviderConfigProperty();
+        property.setName(USE_RECAPTCHA_NET);
+        property.setLabel("use recaptcha.net");
+        property.setType(ProviderConfigProperty.BOOLEAN_TYPE);
+        property.setHelpText("Use recaptcha.net? (or else google.com)");
+        CONFIG_PROPERTIES.add(property);
     }
 
 
     @Override
     public List<ProviderConfigProperty> getConfigProperties() {
-        return configProperties;
+        return CONFIG_PROPERTIES;
     }
 }

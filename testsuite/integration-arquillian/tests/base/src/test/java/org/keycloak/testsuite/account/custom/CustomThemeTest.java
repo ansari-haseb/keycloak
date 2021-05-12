@@ -17,6 +17,8 @@
 
 package org.keycloak.testsuite.account.custom;
 
+import javax.ws.rs.core.UriBuilder;
+
 import org.jboss.arquillian.graphene.page.Page;
 import org.junit.Assert;
 import org.junit.Rule;
@@ -25,9 +27,10 @@ import org.keycloak.events.Details;
 import org.keycloak.events.EventType;
 import org.keycloak.representations.idm.RealmRepresentation;
 import org.keycloak.representations.idm.UserRepresentation;
+import org.keycloak.services.resources.account.AccountFormService;
 import org.keycloak.testsuite.AssertEvents;
 import org.keycloak.testsuite.AbstractTestRealmKeycloakTest;
-import org.keycloak.testsuite.account.AccountTest;
+import org.keycloak.testsuite.account.AccountFormServiceTest;
 import org.keycloak.testsuite.pages.AccountUpdateProfilePage;
 import org.keycloak.testsuite.pages.LoginPage;
 import org.keycloak.testsuite.util.RealmBuilder;
@@ -68,7 +71,7 @@ public class CustomThemeTest extends AbstractTestRealmKeycloakTest {
         profilePage.open();
         loginPage.login("test-user@localhost", "password");
 
-        events.expectLogin().client("account").detail(Details.REDIRECT_URI, AccountTest.ACCOUNT_REDIRECT).assertEvent();
+        events.expectLogin().client("account").detail(Details.REDIRECT_URI, getAccountRedirectUrl()).assertEvent();
 
         Assert.assertEquals("test-user@localhost", profilePage.getEmail());
         Assert.assertEquals("", profilePage.getAttribute("street"));

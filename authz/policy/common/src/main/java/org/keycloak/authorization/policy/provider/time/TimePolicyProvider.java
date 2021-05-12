@@ -21,8 +21,10 @@ import java.text.SimpleDateFormat;
 import java.util.Calendar;
 import java.util.Date;
 
+import org.keycloak.authorization.attribute.Attributes;
 import org.keycloak.authorization.model.Policy;
 import org.keycloak.authorization.policy.evaluation.Evaluation;
+import org.keycloak.authorization.policy.evaluation.EvaluationContext;
 import org.keycloak.authorization.policy.provider.PolicyProvider;
 
 /**
@@ -30,24 +32,28 @@ import org.keycloak.authorization.policy.provider.PolicyProvider;
  */
 public class TimePolicyProvider implements PolicyProvider {
 
-    static String DEFAULT_DATE_PATTERN = "yyyy-MM-dd hh:mm:ss";
+    static String DEFAULT_DATE_PATTERN = "yyyy-MM-dd HH:mm:ss";
 
-    private final SimpleDateFormat dateFormat;
-    private final Date currentDate;
-
-    public TimePolicyProvider() {
-        this.dateFormat = new SimpleDateFormat(DEFAULT_DATE_PATTERN);
-        this.currentDate = new Date();
-    }
+    static String CONTEXT_TIME_ENTRY = "kc.time.date_time";
 
     @Override
     public void evaluate(Evaluation evaluation) {
         Policy policy = evaluation.getPolicy();
-
+        SimpleDateFormat dateFormat = new SimpleDateFormat(DEFAULT_DATE_PATTERN);
         try {
+            String contextTime = null;
+            EvaluationContext context = evaluation.getContext();
+            if (context.getAttributes() != null && context.getAttributes().exists(CONTEXT_TIME_ENTRY)) {
+                Attributes.Entry contextTimeEntry = context.getAttributes().getValue(CONTEXT_TIME_ENTRY);
+                if (!contextTimeEntry.isEmpty()) {
+                    contextTime = contextTimeEntry.asString(0);
+                }
+            }
+            Date actualDate = contextTime == null ? new Date() : dateFormat.parse(contextTime);
+
             String notBefore = policy.getConfig().get("nbf");
             if (notBefore != null && !"".equals(notBefore)) {
-                if (this.currentDate.before(this.dateFormat.parse(format(notBefore)))) {
+                if (actualDate.before(dateFormat.parse(format(notBefore)))) {
                     evaluation.deny();
                     return;
                 }
@@ -55,17 +61,17 @@ public class TimePolicyProvider implements PolicyProvider {
 
             String notOnOrAfter = policy.getConfig().get("noa");
             if (notOnOrAfter != null && !"".equals(notOnOrAfter)) {
-                if (this.currentDate.after(this.dateFormat.parse(format(notOnOrAfter)))) {
+                if (actualDate.after(dateFormat.parse(format(notOnOrAfter)))) {
                     evaluation.deny();
                     return;
                 }
             }
 
-            if (isInvalid(Calendar.DAY_OF_MONTH, "dayMonth", policy)
-                    || isInvalid(Calendar.MONTH, "month", policy)
-                    || isInvalid(Calendar.YEAR, "year", policy)
-                    || isInvalid(Calendar.HOUR_OF_DAY, "hour", policy)
-                    || isInvalid(Calendar.MINUTE, "minute", policy)) {
+            if (isInvalid(actualDate, Calendar.DAY_OF_MONTH, "dayMonth", policy)
+                    || isInvalid(actualDate, Calendar.MONTH, "month", policy)
+                    || isInvalid(actualDate, Calendar.YEAR, "year", policy)
+                    || isInvalid(actualDate, Calendar.HOUR_OF_DAY, "hour", policy)
+                    || isInvalid(actualDate, Calendar.MINUTE, "minute", policy)) {
                 evaluation.deny();
                 return;
             }
@@ -76,10 +82,10 @@ public class TimePolicyProvider implements PolicyProvider {
         }
     }
 
-    private boolean isInvalid(int timeConstant, String configName, Policy policy) {
+    private boolean isInvalid(Date actualDate, int timeConstant, String configName, Policy policy) {
         Calendar calendar = Calendar.getInstance();
 
-        calendar.setTime(this.currentDate);
+        calendar.setTime(actualDate);
 
         int dateField = calendar.get(timeConstant);
 

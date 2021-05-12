@@ -91,7 +91,7 @@ public abstract class CacheManager {
 
     }
 
-    public <T> T get(String id, Class<T> type) {
+    public <T extends Revisioned> T get(String id, Class<T> type) {
         Revisioned o = (Revisioned)cache.get(id);
         if (o == null) {
             return null;
@@ -101,6 +101,12 @@ public abstract class CacheManager {
             if (getLogger().isTraceEnabled()) {
                 getLogger().tracev("get() missing rev {0}", id);
             }
+            /* id is no longer in this.revisions
+             ** => remove it also from this.cache
+             ** to come back to a consistent state
+             ** this allows caching the current version again
+             */
+            cache.remove(id);
             return null;
         }
         long oRev = o.getRevision() == null ? -1L : o.getRevision().longValue();
@@ -108,6 +114,8 @@ public abstract class CacheManager {
             if (getLogger().isTraceEnabled()) {
                 getLogger().tracev("get() rev: {0} o.rev: {1}", rev.longValue(), oRev);
             }
+            // the object in this.cache is outdated => remove it
+            cache.remove(id);
             return null;
         }
         return o != null && type.isInstance(o) ? type.cast(o) : null;
@@ -198,29 +206,22 @@ public abstract class CacheManager {
     }
 
 
-    public void sendInvalidationEvents(KeycloakSession session, Collection<InvalidationEvent> invalidationEvents) {
+    public void sendInvalidationEvents(KeycloakSession session, Collection<InvalidationEvent> invalidationEvents, String eventKey) {
         ClusterProvider clusterProvider = session.getProvider(ClusterProvider.class);
 
         // Maybe add InvalidationEvent, which will be collection of all invalidationEvents? That will reduce cluster traffic even more.
         for (InvalidationEvent event : invalidationEvents) {
-            clusterProvider.notify(generateEventId(event), event, true);
+            clusterProvider.notify(eventKey, event, true, ClusterProvider.DCNotify.ALL_DCS);
         }
     }
 
-    protected String generateEventId(InvalidationEvent event) {
-        return new StringBuilder(event.getId())
-                .append("_")
-                .append(event.hashCode())
-                .toString();
-    }
 
-
-    protected void invalidationEventReceived(InvalidationEvent event) {
+    public void invalidationEventReceived(InvalidationEvent event) {
         Set<String> invalidations = new HashSet<>();
 
         addInvalidationsFromEvent(event, invalidations);
 
-        getLogger().debugf("Invalidating %d cache items after received event %s", invalidations.size(), event);
+        getLogger().debugf("[%s] Invalidating %d cache items after received event %s", cache.getCacheManager().getAddress(), invalidations.size(), event);
 
         for (String invalidation : invalidations) {
             invalidateObject(invalidation);

@@ -17,19 +17,22 @@
 
 package org.keycloak.testsuite.rest;
 
-import org.jboss.resteasy.annotations.Query;
 import org.jboss.resteasy.annotations.cache.NoCache;
 import org.jboss.resteasy.spi.HttpRequest;
-import org.jboss.resteasy.spi.ResteasyProviderFactory;
+import org.keycloak.OAuth2Constants;
+import org.keycloak.common.util.HtmlUtils;
 import org.keycloak.jose.jws.JWSInput;
 import org.keycloak.jose.jws.JWSInputException;
 import org.keycloak.models.KeycloakSession;
+import org.keycloak.representations.LogoutToken;
 import org.keycloak.representations.adapters.action.LogoutAction;
 import org.keycloak.representations.adapters.action.PushNotBeforeAction;
 import org.keycloak.representations.adapters.action.TestAvailabilityAction;
 import org.keycloak.services.resource.RealmResourceProvider;
 import org.keycloak.services.resources.RealmsResource;
+import org.keycloak.testsuite.rest.representation.TestAuthenticationChannelRequest;
 import org.keycloak.testsuite.rest.resource.TestingOIDCEndpointsApplicationResource;
+import org.keycloak.utils.MediaType;
 
 import javax.ws.rs.Consumes;
 import javax.ws.rs.GET;
@@ -38,11 +41,12 @@ import javax.ws.rs.Path;
 import javax.ws.rs.PathParam;
 import javax.ws.rs.Produces;
 import javax.ws.rs.QueryParam;
-import javax.ws.rs.core.MediaType;
+import javax.ws.rs.core.Context;
 import javax.ws.rs.core.MultivaluedMap;
 import javax.ws.rs.core.Response;
 import javax.ws.rs.core.UriBuilder;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -54,36 +58,54 @@ public class TestApplicationResourceProvider implements RealmResourceProvider {
     private KeycloakSession session;
 
     private final BlockingQueue<LogoutAction> adminLogoutActions;
+    private final BlockingQueue<LogoutToken> backChannelLogoutTokens;
     private final BlockingQueue<PushNotBeforeAction> adminPushNotBeforeActions;
     private final BlockingQueue<TestAvailabilityAction> adminTestAvailabilityAction;
     private final TestApplicationResourceProviderFactory.OIDCClientData oidcClientData;
 
+    private final ConcurrentMap<String, TestAuthenticationChannelRequest> authenticationChannelRequests;
+
+    @Context
+    HttpRequest request;
+
     public TestApplicationResourceProvider(KeycloakSession session, BlockingQueue<LogoutAction> adminLogoutActions,
+            BlockingQueue<LogoutToken> backChannelLogoutTokens,
             BlockingQueue<PushNotBeforeAction> adminPushNotBeforeActions,
-            BlockingQueue<TestAvailabilityAction> adminTestAvailabilityAction, TestApplicationResourceProviderFactory.OIDCClientData oidcClientData) {
+            BlockingQueue<TestAvailabilityAction> adminTestAvailabilityAction,
+            TestApplicationResourceProviderFactory.OIDCClientData oidcClientData,
+            ConcurrentMap<String, TestAuthenticationChannelRequest> authenticationChannelRequests) {
         this.session = session;
         this.adminLogoutActions = adminLogoutActions;
+        this.backChannelLogoutTokens = backChannelLogoutTokens;
         this.adminPushNotBeforeActions = adminPushNotBeforeActions;
         this.adminTestAvailabilityAction = adminTestAvailabilityAction;
         this.oidcClientData = oidcClientData;
+        this.authenticationChannelRequests = authenticationChannelRequests;
     }
 
     @POST
-    @Consumes(MediaType.TEXT_PLAIN)
+    @Consumes(MediaType.TEXT_PLAIN_UTF_8)
     @Path("/admin/k_logout")
     public void adminLogout(String data) throws JWSInputException {
         adminLogoutActions.add(new JWSInput(data).readJsonContent(LogoutAction.class));
     }
 
     @POST
-    @Consumes(MediaType.TEXT_PLAIN)
+    @Consumes(MediaType.APPLICATION_FORM_URLENCODED)
+    @Path("/admin/backchannelLogout")
+    public void backchannelLogout() throws JWSInputException {
+        backChannelLogoutTokens.add(new JWSInput(request.getDecodedFormParameters().getFirst(OAuth2Constants.LOGOUT_TOKEN)).readJsonContent(LogoutToken.class));
+    }
+
+    @POST
+    @Consumes(MediaType.TEXT_PLAIN_UTF_8)
     @Path("/admin/k_push_not_before")
     public void adminPushNotBefore(String data) throws JWSInputException {
         adminPushNotBeforeActions.add(new JWSInput(data).readJsonContent(PushNotBeforeAction.class));
     }
 
     @POST
-    @Consumes(MediaType.TEXT_PLAIN)
+    @Consumes(MediaType.TEXT_PLAIN_UTF_8)
     @Path("/admin/k_test_available")
     public void testAvailable(String data) throws JWSInputException {
         adminTestAvailabilityAction.add(new JWSInput(data).readJsonContent(TestAvailabilityAction.class));
@@ -94,6 +116,13 @@ public class TestApplicationResourceProvider implements RealmResourceProvider {
     @Path("/poll-admin-logout")
     public LogoutAction getAdminLogoutAction() throws InterruptedException {
         return adminLogoutActions.poll(10, TimeUnit.SECONDS);
+    }
+
+    @GET
+    @Produces(MediaType.APPLICATION_JSON)
+    @Path("/poll-backchannel-logout")
+    public LogoutToken getBackChannelLogoutAction() throws InterruptedException {
+        return backChannelLogoutTokens.poll(20, TimeUnit.SECONDS);
     }
 
     @GET
@@ -119,9 +148,14 @@ public class TestApplicationResourceProvider implements RealmResourceProvider {
     }
 
     @POST
-    @Produces(MediaType.TEXT_HTML)
+    @Consumes(javax.ws.rs.core.MediaType.APPLICATION_FORM_URLENCODED)
+    @Produces(MediaType.TEXT_HTML_UTF_8)
     @Path("/{action}")
-    public String post(@PathParam("action") String action) {
+    public Response post(@PathParam("action") String action) {
+        if ("clear-admin-actions".equals(action)) {
+            return clearAdminActions();
+        }
+        MultivaluedMap<String, String> formParams = request.getDecodedFormParameters();
         String title = "APP_REQUEST";
         if (action.equals("auth")) {
             title = "AUTH_RESPONSE";
@@ -133,22 +167,23 @@ public class TestApplicationResourceProvider implements RealmResourceProvider {
         sb.append("<html><head><title>" + title + "</title></head><body>");
 
         sb.append("<b>Form parameters: </b><br>");
-        HttpRequest request = ResteasyProviderFactory.getContextData(HttpRequest.class);
-        MultivaluedMap<String, String> formParams = request.getDecodedFormParameters();
         for (String paramName : formParams.keySet()) {
-            sb.append(paramName).append(": ").append("<span id=\"").append(paramName).append("\">").append(formParams.getFirst(paramName)).append("</span><br>");
+            sb.append(paramName).append(": ").append("<span id=\"")
+                    .append(paramName).append("\">")
+                    .append(HtmlUtils.escapeAttribute(formParams.getFirst(paramName)))
+                    .append("</span><br>");
         }
         sb.append("<br>");
 
-        UriBuilder base = UriBuilder.fromUri("http://localhost:8180/auth");
+        UriBuilder base = UriBuilder.fromUri("/auth");
         sb.append("<a href=\"" + RealmsResource.accountUrl(base).build("test").toString() + "\" id=\"account\">account</a>");
 
         sb.append("</body></html>");
-        return sb.toString();
+        return Response.ok(sb.toString()).build();
     }
 
     @GET
-    @Produces(MediaType.TEXT_HTML)
+    @Produces(MediaType.TEXT_HTML_UTF_8)
     @Path("/{action}")
     public String get(@PathParam("action") String action) {
         //String requestUri = session.getContext().getUri().getRequestUri().toString();
@@ -162,7 +197,7 @@ public class TestApplicationResourceProvider implements RealmResourceProvider {
 
         StringBuilder sb = new StringBuilder();
         sb.append("<html><head><title>" + title + "</title></head><body>");
-        UriBuilder base = UriBuilder.fromUri("http://localhost:8180/auth");
+        UriBuilder base = UriBuilder.fromUri("/auth");
         sb.append("<a href=\"" + RealmsResource.accountUrl(base).build("test").toString() + "\" id=\"account\">account</a>");
 
         sb.append("</body></html>");
@@ -171,7 +206,7 @@ public class TestApplicationResourceProvider implements RealmResourceProvider {
 
     @GET
     @NoCache
-    @Produces(MediaType.TEXT_HTML)
+    @Produces(MediaType.TEXT_HTML_UTF_8)
     @Path("/get-account-profile")
     public String getAccountProfile(@QueryParam("token") String token, @QueryParam("account-uri") String accountUri) {
         StringBuilder sb = new StringBuilder();
@@ -198,7 +233,7 @@ public class TestApplicationResourceProvider implements RealmResourceProvider {
 
     @Path("/oidc-client-endpoints")
     public TestingOIDCEndpointsApplicationResource getTestingOIDCClientEndpoints() {
-        return new TestingOIDCEndpointsApplicationResource(oidcClientData);
+        return new TestingOIDCEndpointsApplicationResource(oidcClientData, authenticationChannelRequests);
     }
 
     @Override

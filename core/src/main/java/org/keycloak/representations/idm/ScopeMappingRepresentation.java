@@ -27,7 +27,10 @@ import java.util.Set;
 public class ScopeMappingRepresentation {
     protected String self; // link
     protected String client;
+
+    @Deprecated // Replaced by clientScope
     protected String clientTemplate;
+    protected String clientScope;
     protected Set<String> roles;
 
     public String getSelf() {
@@ -46,12 +49,17 @@ public class ScopeMappingRepresentation {
         this.client = client;
     }
 
+    @Deprecated
     public String getClientTemplate() {
         return clientTemplate;
     }
 
-    public void setClientTemplate(String clientTemplate) {
-        this.clientTemplate = clientTemplate;
+    public String getClientScope() {
+        return clientScope;
+    }
+
+    public void setClientScope(String clientScope) {
+        this.clientScope = clientScope;
     }
 
     public Set<String> getRoles() {
@@ -63,7 +71,7 @@ public class ScopeMappingRepresentation {
     }
 
     public ScopeMappingRepresentation role(String role) {
-        if (this.roles == null) this.roles = new HashSet<String>();
+        if (this.roles == null) this.roles = new HashSet<>();
         this.roles.add(role);
         return this;
     }

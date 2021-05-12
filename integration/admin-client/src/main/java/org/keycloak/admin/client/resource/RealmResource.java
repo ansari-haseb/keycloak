@@ -18,17 +18,22 @@
 package org.keycloak.admin.client.resource;
 
 import org.jboss.resteasy.annotations.cache.NoCache;
+import org.jboss.resteasy.spi.ResteasyProviderFactory;
 import org.keycloak.representations.adapters.action.GlobalRequestResult;
 import org.keycloak.representations.idm.AdminEventRepresentation;
 import org.keycloak.representations.idm.ClientRepresentation;
+import org.keycloak.representations.idm.ClientScopeRepresentation;
 import org.keycloak.representations.idm.EventRepresentation;
 import org.keycloak.representations.idm.GroupRepresentation;
+import org.keycloak.representations.idm.LDAPCapabilityRepresentation;
 import org.keycloak.representations.idm.PartialImportRepresentation;
 import org.keycloak.representations.idm.RealmEventsConfigRepresentation;
 import org.keycloak.representations.idm.RealmRepresentation;
+import org.keycloak.representations.idm.TestLdapConnectionRepresentation;
 
 import javax.ws.rs.Consumes;
 import javax.ws.rs.DELETE;
+import javax.ws.rs.FormParam;
 import javax.ws.rs.GET;
 import javax.ws.rs.POST;
 import javax.ws.rs.PUT;
@@ -38,6 +43,7 @@ import javax.ws.rs.Produces;
 import javax.ws.rs.QueryParam;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
+
 import java.util.List;
 import java.util.Map;
 
@@ -57,8 +63,34 @@ public interface RealmResource {
     @Path("clients")
     ClientsResource clients();
 
-    @Path("client-templates")
-    ClientTemplatesResource clientTemplates();
+    @Path("client-scopes")
+    ClientScopesResource clientScopes();
+
+    @GET
+    @Produces(MediaType.APPLICATION_JSON)
+    @Path("default-default-client-scopes")
+    List<ClientScopeRepresentation> getDefaultDefaultClientScopes();
+
+    @PUT
+    @Path("default-default-client-scopes/{clientScopeId}")
+    void addDefaultDefaultClientScope(@PathParam("clientScopeId") String clientScopeId);
+
+    @DELETE
+    @Path("default-default-client-scopes/{clientScopeId}")
+    void removeDefaultDefaultClientScope(@PathParam("clientScopeId") String clientScopeId);
+
+    @GET
+    @Produces(MediaType.APPLICATION_JSON)
+    @Path("default-optional-client-scopes")
+    List<ClientScopeRepresentation> getDefaultOptionalClientScopes();
+
+    @PUT
+    @Path("default-optional-client-scopes/{clientScopeId}")
+    void addDefaultOptionalClientScope(@PathParam("clientScopeId") String clientScopeId);
+
+    @DELETE
+    @Path("default-optional-client-scopes/{clientScopeId}")
+    void removeDefaultOptionalClientScope(@PathParam("clientScopeId") String clientScopeId);
 
     @Path("client-description-converter")
     @POST
@@ -91,7 +123,7 @@ public interface RealmResource {
     @GET
     @NoCache
     @Produces(MediaType.APPLICATION_JSON)
-    public List<EventRepresentation> getEvents(@QueryParam("type") List<String> types, @QueryParam("client") String client,
+    List<EventRepresentation> getEvents(@QueryParam("type") List<String> types, @QueryParam("client") String client,
             @QueryParam("user") String user, @QueryParam("dateFrom") String dateFrom, @QueryParam("dateTo") String dateTo,
             @QueryParam("ipAddress") String ipAddress, @QueryParam("first") Integer firstResult,
             @QueryParam("max") Integer maxResults);
@@ -117,31 +149,31 @@ public interface RealmResource {
     @GET
     @Path("events/config")
     @Produces(MediaType.APPLICATION_JSON)
-    public RealmEventsConfigRepresentation getRealmEventsConfig();
+    RealmEventsConfigRepresentation getRealmEventsConfig();
 
     @PUT
     @Path("events/config")
     @Consumes(MediaType.APPLICATION_JSON)
-    public void updateRealmEventsConfig(RealmEventsConfigRepresentation rep);
+    void updateRealmEventsConfig(RealmEventsConfigRepresentation rep);
 
     @GET
     @Path("group-by-path/{path: .*}")
     @NoCache
     @Produces(MediaType.APPLICATION_JSON)
-    public GroupRepresentation getGroupByPath(@PathParam("path") String path);
+    GroupRepresentation getGroupByPath(@PathParam("path") String path);
 
     @GET
     @Produces(MediaType.APPLICATION_JSON)
     @Path("default-groups")
-    public List<GroupRepresentation> getDefaultGroups();
+    List<GroupRepresentation> getDefaultGroups();
 
     @PUT
     @Path("default-groups/{groupId}")
-    public void addDefaultGroup(@PathParam("groupId") String groupId);
+    void addDefaultGroup(@PathParam("groupId") String groupId);
 
     @DELETE
     @Path("default-groups/{groupId}")
-    public void removeDefaultGroup(@PathParam("groupId") String groupId);
+    void removeDefaultGroup(@PathParam("groupId") String groupId);
 
     @Path("identity-provider")
     IdentityProvidersResource identityProviders();
@@ -163,8 +195,13 @@ public interface RealmResource {
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)
-    public Response partialImport(PartialImportRepresentation rep);
+    Response partialImport(PartialImportRepresentation rep);
 
+    @Path("partial-export")
+    @POST
+    @Produces(MediaType.APPLICATION_JSON)
+    RealmRepresentation partialExport(@QueryParam("exportGroupsAndRoles") Boolean exportGroupsAndRoles,
+                                             @QueryParam("exportClients") Boolean exportClients);
     @Path("authentication")
     @Consumes(MediaType.APPLICATION_JSON)
     AuthenticationManagementResource flows();
@@ -173,11 +210,39 @@ public interface RealmResource {
     AttackDetectionResource attackDetection();
 
     @Path("testLDAPConnection")
-    @GET
+    @POST
+    @Consumes(MediaType.APPLICATION_FORM_URLENCODED)
     @NoCache
-    Response testLDAPConnection(@QueryParam("action") String action, @QueryParam("connectionUrl") String connectionUrl,
-                                @QueryParam("bindDn") String bindDn, @QueryParam("bindCredential") String bindCredential,
-                                @QueryParam("useTruststoreSpi") String useTruststoreSpi, @QueryParam("connectionTimeout") String connectionTimeout);
+    @Deprecated
+    Response testLDAPConnection(@FormParam("action") String action, @FormParam("connectionUrl") String connectionUrl,
+                                @FormParam("bindDn") String bindDn, @FormParam("bindCredential") String bindCredential,
+                                @FormParam("useTruststoreSpi") String useTruststoreSpi, @FormParam("connectionTimeout") String connectionTimeout);
+
+    @Path("testLDAPConnection")
+    @POST
+    @Consumes(MediaType.APPLICATION_JSON)
+    @NoCache
+    Response testLDAPConnection(TestLdapConnectionRepresentation config);
+
+    @POST
+    @Path("ldap-server-capabilities")
+    @NoCache
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(javax.ws.rs.core.MediaType.APPLICATION_JSON)
+    List<LDAPCapabilityRepresentation> ldapServerCapabilities(TestLdapConnectionRepresentation config);
+
+    @Path("testSMTPConnection")
+    @POST
+    @NoCache
+    @Consumes(MediaType.APPLICATION_FORM_URLENCODED)
+    @Deprecated
+    Response testSMTPConnection(@FormParam("config") String config);
+
+    @Path("testSMTPConnection")
+    @POST
+    @NoCache
+    @Consumes(MediaType.APPLICATION_JSON)
+    Response testSMTPConnection(Map<String, String> config);
 
     @Path("clear-realm-cache")
     @POST
@@ -215,4 +280,12 @@ public interface RealmResource {
     @Path("keys")
     KeyResource keys();
 
+    @Path("localization")
+    RealmLocalizationResource localization();
+
+    @Path("client-policies/policies")
+    ClientPoliciesPoliciesResource clientPoliciesPoliciesResource();
+
+    @Path("client-policies/profiles")
+    ClientPoliciesProfilesResource clientPoliciesProfilesResource();
 }

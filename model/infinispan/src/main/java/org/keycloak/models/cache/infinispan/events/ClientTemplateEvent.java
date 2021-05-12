@@ -17,13 +17,24 @@
 
 package org.keycloak.models.cache.infinispan.events;
 
+import java.util.Objects;
 import java.util.Set;
 
 import org.keycloak.models.cache.infinispan.RealmCacheManager;
+import java.io.IOException;
+import java.io.ObjectInput;
+import java.io.ObjectOutput;
+import org.infinispan.commons.marshall.Externalizer;
+import org.infinispan.commons.marshall.MarshallUtil;
+import org.infinispan.commons.marshall.SerializeWith;
 
 /**
+ * TODO Leave the name ClientTemplateEvent just due the backwards compatibility of infinispan migration. See if can be renamed based on
+ * rolling upgrades plan...
+ *
  * @author <a href="mailto:mposolda@redhat.com">Marek Posolda</a>
  */
+@SerializeWith(ClientTemplateEvent.ExternalizerImpl.class)
 public class ClientTemplateEvent extends InvalidationEvent implements RealmCacheInvalidationEvent {
 
     private String clientTemplateId;
@@ -48,5 +59,48 @@ public class ClientTemplateEvent extends InvalidationEvent implements RealmCache
     @Override
     public void addInvalidations(RealmCacheManager realmCache, Set<String> invalidations) {
         // Nothing. ID was already invalidated
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        if (!super.equals(o)) return false;
+        ClientTemplateEvent that = (ClientTemplateEvent) o;
+        return Objects.equals(clientTemplateId, that.clientTemplateId);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(super.hashCode(), clientTemplateId);
+    }
+
+    public static class ExternalizerImpl implements Externalizer<ClientTemplateEvent> {
+
+        private static final int VERSION_1 = 1;
+
+        @Override
+        public void writeObject(ObjectOutput output, ClientTemplateEvent obj) throws IOException {
+            output.writeByte(VERSION_1);
+
+            MarshallUtil.marshallString(obj.clientTemplateId, output);
+        }
+
+        @Override
+        public ClientTemplateEvent readObject(ObjectInput input) throws IOException, ClassNotFoundException {
+            switch (input.readByte()) {
+                case VERSION_1:
+                    return readObjectVersion1(input);
+                default:
+                    throw new IOException("Unknown version");
+            }
+        }
+
+        public ClientTemplateEvent readObjectVersion1(ObjectInput input) throws IOException, ClassNotFoundException {
+            ClientTemplateEvent res = new ClientTemplateEvent();
+            res.clientTemplateId = MarshallUtil.unmarshallString(input);
+
+            return res;
+        }
     }
 }

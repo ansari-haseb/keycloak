@@ -4,6 +4,7 @@ import org.junit.Assert;
 import org.junit.Test;
 import org.keycloak.client.admin.cli.config.ConfigData;
 import org.keycloak.client.admin.cli.config.FileConfigHandler;
+import org.keycloak.client.admin.cli.util.OsUtil;
 import org.keycloak.testsuite.cli.KcAdmExec;
 import org.keycloak.testsuite.util.TempFileResource;
 
@@ -12,6 +13,7 @@ import java.io.IOException;
 
 import static org.keycloak.client.admin.cli.util.ConfigUtil.DEFAULT_CONFIG_FILE_PATH;
 import static org.keycloak.client.admin.cli.util.OsUtil.EOL;
+import static org.keycloak.testsuite.util.ServerURLs.AUTH_SERVER_SSL_REQUIRED;
 import static org.keycloak.testsuite.cli.KcAdmExec.CMD;
 import static org.keycloak.testsuite.cli.KcAdmExec.execute;
 
@@ -23,13 +25,19 @@ public class KcAdmTruststoreTest extends AbstractAdmCliTest {
     @Test
     public void testTruststore() throws IOException {
 
+        File truststore = new File("src/test/resources/keystore/keycloak.truststore");
+
+        KcAdmExec exe = execute("config truststore --no-config '" + truststore.getAbsolutePath() + "'");
+
+        assertExitCodeAndStreamSizes(exe, 1, 0, 2);
+        Assert.assertEquals("stderr first line", "Unsupported option: --no-config", exe.stderrLines().get(0));
+        Assert.assertEquals("try help", "Try '" + OsUtil.CMD + " help config truststore' for more information", exe.stderrLines().get(1));
+
         // only run this test if ssl protected keycloak server is available
-        if (!isAuthServerSSL()) {
+        if (!AUTH_SERVER_SSL_REQUIRED) {
             System.out.println("TEST SKIPPED - This test requires HTTPS. Run with '-Pauth-server-wildfly -Dauth.server.ssl.required=true'");
             return;
         }
-
-        File truststore = new File("src/test/resources/keystore/keycloak.truststore");
 
         FileConfigHandler handler = initCustomConfigFile();
 
@@ -37,14 +45,14 @@ public class KcAdmTruststoreTest extends AbstractAdmCliTest {
 
             if (runIntermittentlyFailingTests()) {
                 // configure truststore
-                KcAdmExec exe = execute("config truststore --config '" + configFile.getName() + "' '" + truststore.getAbsolutePath() + "'");
+                exe = execute("config truststore --config '" + configFile.getName() + "' '" + truststore.getAbsolutePath() + "'");
 
                 assertExitCodeAndStreamSizes(exe, 0, 0, 0);
 
 
                 // perform authentication against server - asks for password, then for truststore password
                 exe = KcAdmExec.newBuilder()
-                        .argsLine("config credentials --server " + serverUrl + " --realm test --user user1" +
+                        .argsLine("config credentials --server " + oauth.AUTH_SERVER_ROOT + " --realm test --user user1" +
                                 " --config '" + configFile.getName() + "'")
                         .executeAsync();
 
@@ -64,7 +72,7 @@ public class KcAdmTruststoreTest extends AbstractAdmCliTest {
 
                 // perform authentication against server - asks for password, then for truststore password
                 exe = KcAdmExec.newBuilder()
-                        .argsLine("config credentials --server " + serverUrl + " --realm test --user user1" +
+                        .argsLine("config credentials --server " + oauth.AUTH_SERVER_ROOT + " --realm test --user user1" +
                                 " --config '" + configFile.getName() + "'")
                         .executeAsync();
 
@@ -80,7 +88,7 @@ public class KcAdmTruststoreTest extends AbstractAdmCliTest {
         }
 
         // configure truststore with password
-        KcAdmExec exe = execute("config truststore --trustpass secret '" + truststore.getAbsolutePath() + "'");
+        exe = execute("config truststore --trustpass secret '" + truststore.getAbsolutePath() + "'");
         assertExitCodeAndStreamSizes(exe, 0, 0, 0);
 
         // perform authentication against server - asks for password, then for truststore password

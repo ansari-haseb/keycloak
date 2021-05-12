@@ -31,6 +31,7 @@ import org.keycloak.adapters.saml.rotation.SamlDescriptorPublicKeyLocator;
 import org.keycloak.rotation.CompositeKeyLocator;
 import org.keycloak.rotation.HardcodedKeyLocator;
 import org.keycloak.rotation.KeyLocator;
+import java.net.URI;
 
 /**
  * @author <a href="mailto:bill@burkecentral.com">Bill Burke</a>
@@ -45,6 +46,7 @@ public class DefaultSamlDeployment implements SamlDeployment {
         private Binding requestBinding;
         private Binding responseBinding;
         private String requestBindingUrl;
+        private URI assertionConsumerServiceUrl;
 
         @Override
         public boolean signRequest() {
@@ -74,6 +76,15 @@ public class DefaultSamlDeployment implements SamlDeployment {
         @Override
         public String getRequestBindingUrl() {
             return requestBindingUrl;
+        }
+
+        @Override
+        public URI getAssertionConsumerServiceUrl() {
+            return assertionConsumerServiceUrl;
+        }
+
+        public void setAssertionConsumerServiceUrl(URI assertionConsumerServiceUrl) {
+            this.assertionConsumerServiceUrl = assertionConsumerServiceUrl;
         }
 
         public void setSignRequest(boolean signRequest) {
@@ -194,7 +205,9 @@ public class DefaultSamlDeployment implements SamlDeployment {
         private SingleLogoutService singleLogoutService;
         private final List<PublicKey> signatureValidationKeys = new LinkedList<>();
         private int minTimeBetweenDescriptorRequests;
+        private int allowedClockSkew;
         private HttpClient client;
+        private String metadataUrl;
 
         @Override
         public String getEntityID() {
@@ -248,11 +261,10 @@ public class DefaultSamlDeployment implements SamlDeployment {
             if (! this.signatureValidationKeys.isEmpty()) {
                 this.signatureValidationKeyLocator.add(new HardcodedKeyLocator(this.signatureValidationKeys));
             } else if (this.singleSignOnService != null) {
-                String samlDescriptorUrl = singleSignOnService.getRequestBindingUrl() + "/descriptor";
                 HttpClient httpClient = getClient();
                 SamlDescriptorPublicKeyLocator samlDescriptorPublicKeyLocator =
                   new SamlDescriptorPublicKeyLocator(
-                    samlDescriptorUrl, this.minTimeBetweenDescriptorRequests, DEFAULT_CACHE_TTL, httpClient);
+                    getMetadataUrl(), this.minTimeBetweenDescriptorRequests, DEFAULT_CACHE_TTL, httpClient);
                 this.signatureValidationKeyLocator.add(samlDescriptorPublicKeyLocator);
             }
         }
@@ -264,6 +276,24 @@ public class DefaultSamlDeployment implements SamlDeployment {
 
         public void setClient(HttpClient client) {
             this.client = client;
+        }
+
+        public String getMetadataUrl() {
+            return metadataUrl == null ? singleSignOnService.getRequestBindingUrl() + "/descriptor" : metadataUrl;
+        }
+
+        public void setMetadataUrl(String metadataUrl) {
+            this.metadataUrl = metadataUrl;
+        }
+
+        @Override
+        public int getAllowedClockSkew() {
+            return allowedClockSkew;
+        }
+
+
+        public void setAllowedClockSkew(int allowedClockSkew) {
+            this.allowedClockSkew = allowedClockSkew;
         }
     }
 
@@ -277,13 +307,15 @@ public class DefaultSamlDeployment implements SamlDeployment {
     private boolean turnOffChangeSessionIdOnLogin;
     private PrivateKey decryptionKey;
     private KeyPair signingKeyPair;
-    private String assertionConsumerServiceUrl;
     private Set<String> roleAttributeNames;
+    private RoleMappingsProvider roleMappingsProvider;
     private PrincipalNamePolicy principalNamePolicy = PrincipalNamePolicy.FROM_NAME_ID;
     private String principalAttributeName;
     private String logoutPage;
     private SignatureAlgorithm signatureAlgorithm;
     private String signatureCanonicalizationMethod;
+    private boolean autodetectBearerOnly;
+    private boolean keepDOMAssertion;
 
     @Override
     public boolean turnOffChangeSessionIdOnLogin() {
@@ -341,13 +373,13 @@ public class DefaultSamlDeployment implements SamlDeployment {
     }
 
     @Override
-    public String getAssertionConsumerServiceUrl() {
-        return assertionConsumerServiceUrl;
+    public Set<String> getRoleAttributeNames() {
+        return roleAttributeNames;
     }
 
     @Override
-    public Set<String> getRoleAttributeNames() {
-        return roleAttributeNames;
+    public RoleMappingsProvider getRoleMappingsProvider() {
+        return this.roleMappingsProvider;
     }
 
     @Override
@@ -396,12 +428,12 @@ public class DefaultSamlDeployment implements SamlDeployment {
         this.signingKeyPair = signingKeyPair;
     }
 
-    public void setAssertionConsumerServiceUrl(String assertionConsumerServiceUrl) {
-        this.assertionConsumerServiceUrl = assertionConsumerServiceUrl;
-    }
-
     public void setRoleAttributeNames(Set<String> roleAttributeNames) {
         this.roleAttributeNames = roleAttributeNames;
+    }
+
+    public void setRoleMappingsProvider(final RoleMappingsProvider provider) {
+        this.roleMappingsProvider = provider;
     }
 
     public void setPrincipalNamePolicy(PrincipalNamePolicy principalNamePolicy) {
@@ -437,5 +469,23 @@ public class DefaultSamlDeployment implements SamlDeployment {
 
     public void setSignatureAlgorithm(SignatureAlgorithm signatureAlgorithm) {
         this.signatureAlgorithm = signatureAlgorithm;
+    }
+
+    @Override
+    public boolean isAutodetectBearerOnly() {
+        return autodetectBearerOnly;
+    }
+
+    public void setAutodetectBearerOnly(boolean autodetectBearerOnly) {
+        this.autodetectBearerOnly = autodetectBearerOnly;
+    }
+
+    @Override
+    public boolean isKeepDOMAssertion() {
+        return keepDOMAssertion;
+    }
+
+    public void setKeepDOMAssertion(Boolean keepDOMAssertion) {
+        this.keepDOMAssertion = keepDOMAssertion != null && keepDOMAssertion;
     }
 }

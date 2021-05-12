@@ -17,12 +17,22 @@
  */
 package org.keycloak.authorization.permission.evaluator;
 
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.Map;
+
+import org.keycloak.authorization.AuthorizationProvider;
 import org.keycloak.authorization.Decision;
+import org.keycloak.authorization.model.Policy;
+import org.keycloak.authorization.model.ResourceServer;
 import org.keycloak.authorization.permission.ResourcePermission;
+import org.keycloak.authorization.policy.evaluation.DecisionPermissionCollector;
 import org.keycloak.authorization.policy.evaluation.EvaluationContext;
 import org.keycloak.authorization.policy.evaluation.PolicyEvaluator;
-
-import java.util.Iterator;
+import org.keycloak.authorization.store.StoreFactory;
+import org.keycloak.representations.idm.authorization.AuthorizationRequest;
+import org.keycloak.representations.idm.authorization.Permission;
 
 /**
  * @author <a href="mailto:psilva@redhat.com">Pedro Igor</a>
@@ -32,22 +42,50 @@ class IterablePermissionEvaluator implements PermissionEvaluator {
     private final Iterator<ResourcePermission> permissions;
     private final EvaluationContext executionContext;
     private final PolicyEvaluator policyEvaluator;
+    private final AuthorizationProvider authorizationProvider;
 
-    IterablePermissionEvaluator(Iterator<ResourcePermission> permissions, EvaluationContext executionContext, PolicyEvaluator policyEvaluator) {
+    IterablePermissionEvaluator(Iterator<ResourcePermission> permissions, EvaluationContext executionContext, AuthorizationProvider authorizationProvider) {
         this.permissions = permissions;
         this.executionContext = executionContext;
-        this.policyEvaluator = policyEvaluator;
+        this.authorizationProvider = authorizationProvider;
+        this.policyEvaluator = authorizationProvider.getPolicyEvaluator();
     }
 
     @Override
-    public void evaluate(Decision decision) {
+    public Decision evaluate(Decision decision) {
+        StoreFactory storeFactory = authorizationProvider.getStoreFactory();
+
         try {
-            while (this.permissions.hasNext()) {
-                this.policyEvaluator.evaluate(this.permissions.next(), this.executionContext, decision);
+            Map<Policy, Map<Object, Decision.Effect>> decisionCache = new HashMap<>();
+
+            storeFactory.setReadOnly(true);
+
+            Iterator<ResourcePermission> permissions = getPermissions();
+
+            while (permissions.hasNext()) {
+                this.policyEvaluator.evaluate(permissions.next(), authorizationProvider, executionContext, decision, decisionCache);
             }
+
             decision.onComplete();
         } catch (Throwable cause) {
             decision.onError(cause);
+        } finally {
+            storeFactory.setReadOnly(false);
         }
+
+        return decision;
+    }
+
+    protected Iterator<ResourcePermission> getPermissions() {
+        return this.permissions;
+    }
+
+    @Override
+    public Collection<Permission> evaluate(ResourceServer resourceServer, AuthorizationRequest request) {
+        DecisionPermissionCollector decision = new DecisionPermissionCollector(authorizationProvider, resourceServer, request);
+
+        evaluate(decision);
+
+        return decision.results();
     }
 }

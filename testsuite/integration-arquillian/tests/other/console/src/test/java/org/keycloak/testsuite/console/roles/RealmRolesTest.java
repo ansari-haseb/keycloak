@@ -7,10 +7,15 @@ import org.junit.Test;
 import org.keycloak.representations.idm.RoleRepresentation;
 import org.keycloak.testsuite.console.page.roles.CreateRole;
 import org.keycloak.testsuite.console.page.roles.RealmRoles;
-import org.keycloak.testsuite.console.page.roles.Role;
+import org.keycloak.testsuite.console.page.roles.RoleDetails;
 import org.keycloak.testsuite.util.Timer;
 
-import static org.junit.Assert.*;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
+import org.keycloak.models.Constants;
+import org.keycloak.testsuite.console.page.roles.DefaultRoles;
 import static org.keycloak.testsuite.util.URLAssert.assertCurrentUrlEquals;
 import static org.keycloak.testsuite.util.WaitUtils.pause;
 
@@ -26,8 +31,10 @@ public class RealmRolesTest extends AbstractRolesTest {
     @Page
     private CreateRole createRolePage;
     @Page
-    private Role rolePage;
-    
+    private RoleDetails roleDetailsPage;
+    @Page
+    private DefaultRoles defaultRolesPage;
+
     private RoleRepresentation testRole;
     
     @Before
@@ -51,10 +58,10 @@ public class RealmRolesTest extends AbstractRolesTest {
         assertCurrentUrlEquals(realmRolesPage);
         realmRolesPage.table().editRole(roleRep.getName());
 //        assertCurrentUrl(role); // can't do this, role id needed as uri param
-        rolePage.form().setBasicAttributes(roleRep);
-        rolePage.form().save();
+        roleDetailsPage.form().setBasicAttributes(roleRep);
+        roleDetailsPage.form().save();
         assertAlertSuccess();
-        rolePage.form().setCompositeRoles(roleRep);
+        roleDetailsPage.form().setCompositeRoles(roleRep);
     }
     
     public void assertBasicRoleAttributesEqual(RoleRepresentation r1, RoleRepresentation r2) {
@@ -72,12 +79,12 @@ public class RealmRolesTest extends AbstractRolesTest {
         RoleRepresentation foundRole = realmRolesPage.table().findRole(testRole.getName()); // search & get role from table
         assertBasicRoleAttributesEqual(testRole, foundRole);
         realmRolesPage.table().editRole(testRole.getName());
-        foundRole = rolePage.form().getBasicAttributes();
+        foundRole = roleDetailsPage.form().getBasicAttributes();
         assertBasicRoleAttributesEqual(testRole, foundRole);
         
         testRole.setDescription("updated role description");
-        rolePage.form().setDescription(testRole.getDescription());
-        rolePage.form().save();
+        roleDetailsPage.form().setDescription(testRole.getDescription());
+        roleDetailsPage.form().save();
         assertAlertSuccess();
         
         configure().roles();
@@ -96,7 +103,7 @@ public class RealmRolesTest extends AbstractRolesTest {
         // add again
         addRole(testRole);
         // delete from page
-        rolePage.form().delete();
+        roleDetailsPage.form().delete();
         modalDialog.confirmDeletion();
         assertCurrentUrlEquals(realmRolesPage);
     }
@@ -119,7 +126,25 @@ public class RealmRolesTest extends AbstractRolesTest {
         createRolePage.form().save();
         assertAlertDanger();
     }
-    
+
+    @Test
+    public void testDefaultRoleWithinRoleList() {
+        //test role name link leads to Default Roles tab
+        configure().roles();
+        realmRolesPage.table().clickRole(Constants.DEFAULT_ROLES_ROLE_PREFIX + "-test");
+        defaultRolesPage.assertCurrent();
+
+        //test role edit button leads to Default Roles tab        
+        configure().roles();
+        realmRolesPage.table().editRole(Constants.DEFAULT_ROLES_ROLE_PREFIX + "-test");
+        defaultRolesPage.assertCurrent();
+
+        //test delete default role doesn't work
+        configure().roles();
+        realmRolesPage.table().deleteRole(Constants.DEFAULT_ROLES_ROLE_PREFIX + "-test");
+        assertTrue(realmRolesPage.table().containsRole(Constants.DEFAULT_ROLES_ROLE_PREFIX + "-test"));
+    }
+
     public void createTestRoles(String namePrefix, int count) {
         Timer.DEFAULT.reset();
         for (int i = 0; i < count; i++) {

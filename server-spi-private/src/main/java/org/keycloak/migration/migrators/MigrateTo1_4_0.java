@@ -28,10 +28,11 @@ import org.keycloak.models.cache.UserCache;
 import org.keycloak.models.utils.DefaultAuthenticationFlows;
 import org.keycloak.models.utils.DefaultRequiredActions;
 import org.keycloak.models.utils.KeycloakModelUtils;
-import org.keycloak.storage.UserStorageProviderModel;
+import org.keycloak.representations.idm.RealmRepresentation;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * @author <a href="mailto:bill@burkecentral.com">Bill Burke</a>
@@ -44,49 +45,50 @@ public class MigrateTo1_4_0 implements Migration {
     }
 
     public void migrate(KeycloakSession session) {
-        List<RealmModel> realms = session.realms().getRealms();
-        for (RealmModel realm : realms) {
-            if (realm.getAuthenticationFlows().size() == 0) {
-                DefaultAuthenticationFlows.migrateFlows(realm);
-                DefaultRequiredActions.addActions(realm);
-            }
-            ImpersonationConstants.setupImpersonationService(session, realm);
+        session.realms().getRealmsStream().forEach(realm -> migrateRealm(session, realm));
+    }
 
-            migrateLDAPMappers(session, realm);
-            migrateUsers(session, realm);
+    protected void migrateRealm(KeycloakSession session, RealmModel realm) {
+        if (realm.getAuthenticationFlowsStream().count() == 0) {
+            DefaultAuthenticationFlows.migrateFlows(realm);
+            DefaultRequiredActions.addActions(realm);
         }
+        ImpersonationConstants.setupImpersonationService(session, realm);
+
+        migrateLDAPMappers(session, realm);
+        migrateUsers(session, realm);
+    }
+
+    @Override
+    public void migrateImport(KeycloakSession session, RealmModel realm, RealmRepresentation rep, boolean skipUserDependent) {
+        migrateRealm(session, realm);
 
     }
 
     private void migrateLDAPMappers(KeycloakSession session, RealmModel realm) {
         List<String> mandatoryInLdap = Arrays.asList("username", "username-cn", "first name", "last name");
-        for (UserStorageProviderModel providerModel : realm.getUserStorageProviders()) {
-            if (providerModel.getProviderId().equals(LDAPConstants.LDAP_PROVIDER)) {
-                List<ComponentModel> mappers = realm.getComponents(providerModel.getId());
-                for (ComponentModel mapper : mappers) {
-                    if (mandatoryInLdap.contains(mapper.getName())) {
-                        mapper = new ComponentModel(mapper);  // don't want to modify cache
-                        mapper.getConfig().putSingle("is.mandatory.in.ldap", "true");
-                        realm.updateComponent(mapper);
-                    }
-
-                }
-            }
-        }
+        realm.getUserStorageProvidersStream()
+                .filter(providerModel -> Objects.equals(providerModel.getProviderId(), LDAPConstants.LDAP_PROVIDER))
+                .forEachOrdered(providerModel -> realm.getComponentsStream(providerModel.getId())
+                        .filter(mapper -> mandatoryInLdap.contains(mapper.getName()))
+                        .forEach(mapper -> {
+                            mapper = new ComponentModel(mapper);  // don't want to modify cache
+                            mapper.getConfig().putSingle("is.mandatory.in.ldap", "true");
+                            realm.updateComponent(mapper);
+                        }));
     }
 
     private void migrateUsers(KeycloakSession session, RealmModel realm) {
-        List<UserModel> users = session.userLocalStorage().getUsers(realm, false);
-        for (UserModel user : users) {
-            String email = user.getEmail();
-            email = KeycloakModelUtils.toLowerCaseSafe(email);
-            if (email != null && !email.equals(user.getEmail())) {
-                user.setEmail(email);
-                UserCache userCache = session.userCache();
-                if (userCache != null) {
-                    userCache.evict(realm, user);
-                }
-            }
-        }
+        session.userLocalStorage().getUsersStream(realm, false)
+                .forEach(user -> {
+                    String email = KeycloakModelUtils.toLowerCaseSafe(user.getEmail());
+                    if (email != null && !email.equals(user.getEmail())) {
+                        user.setEmail(email);
+                        UserCache userCache = session.userCache();
+                        if (userCache != null) {
+                            userCache.evict(realm, user);
+                        }
+                    }
+                });
     }
 }

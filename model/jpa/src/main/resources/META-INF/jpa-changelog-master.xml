@@ -46,4 +46,28 @@
     <include file="META-INF/jpa-changelog-2.4.0.xml"/>
     <include file="META-INF/jpa-changelog-2.5.0.xml"/>
     <include file="META-INF/jpa-changelog-2.5.1.xml"/>
+    <include file="META-INF/jpa-changelog-3.0.0.xml"/>
+    <include file="META-INF/jpa-changelog-3.2.0.xml"/>
+    <include file="META-INF/jpa-changelog-3.3.0.xml"/>
+    <include file="META-INF/jpa-changelog-authz-3.4.0.CR1.xml"/>
+    <include file="META-INF/jpa-changelog-3.4.0.xml"/>
+    <include file="META-INF/jpa-changelog-3.4.1.xml"/>
+    <include file="META-INF/jpa-changelog-3.4.2.xml"/>
+    <include file="META-INF/jpa-changelog-4.0.0.xml"/>
+    <include file="META-INF/jpa-changelog-authz-4.0.0.CR1.xml"/>
+    <include file="META-INF/jpa-changelog-authz-4.0.0.Beta3.xml"/>
+    <include file="META-INF/jpa-changelog-authz-4.2.0.Final.xml"/>
+    <include file="META-INF/jpa-changelog-4.2.0.xml"/>
+    <include file="META-INF/jpa-changelog-4.3.0.xml"/>
+    <include file="META-INF/jpa-changelog-4.6.0.xml"/>
+    <include file="META-INF/jpa-changelog-4.7.0.xml"/>
+    <include file="META-INF/jpa-changelog-4.8.0.xml"/>
+    <include file="META-INF/jpa-changelog-authz-7.0.0.xml"/>
+    <include file="META-INF/jpa-changelog-8.0.0.xml"/>
+    <include file="META-INF/jpa-changelog-9.0.0.xml"/>
+    <include file="META-INF/jpa-changelog-9.0.1.xml"/>
+    <include file="META-INF/jpa-changelog-11.0.0.xml"/>
+    <include file="META-INF/jpa-changelog-12.0.0.xml"/>
+    <include file="META-INF/jpa-changelog-13.0.0.xml"/>
+
 </databaseChangeLog>

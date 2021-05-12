@@ -17,13 +17,37 @@
 
 package org.keycloak.models;
 
-import java.util.List;
+import org.keycloak.storage.SearchableModelField;
+
+import java.util.Collection;
 import java.util.Map;
 
 /**
  * @author <a href="mailto:sthorger@redhat.com">Stian Thorgersen</a>
  */
 public interface UserSessionModel {
+
+    class SearchableFields {
+        public static final SearchableModelField<UserSessionModel> ID       = new SearchableModelField<>("id", String.class);
+
+        /**
+         * Represents the corresponding offline user session for the online user session.
+         * null if there is no corresponding offline user session.
+         */
+        public static final SearchableModelField<UserSessionModel> CORRESPONDING_SESSION_ID = new SearchableModelField<>("correspondingSessionId", String.class);
+        public static final SearchableModelField<UserSessionModel> REALM_ID = new SearchableModelField<>("realmId", String.class);
+        public static final SearchableModelField<UserSessionModel> USER_ID  = new SearchableModelField<>("userId", String.class);
+        public static final SearchableModelField<UserSessionModel> CLIENT_ID  = new SearchableModelField<>("clientId", String.class);
+        public static final SearchableModelField<UserSessionModel> BROKER_SESSION_ID  = new SearchableModelField<>("brokerSessionId", String.class);
+        public static final SearchableModelField<UserSessionModel> BROKER_USER_ID  = new SearchableModelField<>("brokerUserId", String.class);
+        public static final SearchableModelField<UserSessionModel> IS_OFFLINE  = new SearchableModelField<>("isOffline", Boolean.class);
+        public static final SearchableModelField<UserSessionModel> LAST_SESSION_REFRESH  = new SearchableModelField<>("lastSessionRefresh", Integer.class);
+    }
+
+    /**
+     * Represents the corresponding online/offline user session.
+     */
+    String CORRESPONDING_SESSION_ID = "correspondingSessionId";
 
     String getId();
     RealmModel getRealm();
@@ -53,21 +77,66 @@ public interface UserSessionModel {
 
     void setLastSessionRefresh(int seconds);
 
-    List<ClientSessionModel> getClientSessions();
+    boolean isOffline();
 
-    public String getNote(String name);
-    public void setNote(String name, String value);
-    public void removeNote(String name);
-    public Map<String, String> getNotes();
+    /**
+     * Returns map where key is ID of the client (its UUID) and value is ID respective {@link AuthenticatedClientSessionModel} object.
+     * @return 
+     */
+    Map<String, AuthenticatedClientSessionModel> getAuthenticatedClientSessions();
+    /**
+     * Returns a client session for the given client UUID.
+     * @return
+     */
+    default AuthenticatedClientSessionModel getAuthenticatedClientSessionByClient(String clientUUID) {
+        return getAuthenticatedClientSessions().get(clientUUID);
+    };
+    /**
+     * Removes authenticated client sessions for all clients whose UUID is present in {@code removedClientUUIDS} parameter.
+     * @param removedClientUUIDS
+     */
+    void removeAuthenticatedClientSessions(Collection<String> removedClientUUIDS);
+
+
+    String getNote(String name);
+    void setNote(String name, String value);
+    void removeNote(String name);
+    Map<String, String> getNotes();
 
     State getState();
     void setState(State state);
 
-    public static enum State {
-        LOGGING_IN,
+    // Will completely restart whole state of user session. It will just keep same ID.
+    void restartSession(RealmModel realm, UserModel user, String loginUsername, String ipAddress, String authMethod, boolean rememberMe, String brokerSessionId, String brokerUserId);
+
+    enum State {
         LOGGED_IN,
         LOGGING_OUT,
-        LOGGED_OUT
+        LOGGED_OUT,
+        LOGGED_OUT_UNCONFIRMED;
+    }
+
+    /**
+     * Flag used when creating user session
+     */
+    enum SessionPersistenceState {
+
+        /**
+         * Session will be marked as persistent when created and it will be saved into the persistent storage (EG. infinispan cache).
+         * This is the default behaviour
+         */
+        PERSISTENT,
+
+        /**
+         *  This userSession will be valid just for the single request. Hence there won't be real
+         *  userSession created in the persistent store. Flag can be used for the protocols, which need just "dummy"
+         *  userSession to be able to run protocolMappers SPI. Example is DockerProtocol or OAuth2 client credentials grant.
+         */
+        TRANSIENT;
+
+        public static SessionPersistenceState fromString(String sessionPersistenceString) {
+            return (sessionPersistenceString == null) ? PERSISTENT : Enum.valueOf(SessionPersistenceState.class, sessionPersistenceString);
+        }
     }
 
 }

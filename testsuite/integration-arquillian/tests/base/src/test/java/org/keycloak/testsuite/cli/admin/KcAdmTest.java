@@ -18,11 +18,14 @@ import java.util.UUID;
 
 import static org.keycloak.client.admin.cli.util.OsUtil.CMD;
 import static org.keycloak.client.admin.cli.util.OsUtil.EOL;
+import org.keycloak.testsuite.arquillian.annotation.AuthServerContainerExclude;
+import org.keycloak.testsuite.arquillian.annotation.AuthServerContainerExclude.AuthServer;
 import static org.keycloak.testsuite.cli.KcAdmExec.execute;
 
 /**
  * @author <a href="mailto:mstrukel@redhat.com">Marko Strukelj</a>
  */
+@AuthServerContainerExclude(AuthServer.REMOTE)
 public class KcAdmTest extends AbstractAdmCliTest {
 
     @Test
@@ -123,7 +126,7 @@ public class KcAdmTest extends AbstractAdmCliTest {
         exe = KcAdmExec.execute("set-password");
         assertExitCodeAndStdErrSize(exe, 1, 0);
         Assert.assertTrue("help message returned", exe.stdoutLines().size() > 10);
-        Assert.assertEquals("help message", "Usage: " + CMD + " set-password (--username USERNAME | --userid ID) [--password PASSWORD] [ARGUMENTS]", exe.stdoutLines().get(0));
+        Assert.assertEquals("help message", "Usage: " + CMD + " set-password (--username USERNAME | --userid ID) [--new-password PASSWORD] [ARGUMENTS]", exe.stdoutLines().get(0));
         //Assert.assertEquals("error message", "CLIENT not specified", exe.stderrLines().get(0));
 
         exe = KcAdmExec.execute("help");
@@ -174,7 +177,7 @@ public class KcAdmTest extends AbstractAdmCliTest {
 
         exe = KcAdmExec.execute("set-password --help");
         assertExitCodeAndStdErrSize(exe, 0, 0);
-        Assert.assertEquals("stdout first line", "Usage: " + CMD + " set-password (--username USERNAME | --userid ID) [--password PASSWORD] [ARGUMENTS]", exe.stdoutLines().get(0));
+        Assert.assertEquals("stdout first line", "Usage: " + CMD + " set-password (--username USERNAME | --userid ID) [--new-password PASSWORD] [ARGUMENTS]", exe.stdoutLines().get(0));
 
         exe = KcAdmExec.execute("config --help");
         assertExitCodeAndStdErrSize(exe, 0, 0);
@@ -255,6 +258,18 @@ public class KcAdmTest extends AbstractAdmCliTest {
 
         assertExitCodeAndStreamSizes(exe, 1, 0, 2);
         Assert.assertEquals("stderr first line", "Required option not specified: --realm", exe.stderrLines().get(0));
+        Assert.assertEquals("try help", "Try '" + CMD + " help config credentials' for more information", exe.stderrLines().get(1));
+    }
+
+    @Test
+    public void testCredentialsWithNoConfig() {
+        /*
+         *  Test with --no-config specified which is not supported
+         */
+        KcAdmExec exe = KcAdmExec.execute("config credentials --no-config --server " + serverUrl + " --realm master --user admin --password admin");
+
+        assertExitCodeAndStreamSizes(exe, 1, 0, 2);
+        Assert.assertEquals("stderr first line", "Unsupported option: --no-config", exe.stderrLines().get(0));
         Assert.assertEquals("try help", "Try '" + CMD + " help config credentials' for more information", exe.stderrLines().get(1));
     }
 
@@ -462,7 +477,7 @@ public class KcAdmTest extends AbstractAdmCliTest {
 
         assertExitCodeAndStreamSizes(exe, 1, 0, 2);
         Assert.assertEquals("login message", "Logging into " + serverUrl + " as user user1 of realm test", exe.stderrLines().get(0));
-        Assert.assertEquals("error message", "Client not allowed for direct access grants [invalid_grant]", exe.stderrLines().get(1));
+        Assert.assertEquals("error message", "Client not allowed for direct access grants [unauthorized_client]", exe.stderrLines().get(1));
 
 
         // try wrong user password
@@ -504,7 +519,7 @@ public class KcAdmTest extends AbstractAdmCliTest {
 
         assertExitCodeAndStreamSizes(exe, 1, 0, 2);
         Assert.assertEquals("login message", "Logging into " + serverUrl + " as user user1 of realm test", exe.stderrLines().get(0));
-        Assert.assertEquals("error message", "Client not allowed for direct access grants [invalid_grant]", exe.stderrLines().get(1));
+        Assert.assertEquals("error message", "Client not allowed for direct access grants [unauthorized_client]", exe.stderrLines().get(1));
 
 
         // try wrong user password
@@ -557,5 +572,32 @@ public class KcAdmTest extends AbstractAdmCliTest {
         testCRUDWithOnTheFlyAuth(serverUrl,
                 "--client admin-cli-jwt --keystore '" + keystore.getAbsolutePath() + "' --storepass storepass --keypass keypass --alias admin-cli", "",
                 "Logging into " + serverUrl + " as service-account-admin-cli-jwt of realm test");
+    }
+
+    @Test
+    public void testCRUDWithToken() throws Exception {
+        /*
+         *  Test create, get, update, and delete using on-the-fly authentication - without using any config file.
+         *  Login is performed by each operation again, and again using username, password, and client secret.
+         */
+        //non-TLS endpoint
+        oauth.baseUrl(serverUrl);
+        oauth.realm("master");
+        oauth.clientId("admin-cli");
+        String token = oauth.doGrantAccessTokenRequest("", "admin", "admin").getAccessToken();
+        testCRUDWithOnTheFlyAuth(serverUrl, " --token " + token, "",
+                "");
+
+    }
+
+    @Test
+    public void testGetUserNameExact() {
+        KcAdmExec.execute("config credentials --server " + serverUrl + " --realm master --user admin --password admin");
+        KcAdmExec.execute("create realms -s realm=demorealm -s enabled=true");
+        KcAdmExec.execute("create users -r demorealm -s username=testuser");
+        KcAdmExec.execute("create users -r demorealm -s username=anothertestuser");
+        KcAdmExec.execute("create users -r demorealm -s username=onemoretestuser");
+        KcAdmExec exec = execute("add-roles --uusername=testuser --rolename offline_access --target-realm=demorealm");
+        Assert.assertEquals(0, exec.exitCode());
     }
 }

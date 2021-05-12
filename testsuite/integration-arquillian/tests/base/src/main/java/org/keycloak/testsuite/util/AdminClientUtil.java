@@ -26,31 +26,114 @@ import java.security.cert.CertificateException;
 
 import javax.net.ssl.SSLContext;
 
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import javax.net.ssl.HostnameVerifier;
+import org.apache.http.HttpHost;
+import org.apache.http.client.config.RequestConfig;
+import org.apache.http.conn.HttpClientConnectionManager;
+import org.apache.http.impl.conn.PoolingHttpClientConnectionManager;
 import org.apache.http.ssl.SSLContexts;
+import org.jboss.resteasy.client.jaxrs.ClientHttpEngine;
+import org.jboss.resteasy.client.jaxrs.ClientHttpEngineBuilder43;
+import org.jboss.resteasy.client.jaxrs.ResteasyClient;
+import org.jboss.resteasy.client.jaxrs.ResteasyClientBuilder;
+import org.jboss.resteasy.plugins.providers.jackson.ResteasyJackson2Provider;
+import org.keycloak.OAuth2Constants;
 import org.keycloak.admin.client.Keycloak;
+import org.keycloak.admin.client.KeycloakBuilder;
 import org.keycloak.models.Constants;
-import org.keycloak.testsuite.arquillian.AuthServerTestEnricher;
 
+import org.jboss.resteasy.client.jaxrs.engines.ApacheHttpClient4Engine;
 import static org.keycloak.testsuite.auth.page.AuthRealm.ADMIN;
 import static org.keycloak.testsuite.auth.page.AuthRealm.MASTER;
-import static org.keycloak.testsuite.util.IOUtil.PROJECT_BUILD_DIRECTORY;
+import static org.keycloak.testsuite.utils.io.IOUtil.PROJECT_BUILD_DIRECTORY;
+import static org.keycloak.testsuite.util.ServerURLs.getAuthServerContextRoot;
 
 
 public class AdminClientUtil {
 
+    public static final int NUMBER_OF_CONNECTIONS = 10;
+
+    public static Keycloak createAdminClient(boolean ignoreUnknownProperties, String authServerContextRoot) throws Exception {
+        return createAdminClient(ignoreUnknownProperties, authServerContextRoot, MASTER, ADMIN, ADMIN, Constants.ADMIN_CLI_CLIENT_ID, null);
+
+    }
+    public static Keycloak createAdminClient(boolean ignoreUnknownProperties, String realmName, String username, String password, String clientId, String clientSecret) throws CertificateException, NoSuchAlgorithmException, KeyStoreException, IOException, KeyManagementException {
+        return createAdminClient(ignoreUnknownProperties, getAuthServerContextRoot(), realmName, username, password, clientId, clientSecret);
+    }
+
+    public static Keycloak createAdminClient(boolean ignoreUnknownProperties, String authServerContextRoot, String realmName, String username, String password, String clientId, String clientSecret) throws CertificateException, NoSuchAlgorithmException, KeyStoreException, IOException, KeyManagementException {
+        ResteasyClient resteasyClient = createResteasyClient(ignoreUnknownProperties, null);
+
+        return KeycloakBuilder.builder()
+                .serverUrl(authServerContextRoot + "/auth")
+                .realm(realmName)
+                .username(username)
+                .password(password)
+                .clientId(clientId)
+                .clientSecret(clientSecret)
+                .resteasyClient(resteasyClient).build();
+    }
+
+    public static Keycloak createAdminClientWithClientCredentials(String realmName, String clientId, String clientSecret) throws CertificateException, NoSuchAlgorithmException, KeyStoreException, IOException, KeyManagementException {
+        boolean ignoreUnknownProperties = false;
+        ResteasyClient resteasyClient = createResteasyClient(ignoreUnknownProperties, null);
+
+        return KeycloakBuilder.builder()
+                .serverUrl(getAuthServerContextRoot() + "/auth")
+                .realm(realmName)
+                .grantType(OAuth2Constants.CLIENT_CREDENTIALS)
+                .clientId(clientId)
+                .clientSecret(clientSecret)
+                .resteasyClient(resteasyClient).build();
+    }
+
     public static Keycloak createAdminClient() throws Exception {
-        SSLContext ssl = null;
+        return createAdminClient(false, getAuthServerContextRoot());
+    }
+
+    public static Keycloak createAdminClient(boolean ignoreUnknownProperties) throws Exception {
+        return createAdminClient(ignoreUnknownProperties, getAuthServerContextRoot());
+    }
+
+    public static ResteasyClient createResteasyClient() {
+        try {
+            return createResteasyClient(false, null);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    public static ResteasyClient createResteasyClient(boolean ignoreUnknownProperties, Boolean followRedirects) throws CertificateException, NoSuchAlgorithmException, KeyStoreException, IOException, KeyManagementException {
+        ResteasyClientBuilder resteasyClientBuilder = new ResteasyClientBuilder();
+
         if ("true".equals(System.getProperty("auth.server.ssl.required"))) {
             File trustore = new File(PROJECT_BUILD_DIRECTORY, "dependency/keystore/keycloak.truststore");
-            ssl = getSSLContextWithTrustore(trustore, "secret");
+            resteasyClientBuilder.sslContext(getSSLContextWithTrustore(trustore, "secret"));
 
             System.setProperty("javax.net.ssl.trustStore", trustore.getAbsolutePath());
         }
 
-        return Keycloak.getInstance(AuthServerTestEnricher.getAuthServerContextRoot() + "/auth",
-                MASTER, ADMIN, ADMIN, Constants.ADMIN_CLI_CLIENT_ID, null, ssl);
-    }
+        // We need to ignore unknown JSON properties e.g. in the adapter configuration representation
+        // during adapter backward compatibility testing
+        if (ignoreUnknownProperties) {
+            // We need to use anonymous class to avoid the following error from RESTEasy:
+            // Provider class org.jboss.resteasy.plugins.providers.jackson.ResteasyJackson2Provider is already registered.  2nd registration is being ignored.
+            ResteasyJackson2Provider jacksonProvider = new ResteasyJackson2Provider() {};
+            ObjectMapper objectMapper = new ObjectMapper();
+            objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+            jacksonProvider.setMapper(objectMapper);
+            resteasyClientBuilder.register(jacksonProvider, 100);
+        }
 
+        resteasyClientBuilder
+                .hostnameVerification(ResteasyClientBuilder.HostnameVerificationPolicy.WILDCARD)
+                .connectionPoolSize(NUMBER_OF_CONNECTIONS)
+                .httpEngine(getCustomClientHttpEngine(resteasyClientBuilder, 1, followRedirects));
+
+        return resteasyClientBuilder.build();
+    }
 
     private static SSLContext getSSLContextWithTrustore(File file, String password) throws CertificateException, NoSuchAlgorithmException, KeyStoreException, IOException, KeyManagementException {
         if (!file.isFile()) {
@@ -63,4 +146,40 @@ public class AdminClientUtil {
         return theContext;
     }
 
+    public static ClientHttpEngine getCustomClientHttpEngine(ResteasyClientBuilder resteasyClientBuilder, int validateAfterInactivity, Boolean followRedirects) {
+        return new CustomClientHttpEngineBuilder43(validateAfterInactivity, followRedirects).resteasyClientBuilder(resteasyClientBuilder).build();
+    }
+
+    /**
+     * Adds a possibility to pass validateAfterInactivity parameter into underlying ConnectionManager. The parameter affects how
+     * long the connection is being used without testing if it became stale, default value is 2000ms
+     */
+    private static class CustomClientHttpEngineBuilder43 extends ClientHttpEngineBuilder43 {
+
+        private final int validateAfterInactivity;
+        private final Boolean followRedirects;
+
+        private CustomClientHttpEngineBuilder43(int validateAfterInactivity, Boolean followRedirects) {
+            this.validateAfterInactivity = validateAfterInactivity;
+            this.followRedirects = followRedirects;
+        }
+
+        @Override
+        protected ClientHttpEngine createEngine(final HttpClientConnectionManager cm, final RequestConfig.Builder rcBuilder,
+                final HttpHost defaultProxy, final int responseBufferSize, final HostnameVerifier verifier, final SSLContext theContext) {
+            final ClientHttpEngine engine;
+            if (cm instanceof PoolingHttpClientConnectionManager) {
+                PoolingHttpClientConnectionManager pcm = (PoolingHttpClientConnectionManager) cm;
+                pcm.setValidateAfterInactivity(validateAfterInactivity);
+                engine = super.createEngine(pcm, rcBuilder, defaultProxy, responseBufferSize, verifier, theContext);
+            } else {
+                engine = super.createEngine(cm, rcBuilder, defaultProxy, responseBufferSize, verifier, theContext);
+            }
+            if (followRedirects != null) {
+                ((ApacheHttpClient4Engine) engine).setFollowRedirects(followRedirects);
+            }
+            return engine;
+        }
+    }
+   
 }

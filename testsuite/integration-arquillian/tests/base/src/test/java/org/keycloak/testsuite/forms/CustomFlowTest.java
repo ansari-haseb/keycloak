@@ -24,15 +24,17 @@ import org.junit.Test;
 import org.keycloak.OAuth2Constants;
 import org.keycloak.admin.client.resource.AuthenticationManagementResource;
 import org.keycloak.authentication.AuthenticationFlow;
+import org.keycloak.authentication.authenticators.x509.AbstractX509ClientCertificateAuthenticator;
+import org.keycloak.authentication.authenticators.x509.ValidateX509CertificateUsernameFactory;
 import org.keycloak.events.Details;
 import org.keycloak.events.Errors;
-import org.keycloak.events.admin.OperationType;
-import org.keycloak.events.admin.ResourceType;
 import org.keycloak.models.AuthenticationExecutionModel;
 import org.keycloak.representations.AccessToken;
 import org.keycloak.representations.RefreshToken;
+import org.keycloak.representations.idm.AuthenticationExecutionInfoRepresentation;
 import org.keycloak.representations.idm.AuthenticationExecutionRepresentation;
 import org.keycloak.representations.idm.AuthenticationFlowRepresentation;
+import org.keycloak.representations.idm.AuthenticatorConfigRepresentation;
 import org.keycloak.representations.idm.ClientRepresentation;
 import org.keycloak.representations.idm.RealmRepresentation;
 import org.keycloak.representations.idm.UserRepresentation;
@@ -46,7 +48,7 @@ import org.keycloak.testsuite.pages.LoginPasswordUpdatePage;
 import org.keycloak.testsuite.pages.RegisterPage;
 import org.keycloak.testsuite.pages.TermsAndConditionsPage;
 import org.keycloak.testsuite.rest.representation.AuthenticatorState;
-import org.keycloak.testsuite.util.AdminEventPaths;
+import org.keycloak.testsuite.updaters.Creator;
 import org.keycloak.testsuite.util.ClientBuilder;
 import org.keycloak.testsuite.util.ExecutionBuilder;
 import org.keycloak.testsuite.util.FlowBuilder;
@@ -57,10 +59,11 @@ import org.keycloak.testsuite.util.UserBuilder;
 import javax.ws.rs.core.Response;
 
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
+import javax.ws.rs.core.Response.Status;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertThat;
 import static org.keycloak.testsuite.util.Matchers.statusCodeIs;
 
 /**
@@ -205,11 +208,9 @@ public class CustomFlowTest extends AbstractFlowTest {
 
     /**
      * KEYCLOAK-3506
-     *
-     * @throws Exception
      */
     @Test
-    public void testRequiredAfterAlternative() throws Exception {
+    public void testRequiredAfterAlternative() {
         AuthenticationManagementResource authMgmtResource = testRealm().flows();
         Map<String, String> params = new HashMap();
         String flowAlias = "Browser Flow With Extra";
@@ -231,25 +232,68 @@ public class CustomFlowTest extends AbstractFlowTest {
                 .priority(10)
                 .authenticatorFlow(false)
                 .build();
-        testRealm().flows().addExecution(execution);
 
         RealmRepresentation rep = testRealm().toRepresentation();
-        rep.setBrowserFlow(flowAlias);
-        testRealm().update(rep);
-        rep = testRealm().toRepresentation();
-        Assert.assertEquals(flowAlias, rep.getBrowserFlow());
+        try (Response r = testRealm().flows().addExecution(execution)) {
+            rep.setBrowserFlow(flowAlias);
+            testRealm().update(rep);
+            rep = testRealm().toRepresentation();
+            Assert.assertEquals(flowAlias, rep.getBrowserFlow());
+        }
+
 
         loginPage.open();
-        String url = driver.getCurrentUrl();
+         /* In the new flows, any required execution will render any optional flows unused.
         // test to make sure we aren't skipping anything
         loginPage.login("test-user@localhost", "bad-password");
         Assert.assertTrue(loginPage.isCurrent());
-        loginPage.login("test-user@localhost", "password");
+        loginPage.login("test-user@localhost", "password");*/
         Assert.assertTrue(termsPage.isCurrent());
 
         // Revert dummy flow
         rep.setBrowserFlow("dummy");
         testRealm().update(rep);
+    }
+
+    @Test
+    public void validateX509FlowUpdate() throws Exception {
+        String flowAlias = "Browser Flow With Extra 2";
+
+        AuthenticationFlowRepresentation flow = new AuthenticationFlowRepresentation();
+        flow.setAlias(flowAlias);
+        flow.setDescription("");
+        flow.setProviderId("basic-flow");
+        flow.setTopLevel(true);
+        flow.setBuiltIn(false);
+
+        try (Creator.Flow amr = Creator.create(testRealm(), flow)) {
+            AuthenticationManagementResource authMgmtResource = amr.resource();
+
+            //add execution - X509 username
+            final AuthenticationExecutionInfoRepresentation execution = amr.addExecution(ValidateX509CertificateUsernameFactory.PROVIDER_ID);
+            String executionId = execution.getId();
+
+            Map<String, String> config = new HashMap<>();
+            config.put(AbstractX509ClientCertificateAuthenticator.ENABLE_CRL, Boolean.TRUE.toString());
+            AuthenticatorConfigRepresentation authConfig = new AuthenticatorConfigRepresentation();
+            authConfig.setAlias("Config alias");
+            authConfig.setConfig(config);
+
+            String acId;
+            try (Response resp = authMgmtResource.newExecutionConfig(executionId, authConfig)) {
+                assertThat(resp, statusCodeIs(Status.CREATED));
+                acId = ApiUtil.getCreatedId(resp);
+            }
+
+            authConfig = authMgmtResource.getAuthenticatorConfig(acId);
+            authConfig.getConfig().put(AbstractX509ClientCertificateAuthenticator.ENABLE_CRL, Boolean.FALSE.toString());
+            authConfig.getConfig().put(AbstractX509ClientCertificateAuthenticator.CRL_RELATIVE_PATH, "");
+
+            authMgmtResource.updateAuthenticatorConfig(acId, authConfig);
+
+            // Saving the same options for the second time would fail for CRL_RELATIVE_PATH on Oracle due to "" == NULL weirdness
+            authMgmtResource.updateAuthenticatorConfig(acId, authConfig);
+        }
     }
 
     @Test
@@ -294,7 +338,7 @@ public class CustomFlowTest extends AbstractFlowTest {
 
         OAuthClient.AccessTokenResponse response = oauth.doGrantAccessTokenRequest("password", "test-user", "password");
         assertEquals(400, response.getStatusCode());
-        assertEquals("unauthorized_client", response.getError());
+        assertEquals("invalid_client", response.getError());
 
         events.expectLogin()
                 .client((String) null)
@@ -308,6 +352,17 @@ public class CustomFlowTest extends AbstractFlowTest {
 
         state.setClientId("test-app");
         testingClient.testing().updateAuthenticator(state);
+
+        // Test throwing exception from the client authenticator. No error details should be displayed
+        oauth.addCustomParameter(PassThroughClientAuthenticator.TEST_ERROR_PARAM, "Some Random Error");
+        try {
+            response = oauth.doGrantAccessTokenRequest("password", "test-user", "password");
+            assertEquals(400, response.getStatusCode());
+            assertEquals("unauthorized_client", response.getError());
+            assertEquals("Unexpected error when authenticating client", response.getErrorDescription());
+        } finally {
+            oauth.removeCustomParameter(PassThroughClientAuthenticator.TEST_ERROR_PARAM);
+        }
     }
 
 
@@ -318,7 +373,7 @@ public class CustomFlowTest extends AbstractFlowTest {
         assertEquals(200, response.getStatusCode());
 
         AccessToken accessToken = oauth.verifyToken(response.getAccessToken());
-        RefreshToken refreshToken = oauth.verifyRefreshToken(response.getRefreshToken());
+        RefreshToken refreshToken = oauth.parseRefreshToken(response.getRefreshToken());
 
         events.expectLogin()
                 .client(clientId)
@@ -339,7 +394,7 @@ public class CustomFlowTest extends AbstractFlowTest {
         OAuthClient.AccessTokenResponse refreshedResponse = oauth.doRefreshTokenRequest(response.getRefreshToken(), "password");
 
         AccessToken refreshedAccessToken = oauth.verifyToken(refreshedResponse.getAccessToken());
-        RefreshToken refreshedRefreshToken = oauth.verifyRefreshToken(refreshedResponse.getRefreshToken());
+        RefreshToken refreshedRefreshToken = oauth.parseRefreshToken(refreshedResponse.getRefreshToken());
 
         assertEquals(accessToken.getSessionState(), refreshedAccessToken.getSessionState());
         assertEquals(accessToken.getSessionState(), refreshedRefreshToken.getSessionState());

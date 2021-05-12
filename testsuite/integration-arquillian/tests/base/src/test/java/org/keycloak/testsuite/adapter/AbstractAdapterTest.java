@@ -21,23 +21,57 @@ import org.apache.commons.io.IOUtils;
 import org.jboss.arquillian.graphene.page.Page;
 import org.jboss.shrinkwrap.api.Archive;
 import org.jboss.shrinkwrap.api.asset.StringAsset;
+import org.jboss.shrinkwrap.api.spec.WebArchive;
+import org.junit.AfterClass;
+import org.junit.Before;
+import org.junit.BeforeClass;
+import org.junit.ClassRule;
+import org.junit.Rule;
+import org.junit.rules.TestName;
 import org.keycloak.representations.idm.ClientRepresentation;
 import org.keycloak.representations.idm.RealmRepresentation;
 import org.keycloak.testsuite.AbstractAuthTest;
 import org.keycloak.testsuite.adapter.page.AppServerContextRoot;
+import org.keycloak.testsuite.arquillian.AppServerTestEnricher;
+import org.keycloak.testsuite.arquillian.SuiteContext;
 import org.keycloak.testsuite.arquillian.annotation.AppServerContainer;
+import org.keycloak.testsuite.arquillian.annotation.AuthServerContainerExclude;
+import org.keycloak.testsuite.util.ServerURLs;
+import org.wildfly.extras.creaper.commands.undertow.AddUndertowListener;
+import org.wildfly.extras.creaper.commands.undertow.RemoveUndertowListener;
+import org.wildfly.extras.creaper.commands.undertow.UndertowListenerType;
+import org.wildfly.extras.creaper.commands.web.AddConnector;
+import org.wildfly.extras.creaper.commands.web.AddConnectorSslConfig;
+import org.wildfly.extras.creaper.core.CommandFailedException;
+import org.wildfly.extras.creaper.core.online.CliException;
+import org.wildfly.extras.creaper.core.online.OnlineManagementClient;
+import org.wildfly.extras.creaper.core.online.operations.Address;
+import org.wildfly.extras.creaper.core.online.operations.OperationException;
+import org.wildfly.extras.creaper.core.online.operations.Operations;
+import org.wildfly.extras.creaper.core.online.operations.admin.Administration;
 
 import java.io.IOException;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeoutException;
+
+import static org.keycloak.testsuite.arquillian.AppServerTestEnricher.APP_SERVER_SSL_REQUIRED;
+import static org.keycloak.testsuite.arquillian.AppServerTestEnricher.CURRENT_APP_SERVER;
+import static org.keycloak.testsuite.arquillian.AppServerTestEnricher.enableHTTPSForAppServer;
+import static org.keycloak.testsuite.util.ServerURLs.AUTH_SERVER_PORT;
+import static org.keycloak.testsuite.util.ServerURLs.AUTH_SERVER_SSL_REQUIRED;
+import org.keycloak.testsuite.arquillian.annotation.AuthServerContainerExclude.AuthServer;
 
 /**
- *
+ * <code>@AppServerContainer</code> is needed for stopping recursion in 
+ * AppServerTestEnricher.getNearestSuperclassWithAnnotation
+ * 
  * @author tkyjovsk
  */
-@AppServerContainer
+@AppServerContainer("")
+@AuthServerContainerExclude(AuthServer.REMOTE)
 public abstract class AbstractAdapterTest extends AbstractAuthTest {
 
     @Page
@@ -46,9 +80,32 @@ public abstract class AbstractAdapterTest extends AbstractAuthTest {
     public static final String JBOSS_DEPLOYMENT_STRUCTURE_XML = "jboss-deployment-structure.xml";
     public static final URL jbossDeploymentStructure = AbstractServletsAdapterTest.class
             .getResource("/adapter-test/" + JBOSS_DEPLOYMENT_STRUCTURE_XML);
+    public static final String UNDERTOW_HANDLERS_CONF = "undertow-handlers.conf";
+    public static final URL undertowHandlersConf = AbstractServletsAdapterTest.class
+            .getResource("/adapter-test/samesite/undertow-handlers.conf");
     public static final String TOMCAT_CONTEXT_XML = "context.xml";
     public static final URL tomcatContext = AbstractServletsAdapterTest.class
             .getResource("/adapter-test/" + TOMCAT_CONTEXT_XML);
+
+    protected static boolean sslConfigured = false;
+
+    @Before
+    public void setUpAppServer() throws Exception {
+        if (!sslConfigured && shouldConfigureSSL()) { // Other containers need some external configuraiton to run SSL tests
+            enableHTTPSForAppServer();
+
+            sslConfigured = true;
+        }
+    }
+
+    @AfterClass
+    public static void resetSSLConfig() {
+        sslConfigured = false;
+    }
+
+    protected boolean shouldConfigureSSL() {
+        return APP_SERVER_SSL_REQUIRED && (CURRENT_APP_SERVER.contains("eap") || CURRENT_APP_SERVER.contains("wildfly"));
+    }
 
     @Override
     public void addTestRealms(List<RealmRepresentation> testRealms) {
@@ -57,23 +114,28 @@ public abstract class AbstractAdapterTest extends AbstractAuthTest {
             log.info("Setting redirect-uris in test realm '" + tr.getRealm() + "' as " + (isRelative() ? "" : "non-") + "relative");
 
             modifyClientRedirectUris(tr, "http://localhost:8080", "");
+            modifyClientRedirectUris(tr, "^((?:/.*|)/\\*)",
+                  ServerURLs.getAppServerContextRoot() + "$1",
+                    ServerURLs.getAuthServerContextRoot() + "$1");
+
+            modifyClientWebOrigins(tr, "http://localhost:8080", ServerURLs.getAppServerContextRoot(),
+                    ServerURLs.getAuthServerContextRoot());
+
             modifyClientUrls(tr, "http://localhost:8080", "");
+            modifySamlMasterURLs(tr, "http://localhost:8080", "");
+            modifySAMLClientsAttributes(tr, "http://localhost:8080", "");
 
             if (isRelative()) {
-                modifyClientRedirectUris(tr, appServerContextRootPage.toString(), "");
-                modifyClientUrls(tr, appServerContextRootPage.toString(), "");
-                modifyClientWebOrigins(tr, "8080", System.getProperty("auth.server.http.port", null));
-                modifySamlMasterURLs(tr, "/", "http://localhost:" + System.getProperty("auth.server.http.port", null) + "/");
-                modifySAMLClientsAttributes(tr, "8080", System.getProperty("auth.server.http.port", "8180"));
+                modifyClientUrls(tr, ServerURLs.getAppServerContextRoot().toString(), "");
+                modifySamlMasterURLs(tr, "/", ServerURLs.getAppServerContextRoot() + "/");
+                modifySAMLClientsAttributes(tr, "8080", AUTH_SERVER_PORT);
             } else {
-                modifyClientRedirectUris(tr, "^(/.*/\\*)", appServerContextRootPage.toString() + "$1");
-                modifyClientUrls(tr, "^(/.*)", appServerContextRootPage.toString() + "$1");
-                modifyClientWebOrigins(tr, "8080", System.getProperty("app.server.http.port", null));
-                modifySamlMasterURLs(tr, "8080", System.getProperty("auth.server.http.port", null));
-                modifySAMLClientsAttributes(tr, "http://localhost:8080",  appServerContextRootPage.toString());
-                modifyClientJWKSUrl(tr, "^(/.*)", appServerContextRootPage.toString() + "$1");
+                modifyClientUrls(tr, "^(/.*)", ServerURLs.getAppServerContextRoot() + "$1");
+                modifySamlMasterURLs(tr, "^(/.*)", ServerURLs.getAppServerContextRoot() + "$1");
+                modifySAMLClientsAttributes(tr, "^(/.*)",  ServerURLs.getAppServerContextRoot() + "$1");
+                modifyClientJWKSUrl(tr, "^(/.*)", ServerURLs.getAppServerContextRoot() + "$1");
             }
-            if ("true".equals(System.getProperty("auth.server.ssl.required"))) {
+            if (AUTH_SERVER_SSL_REQUIRED) {
                 tr.setSslRequired("all");
             }
         }
@@ -103,14 +165,17 @@ public abstract class AbstractAdapterTest extends AbstractAuthTest {
         return testContext.isRelativeAdapterTest();
     }
 
-    protected void modifyClientRedirectUris(RealmRepresentation realm, String regex, String replacement) {
+    protected void modifyClientRedirectUris(RealmRepresentation realm, String regex, String... replacement) {
         if (realm.getClients() != null) {
             for (ClientRepresentation client : realm.getClients()) {
                 List<String> redirectUris = client.getRedirectUris();
                 if (redirectUris != null) {
                     List<String> newRedirectUris = new ArrayList<>();
                     for (String uri : redirectUris) {
-                        newRedirectUris.add(uri.replaceAll(regex, replacement));
+                        for (String uriReplacement : replacement) {
+                            newRedirectUris.add(uri.replaceAll(regex, uriReplacement));
+                        }
+
                     }
                     client.setRedirectUris(newRedirectUris);
                 }
@@ -133,14 +198,16 @@ public abstract class AbstractAdapterTest extends AbstractAuthTest {
         }
     }
 
-    protected void modifyClientWebOrigins(RealmRepresentation realm, String regex, String replacement) {
+    protected void modifyClientWebOrigins(RealmRepresentation realm, String regex, String... replacement) {
         if (realm.getClients() != null) {
             for (ClientRepresentation client : realm.getClients()) {
                 List<String> webOrigins = client.getWebOrigins();
                 if (webOrigins != null) {
                     List<String> newWebOrigins = new ArrayList<>();
                     for (String uri : webOrigins) {
-                        newWebOrigins.add(uri.replaceAll(regex, replacement));
+                        for (String originReplacement : replacement) {
+                            newWebOrigins.add(uri.replaceAll(regex, originReplacement));
+                        }
                     }
                     client.setWebOrigins(newWebOrigins);
                 }
@@ -152,7 +219,7 @@ public abstract class AbstractAdapterTest extends AbstractAuthTest {
         if (realm.getClients() != null) {
             for (ClientRepresentation client : realm.getClients()) {
                 if (client.getProtocol() != null && client.getProtocol().equals("saml")) {
-                    log.info("Modifying attributes of SAML client: " + client.getClientId());
+                    log.debug("Modifying attributes of SAML client: " + client.getClientId());
                     for (Map.Entry<String, String> entry : client.getAttributes().entrySet()) {
                         client.getAttributes().put(entry.getKey(), entry.getValue().replaceAll(regex, replacement));
                     }
@@ -165,7 +232,7 @@ public abstract class AbstractAdapterTest extends AbstractAuthTest {
         if (realm.getClients() != null) {
             for (ClientRepresentation client : realm.getClients()) {
                 if (client.getProtocol() != null && client.getProtocol().equals("saml")) {
-                    log.info("Modifying master URL of SAML client: " + client.getClientId());
+                    log.debug("Modifying master URL of SAML client: " + client.getClientId());
                     String masterUrl = client.getAdminUrl();
                     if (masterUrl == null) {
                         masterUrl = client.getBaseUrl();
@@ -208,7 +275,7 @@ public abstract class AbstractAdapterTest extends AbstractAuthTest {
 
     public static void addContextXml(Archive archive, String contextPath) {
         try {
-            String contextXmlContent = IOUtils.toString(tomcatContext.openStream())
+            String contextXmlContent = IOUtils.toString(tomcatContext.openStream(), "UTF-8")
                     .replace("%CONTEXT_PATH%", contextPath);
             archive.add(new StringAsset(contextXmlContent), "/META-INF/context.xml");
         } catch (IOException ex) {
@@ -216,4 +283,9 @@ public abstract class AbstractAdapterTest extends AbstractAuthTest {
         }
     }
 
+    public static void addSameSiteUndertowHandlers(WebArchive archive) {
+        if (SuiteContext.BROWSER_STRICT_COOKIES) {
+            archive.addAsWebInfResource(undertowHandlersConf, UNDERTOW_HANDLERS_CONF);
+        }
+    }
 }

@@ -41,13 +41,25 @@ public abstract class TxAwareLDAPUserModelDelegate extends UserModelDelegate {
 
     protected void ensureTransactionStarted() {
         LDAPTransaction transaction = provider.getUserManager().getTransaction(getId());
-        if (transaction.state == LDAPTransaction.TransactionState.NOT_STARTED) {
+        if (transaction.getState() == LDAPTransaction.TransactionState.NOT_STARTED) {
             if (logger.isTraceEnabled()) {
                 logger.trace("Starting and enlisting transaction for object " + ldapUser.getDn().toString());
             }
 
             this.provider.getSession().getTransactionManager().enlistAfterCompletion(transaction);
         }
+    }
+
+    protected void markUpdatedAttributeInTransaction(String modelAttributeName) {
+        ensureTransactionStarted();
+        LDAPTransaction transaction = provider.getUserManager().getTransaction(getId());
+        transaction.addUpdatedAttribute(modelAttributeName);
+    }
+
+    protected void markUpdatedRequiredActionInTransaction(String requiredActionName) {
+        ensureTransactionStarted();
+        LDAPTransaction transaction = provider.getUserManager().getTransaction(getId());
+        transaction.addUpdatedRequiredAction(requiredActionName);
     }
 
 }

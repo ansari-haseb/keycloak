@@ -18,6 +18,7 @@
 package org.keycloak.testsuite.pages;
 
 import org.jboss.arquillian.test.api.ArquillianResource;
+import org.keycloak.testsuite.util.DroneUtils;
 import org.keycloak.testsuite.util.OAuthClient;
 import org.openqa.selenium.WebElement;
 import org.openqa.selenium.support.FindBy;
@@ -25,7 +26,7 @@ import org.openqa.selenium.support.FindBy;
 /**
  * @author <a href="mailto:sthorger@redhat.com">Stian Thorgersen</a>
  */
-public class InfoPage extends AbstractPage {
+public class InfoPage extends LanguageComboboxAwarePage {
 
     @ArquillianResource
     protected OAuthClient oauth;
@@ -33,17 +34,32 @@ public class InfoPage extends AbstractPage {
     @FindBy(className = "instruction")
     private WebElement infoMessage;
 
+    @FindBy(linkText = "« Back to Application")
+    private WebElement backToApplicationLink;
+
+    @FindBy(linkText = "» Klicken Sie hier um fortzufahren")
+    private WebElement clickToContinueDe;
+
     public String getInfo() {
         return infoMessage.getText();
     }
 
+    @Override
     public boolean isCurrent() {
-        return driver.getPageSource().contains("kc-info-message");
+        return DroneUtils.getCurrentDriver().getPageSource().contains("kc-info-message");
     }
 
     @Override
     public void open() {
         throw new UnsupportedOperationException();
+    }
+
+    public void clickBackToApplicationLink() {
+        backToApplicationLink.click();
+    }
+
+    public void clickToContinueDe() {
+        clickToContinueDe.click();
     }
 
 }

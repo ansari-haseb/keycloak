@@ -18,7 +18,7 @@
 package org.keycloak.protocol.saml.mappers;
 
 import org.keycloak.dom.saml.v2.assertion.AttributeStatementType;
-import org.keycloak.models.ClientSessionModel;
+import org.keycloak.models.AuthenticatedClientSessionModel;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.ProtocolMapperModel;
 import org.keycloak.models.UserModel;
@@ -76,13 +76,17 @@ public class UserPropertyAttributeStatementMapper extends AbstractSAMLProtocolMa
     }
 
     @Override
-    public void transformAttributeStatement(AttributeStatementType attributeStatement, ProtocolMapperModel mappingModel, KeycloakSession session, UserSessionModel userSession, ClientSessionModel clientSession) {
+    public void transformAttributeStatement(AttributeStatementType attributeStatement, ProtocolMapperModel mappingModel, KeycloakSession session, UserSessionModel userSession, AuthenticatedClientSessionModel clientSession) {
         UserModel user = userSession.getUser();
         String propertyName = mappingModel.getConfig().get(ProtocolMapperUtils.USER_ATTRIBUTE);
-        String propertyValue = ProtocolMapperUtils.getUserModelValue(user, propertyName);
-        if (propertyValue == null) return;
-        AttributeStatementHelper.addAttribute(attributeStatement, mappingModel, propertyValue);
 
+        if (propertyName == null || propertyName.trim().isEmpty()) return;
+
+        String propertyValue = ProtocolMapperUtils.getUserModelValue(user, propertyName);
+
+        if (propertyValue == null) return;
+
+        AttributeStatementHelper.addAttribute(attributeStatement, mappingModel, propertyValue);
     }
 
     public static ProtocolMapperModel createAttributeMapper(String name, String userAttribute,
@@ -90,7 +94,7 @@ public class UserPropertyAttributeStatementMapper extends AbstractSAMLProtocolMa
                                                             boolean consentRequired, String consentText) {
         String mapperId = PROVIDER_ID;
         return AttributeStatementHelper.createAttributeMapper(name, userAttribute, samlAttributeName, nameFormat, friendlyName,
-                consentRequired, consentText, mapperId);
+                mapperId);
 
     }
 }

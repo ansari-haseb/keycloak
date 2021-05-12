@@ -24,6 +24,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * @author <a href="mailto:sthorger@redhat.com">Stian Thorgersen</a>
@@ -54,13 +55,18 @@ public class RoleBuilder {
         return this;
     }
 
-    public RoleBuilder scopeParamRequired(Boolean required) {
-        rep.setScopeParamRequired(required);
+    public RoleBuilder composite() {
+        rep.setComposite(true);
+        return this;
+    }
+    
+    public RoleBuilder attributes(Map<String, List<String>> attributes) {
+        rep.setAttributes(attributes);
         return this;
     }
 
-    public RoleBuilder composite() {
-        rep.setComposite(true);
+    public RoleBuilder singleAttribute(String name, String value) {
+        rep.singleAttribute(name, value);
         return this;
     }
 

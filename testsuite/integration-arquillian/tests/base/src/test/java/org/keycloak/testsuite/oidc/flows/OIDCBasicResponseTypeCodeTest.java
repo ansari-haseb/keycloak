@@ -45,16 +45,31 @@ public class OIDCBasicResponseTypeCodeTest extends AbstractOIDCResponseTypeTest 
     }
 
 
-    protected List<IDToken> retrieveIDTokens(EventRepresentation loginEvent) {
+    @Override
+    protected boolean isFragment() {
+        return false;
+    }
+
+    @Override
+    protected List<IDToken> testAuthzResponseAndRetrieveIDTokens(OAuthClient.AuthorizationEndpointResponse authzResponse, EventRepresentation loginEvent) {
         Assert.assertEquals(OIDCResponseType.CODE, loginEvent.getDetails().get(Details.RESPONSE_TYPE));
 
-        OAuthClient.AuthorizationEndpointResponse authzResponse = new OAuthClient.AuthorizationEndpointResponse(oauth, false);
         Assert.assertNull(authzResponse.getAccessToken());
         Assert.assertNull(authzResponse.getIdToken());
 
-        IDToken idToken = sendTokenRequestAndGetIDToken(loginEvent);
+        OAuthClient.AccessTokenResponse authzResponse2 = sendTokenRequestAndGetResponse(loginEvent);
+        IDToken idToken2 = oauth.verifyIDToken(authzResponse2.getIdToken());
 
-        return Collections.singletonList(idToken);
+        // Validate "at_hash"
+        assertValidAccessTokenHash(idToken2.getAccessTokenHash(), authzResponse2.getAccessToken());
+
+        // Validate if token_type is null
+        Assert.assertNull(authzResponse.getTokenType());
+
+        // Validate if expires_in is null
+        Assert.assertNull(authzResponse.getExpiresIn());
+
+        return Collections.singletonList(idToken2);
     }
 
 
@@ -62,7 +77,8 @@ public class OIDCBasicResponseTypeCodeTest extends AbstractOIDCResponseTypeTest 
     public void nonceNotUsed() {
         EventRepresentation loginEvent = loginUser(null);
 
-        List<IDToken> idTokens = retrieveIDTokens(loginEvent);
+        OAuthClient.AuthorizationEndpointResponse authzResponse = new OAuthClient.AuthorizationEndpointResponse(oauth, false);
+        List<IDToken> idTokens = testAuthzResponseAndRetrieveIDTokens(authzResponse, loginEvent);
         for (IDToken idToken : idTokens) {
             Assert.assertNull(idToken.getNonce());
         }

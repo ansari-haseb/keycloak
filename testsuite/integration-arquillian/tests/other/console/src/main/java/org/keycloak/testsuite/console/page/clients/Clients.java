@@ -20,12 +20,14 @@ package org.keycloak.testsuite.console.page.clients;
 import org.keycloak.representations.idm.ClientRepresentation;
 import org.keycloak.testsuite.console.page.AdminConsoleRealm;
 import org.keycloak.testsuite.console.page.fragment.DataTable;
+import org.openqa.selenium.By;
 import org.openqa.selenium.WebElement;
 import org.openqa.selenium.support.FindBy;
 
 import java.util.ArrayList;
 import java.util.List;
 
+import static org.keycloak.testsuite.util.UIUtils.getTextFromElement;
 import static org.openqa.selenium.By.linkText;
 import static org.openqa.selenium.By.tagName;
 
@@ -80,6 +82,22 @@ public class Clients extends AdminConsoleRealm {
             clickRowActionButton(getRowByLinkText(clientId), EDIT);
         }
 
+        private void clickFooterButton(int index) {
+	      footer().findElements(By.tagName("button")).get(index).click();
+        }
+
+        public void clickNextPage() {
+            clickFooterButton(2);
+        }
+
+        public void clickPrevPage() {
+            clickFooterButton(1);
+        }
+
+        public void clickFirstPage() {
+            clickFooterButton(0);
+        }
+
         public void deleteClient(String clientId) {
             clickRowActionButton(getRowByLinkText(clientId), DELETE);
         }
@@ -110,9 +128,9 @@ public class Clients extends AdminConsoleRealm {
             if (row.isDisplayed()) {
                 client = new ClientRepresentation();
                 List<WebElement> tds = row.findElements(tagName("td"));
-                client.setClientId(tds.get(0).getText());
+                client.setClientId(getTextFromElement(tds.get(0)));
                 List<String> redirectUris = new ArrayList<>();
-                redirectUris.add(tds.get(2).getText()); // FIXME there can be more than 1 redirect uri
+                redirectUris.add(getTextFromElement(tds.get(2))); // FIXME there can be more than 1 redirect uri
                 client.setRedirectUris(redirectUris);
             }
             return client;

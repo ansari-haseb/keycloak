@@ -18,6 +18,7 @@ package org.keycloak.client.admin.cli.commands;
 
 import org.jboss.aesh.cl.Option;
 import org.jboss.aesh.console.command.invocation.CommandInvocation;
+import org.keycloak.OAuth2Constants;
 import org.keycloak.client.admin.cli.config.ConfigData;
 import org.keycloak.client.admin.cli.config.ConfigHandler;
 import org.keycloak.client.admin.cli.config.FileConfigHandler;
@@ -47,7 +48,7 @@ public abstract class AbstractAuthOptionsCmd extends AbstractGlobalOptionsCmd {
     @Option(name = "config", description = "Path to the config file (~/.keycloak/kcadm.config by default)")
     String config;
 
-    @Option(name = "no-config", description = "No configuration file should be used, no authentication info should be saved", hasValue = false)
+    @Option(name = "no-config", description = "Don't use config file - no authentication info is loaded or saved", hasValue = false)
     boolean noconfig;
 
     @Option(name = "server", description = "Server endpoint url (e.g. 'http://localhost:8080/auth')")
@@ -89,6 +90,12 @@ public abstract class AbstractAuthOptionsCmd extends AbstractGlobalOptionsCmd {
     @Option(name = "trustpass", description = "Truststore password (prompted for if not specified and --truststore is used)")
     String trustPass;
 
+    @Option(name = "insecure", description = "Turns off TLS validation", hasValue = false)
+    boolean insecure;
+
+    @Option(name = "token", description = "Token to use for invocations.  With this option set, every other authentication option is ignored")
+    String externalToken;
+
 
     protected void initFromParent(AbstractAuthOptionsCmd parent) {
 
@@ -108,6 +115,7 @@ public abstract class AbstractAuthOptionsCmd extends AbstractGlobalOptionsCmd {
         alias = parent.alias;
         trustStore = parent.trustStore;
         trustPass = parent.trustPass;
+        externalToken = parent.externalToken;
     }
 
     protected void applyDefaultOptionValues() {
@@ -117,7 +125,7 @@ public abstract class AbstractAuthOptionsCmd extends AbstractGlobalOptionsCmd {
     }
 
     protected boolean noOptions() {
-        return server == null && realm == null && clientId == null && secret == null &&
+        return externalToken == null && server == null && realm == null && clientId == null && secret == null &&
                 user == null && password == null &&
                 keystore == null && storePass == null && keyPass == null && alias == null &&
                 trustStore == null && trustPass == null && config == null && (args == null || args.size() == 0);
@@ -174,6 +182,10 @@ public abstract class AbstractAuthOptionsCmd extends AbstractGlobalOptionsCmd {
                 throw new RuntimeException("Failed to load truststore: " + truststore, e);
             }
         }
+
+        if (insecure) {
+            HttpUtil.setSkipCertificateValidation();
+        }
     }
 
     protected ConfigData ensureAuthInfo(ConfigData config, CommandInvocation commandInvocation) {
@@ -215,8 +227,8 @@ public abstract class AbstractAuthOptionsCmd extends AbstractGlobalOptionsCmd {
     }
 
     protected boolean requiresLogin() {
-        return user != null || password != null || secret != null || keystore != null
-                || keyPass != null || storePass != null || alias != null;
+        return externalToken == null && (user != null || password != null || secret != null || keystore != null
+                || keyPass != null || storePass != null || alias != null);
     }
 
     protected ConfigData copyWithServerInfo(ConfigData config) {
@@ -228,6 +240,9 @@ public abstract class AbstractAuthOptionsCmd extends AbstractGlobalOptionsCmd {
         }
         if (realm != null) {
             result.setRealm(realm);
+        }
+        if (externalToken != null) {
+            result.setExternalToken(externalToken);
         }
 
         checkServerInfo(result);
@@ -241,12 +256,17 @@ public abstract class AbstractAuthOptionsCmd extends AbstractGlobalOptionsCmd {
             data.setRealm(realm);
         if (trustStore != null)
             data.setTruststore(trustStore);
+        if (externalToken != null) {
+            data.setExternalToken(externalToken);
+        }
 
         RealmConfigData rdata = data.sessionRealmConfigData();
         if (clientId != null)
             rdata.setClientId(clientId);
         if (secret != null)
             rdata.setSecret(secret);
+        String grantTypeForAuthentication = user == null ? OAuth2Constants.CLIENT_CREDENTIALS : OAuth2Constants.PASSWORD;
+        rdata.setGrantTypeForAuthentication(grantTypeForAuthentication);
     }
 
     protected void checkUnsupportedOptions(String ... options) {
@@ -259,9 +279,12 @@ public abstract class AbstractAuthOptionsCmd extends AbstractGlobalOptionsCmd {
             String value = options[++i];
 
             if (value != null) {
-                throw new RuntimeException("Unsupported option: " + name);
+                throw new IllegalArgumentException("Unsupported option: " + name);
             }
         }
     }
 
+    protected static String booleanOptionForCheck(boolean value) {
+        return value ? "true" : null;
+    }
 }

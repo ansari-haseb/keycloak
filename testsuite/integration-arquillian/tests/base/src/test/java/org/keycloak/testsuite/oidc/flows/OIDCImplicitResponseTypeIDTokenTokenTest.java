@@ -20,7 +20,7 @@ package org.keycloak.testsuite.oidc.flows;
 import org.junit.Before;
 import org.junit.Test;
 import org.keycloak.events.Details;
-import org.keycloak.jose.jws.crypto.HashProvider;
+import org.keycloak.jose.jws.crypto.HashUtils;
 import org.keycloak.protocol.oidc.utils.OIDCResponseType;
 import org.keycloak.representations.IDToken;
 import org.keycloak.representations.idm.EventRepresentation;
@@ -46,18 +46,30 @@ public class OIDCImplicitResponseTypeIDTokenTokenTest extends AbstractOIDCRespon
     }
 
 
-    protected List<IDToken> retrieveIDTokens(EventRepresentation loginEvent) {
+    @Override
+    protected boolean isFragment() {
+        return true;
+    }
+
+
+    protected List<IDToken> testAuthzResponseAndRetrieveIDTokens(OAuthClient.AuthorizationEndpointResponse authzResponse, EventRepresentation loginEvent) {
         Assert.assertEquals(OIDCResponseType.ID_TOKEN + " " + OIDCResponseType.TOKEN, loginEvent.getDetails().get(Details.RESPONSE_TYPE));
 
-        OAuthClient.AuthorizationEndpointResponse authzResponse = new OAuthClient.AuthorizationEndpointResponse(oauth, true);
         Assert.assertNotNull(authzResponse.getAccessToken());
         String idTokenStr = authzResponse.getIdToken();
         IDToken idToken = oauth.verifyIDToken(idTokenStr);
 
         // Validate "at_hash"
-        Assert.assertNotNull(idToken.getAccessTokenHash());
-        Assert.assertEquals(idToken.getAccessTokenHash(), HashProvider.oidcHash(jwsAlgorithm, authzResponse.getAccessToken()));
+        assertValidAccessTokenHash(idToken.getAccessTokenHash(), authzResponse.getAccessToken());
+
+        // Validate "c_hash"
         Assert.assertNull(idToken.getCodeHash());
+
+        // Validate if token_type is present
+        Assert.assertNotNull(authzResponse.getTokenType());
+
+        // Validate if expires_in is present
+        Assert.assertNotNull(authzResponse.getExpiresIn());
 
         return Collections.singletonList(idToken);
     }

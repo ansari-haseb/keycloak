@@ -18,6 +18,7 @@
 package org.keycloak.models;
 
 import org.jboss.logging.Logger;
+import org.keycloak.models.credential.OTPCredentialModel;
 import org.keycloak.models.utils.Base32;
 import org.keycloak.models.utils.HmacOTP;
 
@@ -25,6 +26,8 @@ import java.io.Serializable;
 import java.io.UnsupportedEncodingException;
 import java.net.URLEncoder;
 import java.util.HashMap;
+import java.util.LinkedList;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -44,6 +47,8 @@ public class OTPPolicy implements Serializable {
 
     private static final Map<String, String> algToKeyUriAlg = new HashMap<>();
 
+    private static final OtpApp[] allApplications = new OtpApp[] { new FreeOTP(), new GoogleAuthenticator() };
+
     static {
         algToKeyUriAlg.put(HmacOTP.HMAC_SHA1, "SHA1");
         algToKeyUriAlg.put(HmacOTP.HMAC_SHA256, "SHA256");
@@ -62,7 +67,11 @@ public class OTPPolicy implements Serializable {
         this.period = period;
     }
 
-    public static OTPPolicy DEFAULT_POLICY = new OTPPolicy(UserCredentialModel.TOTP, HmacOTP.HMAC_SHA1, 0, 6, 1, 30);
+    public static OTPPolicy DEFAULT_POLICY = new OTPPolicy(OTPCredentialModel.TOTP, HmacOTP.HMAC_SHA1, 0, 6, 1, 30);
+
+    public String getAlgorithmKey() {
+        return algToKeyUriAlg.containsKey(algorithm) ? algToKeyUriAlg.get(algorithm) : algorithm;
+    }
 
     public String getType() {
         return type;
@@ -140,9 +149,9 @@ public class OTPPolicy implements Serializable {
                                 + "&algorithm=" + algToKeyUriAlg.get(algorithm) //
                                 + "&issuer=" + issuerName;
 
-            if (type.equals(UserCredentialModel.HOTP)) {
+            if (type.equals(OTPCredentialModel.HOTP)) {
                 parameters += "&counter=" + initialCounter;
-            } else if (type.equals(UserCredentialModel.TOTP)) {
+            } else if (type.equals(OTPCredentialModel.TOTP)) {
                 parameters += "&period=" + period;
             }
 
@@ -151,4 +160,56 @@ public class OTPPolicy implements Serializable {
             throw new RuntimeException(e);
         }
     }
+
+    public List<String> getSupportedApplications() {
+        List<String> applications = new LinkedList<>();
+        for (OtpApp a : allApplications) {
+            if (a.supports(this)) {
+                applications.add(a.getName());
+            }
+        }
+        return applications;
+    }
+
+    public interface OtpApp {
+
+        String getName();
+
+        boolean supports(OTPPolicy policy);
+    }
+
+    public static class GoogleAuthenticator implements OtpApp {
+
+        @Override
+        public String getName() {
+            return "Google Authenticator";
+        }
+
+        @Override
+        public boolean supports(OTPPolicy policy) {
+            if (policy.digits != 6) {
+                return false;
+            }
+
+            if (!policy.getAlgorithm().equals("HmacSHA1")) {
+                return false;
+            }
+
+            return policy.getType().equals("totp") && policy.getPeriod() == 30;
+        }
+    }
+
+    public static class FreeOTP implements OtpApp {
+
+        @Override
+        public String getName() {
+            return "FreeOTP";
+        }
+
+        @Override
+        public boolean supports(OTPPolicy policy) {
+            return true;
+        }
+    }
+
 }

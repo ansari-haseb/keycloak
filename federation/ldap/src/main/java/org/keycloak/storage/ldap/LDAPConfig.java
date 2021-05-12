@@ -22,6 +22,7 @@ import org.keycloak.models.LDAPConstants;
 import org.keycloak.storage.UserStorageProvider;
 
 import javax.naming.directory.SearchControls;
+
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
@@ -57,6 +58,11 @@ public class LDAPConfig {
         } else {
             return value;
         }
+    }
+
+    public boolean useExtendedPasswordModifyOp() {
+        String value = config.getFirst(LDAPConstants.USE_PASSWORD_MODIFY_EXTENDED_OP);
+        return Boolean.parseBoolean(value);
     }
 
     public String getUseTruststoreSpi() {
@@ -105,8 +111,50 @@ public class LDAPConfig {
         return vendor != null && vendor.equals(LDAPConstants.VENDOR_ACTIVE_DIRECTORY);
     }
 
+    public boolean isValidatePasswordPolicy() {
+        String validatePPolicy = config.getFirst(LDAPConstants.VALIDATE_PASSWORD_POLICY);
+        return Boolean.parseBoolean(validatePPolicy);
+    }
+
+    public boolean isTrustEmail(){
+        String trustEmail = config.getFirst(LDAPConstants.TRUST_EMAIL);
+        return Boolean.parseBoolean(trustEmail);
+    }
+
     public String getConnectionPooling() {
-        return config.getFirst(LDAPConstants.CONNECTION_POOLING);
+        if(isStartTls()) {
+            return null;
+        } else {
+            return config.getFirst(LDAPConstants.CONNECTION_POOLING);
+        }
+    }
+
+    public String getConnectionPoolingAuthentication() {
+        return config.getFirst(LDAPConstants.CONNECTION_POOLING_AUTHENTICATION);
+    }
+
+    public String getConnectionPoolingDebug() {
+        return config.getFirst(LDAPConstants.CONNECTION_POOLING_DEBUG);
+    }
+
+    public String getConnectionPoolingInitSize() {
+        return config.getFirst(LDAPConstants.CONNECTION_POOLING_INITSIZE);
+    }
+
+    public String getConnectionPoolingMaxSize() {
+        return config.getFirst(LDAPConstants.CONNECTION_POOLING_MAXSIZE);
+    }
+
+    public String getConnectionPoolingPrefSize() {
+        return config.getFirst(LDAPConstants.CONNECTION_POOLING_PREFSIZE);
+    }
+
+    public String getConnectionPoolingProtocol() {
+        return config.getFirst(LDAPConstants.CONNECTION_POOLING_PROTOCOL);
+    }
+
+    public String getConnectionPoolingTimeout() {
+        return config.getFirst(LDAPConstants.CONNECTION_POOLING_TIMEOUT);
     }
 
     public String getConnectionTimeout() {
@@ -137,9 +185,13 @@ public class LDAPConfig {
 
         return uuidAttrName;
     }
-    
+
     public boolean isObjectGUID() {
         return getUuidLDAPAttributeName().equalsIgnoreCase(LDAPConstants.OBJECT_GUID);
+    }
+
+    public boolean isEdirectoryGUID() {
+        return isEdirectory() && getUuidLDAPAttributeName().equalsIgnoreCase(LDAPConstants.NOVELL_EDIRECTORY_GUID);
     }
 
     public boolean isPagination() {
@@ -186,6 +238,10 @@ public class LDAPConfig {
         return null;
     }
 
+    public boolean isStartTls() {
+        return Boolean.parseBoolean(config.getFirst(LDAPConstants.START_TLS));
+    }
+
     public UserStorageProvider.EditMode getEditMode() {
         String editModeString = config.getFirst(LDAPConstants.EDIT_MODE);
         if (editModeString == null) {
@@ -216,6 +272,10 @@ public class LDAPConfig {
         return true;
     }
 
+    public boolean isEdirectory() {
+        return LDAPConstants.VENDOR_NOVELL_EDIRECTORY.equalsIgnoreCase(getVendor());
+    }
+
     @Override
     public int hashCode() {
         return config.hashCode() * 13 + binaryAttributeNames.hashCode();
@@ -229,4 +289,5 @@ public class LDAPConfig {
                 .append(", binaryAttributes: ").append(binaryAttributeNames)
                 .toString();
     }
+
 }

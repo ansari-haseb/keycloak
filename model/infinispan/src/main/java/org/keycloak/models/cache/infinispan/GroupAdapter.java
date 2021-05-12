@@ -21,42 +21,47 @@ import org.keycloak.models.ClientModel;
 import org.keycloak.models.GroupModel;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
-import org.keycloak.models.RoleContainerModel;
 import org.keycloak.models.RoleModel;
 import org.keycloak.models.cache.infinispan.entities.CachedGroup;
+import org.keycloak.models.utils.RoleUtils;
 
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Supplier;
+import java.util.stream.Stream;
 
 /**
  * @author <a href="mailto:bill@burkecentral.com">Bill Burke</a>
  * @version $Revision: 1 $
  */
-public class GroupAdapter implements GroupModel {
-    protected GroupModel updated;
-    protected CachedGroup cached;
-    protected RealmCacheSession cacheSession;
-    protected KeycloakSession keycloakSession;
-    protected RealmModel realm;
+public class GroupAdapter implements GroupModel.Streams {
+
+    protected final CachedGroup cached;
+    protected final RealmCacheSession cacheSession;
+    protected final KeycloakSession keycloakSession;
+    protected final RealmModel realm;
+    private final Supplier<GroupModel> modelSupplier;
+    protected volatile GroupModel updated;
 
     public GroupAdapter(CachedGroup cached, RealmCacheSession cacheSession, KeycloakSession keycloakSession, RealmModel realm) {
         this.cached = cached;
         this.cacheSession = cacheSession;
         this.keycloakSession = keycloakSession;
         this.realm = realm;
+        modelSupplier = this::getGroupModel;
     }
 
     protected void getDelegateForUpdate() {
         if (updated == null) {
             cacheSession.registerGroupInvalidation(cached.getId());
-            updated = cacheSession.getDelegate().getGroupById(cached.getId(), realm);
+            updated = modelSupplier.get();
             if (updated == null) throw new IllegalStateException("Not found in database");
         }
     }
 
-    protected boolean invalidated;
+    protected volatile boolean invalidated;
     public void invalidate() {
         invalidated = true;
     }
@@ -64,7 +69,7 @@ public class GroupAdapter implements GroupModel {
     protected boolean isUpdated() {
         if (updated != null) return true;
         if (!invalidated) return false;
-        updated = cacheSession.getDelegate().getGroupById(cached.getId(), realm);
+        updated = cacheSession.getGroupDelegate().getGroupById(realm, cached.getId());
         if (updated == null) throw new IllegalStateException("Not found in database");
         return true;
     }
@@ -73,7 +78,7 @@ public class GroupAdapter implements GroupModel {
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
-        if (o == null || !(o instanceof GroupModel)) return false;
+        if (!(o instanceof GroupModel)) return false;
 
         GroupModel that = (GroupModel) o;
 
@@ -128,63 +133,39 @@ public class GroupAdapter implements GroupModel {
     @Override
     public String getFirstAttribute(String name) {
         if (isUpdated()) return updated.getFirstAttribute(name);
-        return cached.getAttributes().getFirst(name);
+        return cached.getAttributes(modelSupplier).getFirst(name);
     }
 
     @Override
-    public List<String> getAttribute(String name) {
-        List<String> values = cached.getAttributes().get(name);
-        if (values == null) return null;
-        return values;
+    public Stream<String> getAttributeStream(String name) {
+        List<String> values = cached.getAttributes(modelSupplier).get(name);
+        if (values == null) return Stream.empty();
+        return values.stream();
     }
 
     @Override
     public Map<String, List<String>> getAttributes() {
-        return cached.getAttributes();
+        return cached.getAttributes(modelSupplier);
     }
 
     @Override
-    public Set<RoleModel> getRealmRoleMappings() {
-        if (isUpdated()) return updated.getRealmRoleMappings();
-        Set<RoleModel> roleMappings = getRoleMappings();
-        Set<RoleModel> realmMappings = new HashSet<RoleModel>();
-        for (RoleModel role : roleMappings) {
-            RoleContainerModel container = role.getContainer();
-            if (container instanceof RealmModel) {
-                if (((RealmModel) container).getId().equals(realm.getId())) {
-                    realmMappings.add(role);
-                }
-            }
-        }
-        return realmMappings;
+    public Stream<RoleModel> getRealmRoleMappingsStream() {
+        if (isUpdated()) return updated.getRealmRoleMappingsStream();
+        return getRoleMappingsStream().filter(r -> RoleUtils.isRealmRole(r, realm));
     }
 
     @Override
-    public Set<RoleModel> getClientRoleMappings(ClientModel app) {
-        if (isUpdated()) return updated.getClientRoleMappings(app);
-        Set<RoleModel> roleMappings = getRoleMappings();
-        Set<RoleModel> appMappings = new HashSet<RoleModel>();
-        for (RoleModel role : roleMappings) {
-            RoleContainerModel container = role.getContainer();
-            if (container instanceof ClientModel) {
-                if (((ClientModel) container).getId().equals(app.getId())) {
-                    appMappings.add(role);
-                }
-            }
-        }
-        return appMappings;
+    public Stream<RoleModel> getClientRoleMappingsStream(ClientModel app) {
+        if (isUpdated()) return updated.getClientRoleMappingsStream(app);
+        return getRoleMappingsStream().filter(r -> RoleUtils.isClientRole(r, app));
     }
 
     @Override
     public boolean hasRole(RoleModel role) {
         if (isUpdated()) return updated.hasRole(role);
-        if (cached.getRoleMappings().contains(role.getId())) return true;
+        if (cached.getRoleMappings(modelSupplier).contains(role.getId())) return true;
 
-        Set<RoleModel> mappings = getRoleMappings();
-        for (RoleModel mapping: mappings) {
-            if (mapping.hasRole(role)) return true;
-        }
-        return false;
+        return getRoleMappingsStream().anyMatch(r -> r.hasRole(role));
     }
 
     @Override
@@ -194,20 +175,20 @@ public class GroupAdapter implements GroupModel {
     }
 
     @Override
-    public Set<RoleModel> getRoleMappings() {
-        if (isUpdated()) return updated.getRoleMappings();
-        Set<RoleModel> roles = new HashSet<RoleModel>();
-        for (String id : cached.getRoleMappings()) {
-            RoleModel roleById = keycloakSession.realms().getRoleById(id, realm);
+    public Stream<RoleModel> getRoleMappingsStream() {
+        if (isUpdated()) return updated.getRoleMappingsStream();
+        Set<RoleModel> roles = new HashSet<>();
+        for (String id : cached.getRoleMappings(modelSupplier)) {
+            RoleModel roleById = keycloakSession.roles().getRoleById(realm, id);
             if (roleById == null) {
                 // chance that role was removed, so just delegate to persistence and get user invalidated
                 getDelegateForUpdate();
-                return updated.getRoleMappings();
+                return updated.getRoleMappingsStream();
             }
             roles.add(roleById);
 
         }
-        return roles;
+        return roles.stream();
     }
 
     @Override
@@ -220,7 +201,7 @@ public class GroupAdapter implements GroupModel {
     public GroupModel getParent() {
         if (isUpdated()) return updated.getParent();
         if (cached.getParentId() == null) return null;
-        return keycloakSession.realms().getGroupById(cached.getParentId(), realm);
+        return keycloakSession.groups().getGroupById(realm, cached.getParentId());
     }
 
     @Override
@@ -230,20 +211,20 @@ public class GroupAdapter implements GroupModel {
     }
 
     @Override
-    public Set<GroupModel> getSubGroups() {
-        if (isUpdated()) return updated.getSubGroups();
+    public Stream<GroupModel> getSubGroupsStream() {
+        if (isUpdated()) return updated.getSubGroupsStream();
         Set<GroupModel> subGroups = new HashSet<>();
-        for (String id : cached.getSubGroups()) {
-            GroupModel subGroup = keycloakSession.realms().getGroupById(id, realm);
+        for (String id : cached.getSubGroups(modelSupplier)) {
+            GroupModel subGroup = keycloakSession.groups().getGroupById(realm, id);
             if (subGroup == null) {
                 // chance that role was removed, so just delegate to persistence and get user invalidated
                 getDelegateForUpdate();
-                return updated.getSubGroups();
+                return updated.getSubGroupsStream();
 
             }
             subGroups.add(subGroup);
         }
-        return subGroups;
+        return subGroups.stream();
     }
 
 
@@ -266,5 +247,9 @@ public class GroupAdapter implements GroupModel {
     public void removeChild(GroupModel subGroup) {
         getDelegateForUpdate();
         updated.removeChild(subGroup);
+    }
+
+    private GroupModel getGroupModel() {
+        return cacheSession.getGroupDelegate().getGroupById(realm, cached.getId());
     }
 }

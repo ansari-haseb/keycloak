@@ -25,16 +25,13 @@ import org.apache.catalina.authenticator.FormAuthenticator;
 import org.apache.catalina.connector.Request;
 import org.apache.catalina.connector.Response;
 import org.jboss.logging.Logger;
+
 import org.keycloak.adapters.saml.config.parsers.DeploymentBuilder;
 import org.keycloak.adapters.saml.config.parsers.ResourceLoader;
-import org.keycloak.adapters.spi.AuthChallenge;
-import org.keycloak.adapters.spi.AuthOutcome;
-import org.keycloak.adapters.spi.HttpFacade;
-import org.keycloak.adapters.spi.InMemorySessionIdMapper;
-import org.keycloak.adapters.spi.SessionIdMapper;
+import org.keycloak.adapters.spi.*;
 import org.keycloak.adapters.tomcat.CatalinaHttpFacade;
 import org.keycloak.adapters.tomcat.CatalinaUserSessionManagement;
-import org.keycloak.adapters.tomcat.GenericPrincipalFactory;
+import org.keycloak.adapters.tomcat.PrincipalFactory;
 import org.keycloak.saml.common.exceptions.ParsingException;
 
 import javax.servlet.RequestDispatcher;
@@ -46,6 +43,8 @@ import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
+import java.lang.reflect.*;
+import java.util.regex.Pattern;
 
 /**
  * Keycloak authentication valve
@@ -62,6 +61,7 @@ public abstract class AbstractSamlAuthenticatorValve extends FormAuthenticator i
 	protected CatalinaUserSessionManagement userSessionManagement = new CatalinaUserSessionManagement();
     protected SamlDeploymentContext deploymentContext;
     protected SessionIdMapper mapper = new InMemorySessionIdMapper();
+    protected SessionIdMapperUpdater idMapperUpdater = SessionIdMapperUpdater.DIRECT;
 
     @Override
     public void lifecycleEvent(LifecycleEvent event) {
@@ -69,7 +69,7 @@ public abstract class AbstractSamlAuthenticatorValve extends FormAuthenticator i
             cache = false;
         } else if (Lifecycle.AFTER_START_EVENT.equals(event.getType())) {
         	keycloakInit();
-        } else if (event.getType() == Lifecycle.BEFORE_STOP_EVENT) {
+        } else if (Lifecycle.BEFORE_STOP_EVENT.equals(event.getType())) {
             beforeStop();
         }
     }
@@ -87,7 +87,7 @@ public abstract class AbstractSamlAuthenticatorValve extends FormAuthenticator i
         // Possible scenarios:
         // 1) The deployment has a keycloak.config.resolver specified and it exists:
         //    Outcome: adapter uses the resolver
-        // 2) The deployment has a keycloak.config.resolver and isn't valid (doesn't exists, isn't a resolver, ...) :
+        // 2) The deployment has a keycloak.config.resolver and isn't valid (doesn't exist, isn't a resolver, ...) :
         //    Outcome: adapter is left unconfigured
         // 3) The deployment doesn't have a keycloak.config.resolver , but has a keycloak.json (or equivalent)
         //    Outcome: adapter uses it
@@ -97,13 +97,12 @@ public abstract class AbstractSamlAuthenticatorValve extends FormAuthenticator i
         String configResolverClass = context.getServletContext().getInitParameter("keycloak.config.resolver");
         if (configResolverClass != null) {
             try {
-                throw new RuntimeException("Not implemented yet");
-                //KeycloakConfigResolver configResolver = (KeycloakConfigResolver) context.getLoader().getClassLoader().loadClass(configResolverClass).newInstance();
-                //deploymentContext = new SamlDeploymentContext(configResolver);
-                //log.log(Level.INFO, "Using {0} to resolve Keycloak configuration on a per-request basis.", configResolverClass);
+                SamlConfigResolver configResolver = (SamlConfigResolver) context.getLoader().getClassLoader().loadClass(configResolverClass).newInstance();
+                deploymentContext = new SamlDeploymentContext(configResolver);
+                log.infov("Using {0} to resolve Keycloak configuration on a per-request basis.", configResolverClass);
             } catch (Exception ex) {
                 log.errorv("The specified resolver {0} could NOT be loaded. Keycloak is unconfigured and will deny all requests. Reason: {1}", configResolverClass, ex.getMessage());
-                //deploymentContext = new AdapterDeploymentContext(new KeycloakDeployment());
+                deploymentContext = new SamlDeploymentContext(new DefaultSamlDeployment());
             }
         } else {
             InputStream is = getConfigInputStream(context);
@@ -129,6 +128,8 @@ public abstract class AbstractSamlAuthenticatorValve extends FormAuthenticator i
         }
 
         context.getServletContext().setAttribute(SamlDeploymentContext.class.getName(), deploymentContext);
+
+        addTokenStoreUpdaters();
     }
 
     protected void beforeStop() {
@@ -185,18 +186,29 @@ public abstract class AbstractSamlAuthenticatorValve extends FormAuthenticator i
 
     }
 
-    protected abstract GenericPrincipalFactory createPrincipalFactory();
+    protected abstract PrincipalFactory createPrincipalFactory();
     protected abstract boolean forwardToErrorPageInternal(Request request, HttpServletResponse response, Object loginConfig) throws IOException;
-    protected void forwardToLogoutPage(Request request, HttpServletResponse response,SamlDeployment deployment) {
-        RequestDispatcher disp = request.getRequestDispatcher(deployment.getLogoutPage());
-        //make sure the login page is never cached
-        response.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-        response.setHeader("Pragma", "no-cache");
-        response.setHeader("Expires", "0");
+    private static final Pattern PROTOCOL_PATTERN = Pattern.compile("^[a-zA-Z][a-zA-Z0-9+.-]*:");
 
+    protected void forwardToLogoutPage(Request request, HttpServletResponse response, SamlDeployment deployment) {
+        final String location = deployment.getLogoutPage();
 
         try {
-            disp.forward(request.getRequest(), response);
+            //make sure the login page is never cached
+            response.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+            response.setHeader("Pragma", "no-cache");
+            response.setHeader("Expires", "0");
+
+            if (location == null) {
+                log.warn("Logout page not set.");
+                response.sendError(HttpServletResponse.SC_NOT_FOUND);
+            } else if (PROTOCOL_PATTERN.matcher(location).find()) {
+                response.sendRedirect(response.encodeRedirectURL(location));
+            } else {
+                RequestDispatcher disp = request.getRequestDispatcher(location);
+
+                disp.forward(request.getRequest(), response);
+            }
         } catch (ServletException e) {
             throw new RuntimeException(e);
         } catch (IOException e) {
@@ -273,8 +285,68 @@ public abstract class AbstractSamlAuthenticatorValve extends FormAuthenticator i
 
     protected SamlSessionStore createSessionStore(Request request, HttpFacade facade, SamlDeployment resolvedDeployment) {
         SamlSessionStore store;
-        store = new CatalinaSamlSessionStore(userSessionManagement, createPrincipalFactory(), mapper, request, this, facade, resolvedDeployment);
+        store = new CatalinaSamlSessionStore(userSessionManagement, createPrincipalFactory(), mapper, idMapperUpdater, request, this, facade, resolvedDeployment);
         return store;
     }
 
+    protected void addTokenStoreUpdaters() {
+        SessionIdMapperUpdater updater = getIdMapperUpdater();
+
+        try {
+            String idMapperSessionUpdaterClasses = context.getServletContext().getInitParameter("keycloak.sessionIdMapperUpdater.classes");
+            if (idMapperSessionUpdaterClasses == null) {
+                return;
+            }
+
+            for (String clazz : idMapperSessionUpdaterClasses.split("\\s*,\\s*")) {
+                if (! clazz.isEmpty()) {
+                    updater = invokeAddTokenStoreUpdaterMethod(clazz, updater);
+                }
+            }
+        } finally {
+            setIdMapperUpdater(updater);
+        }
+    }
+
+    private SessionIdMapperUpdater invokeAddTokenStoreUpdaterMethod(String idMapperSessionUpdaterClass, SessionIdMapperUpdater previousIdMapperUpdater) {
+        try {
+            Class<?> clazz = context.getLoader().getClassLoader().loadClass(idMapperSessionUpdaterClass);
+            Method addTokenStoreUpdatersMethod = clazz.getMethod("addTokenStoreUpdaters", Context.class, SessionIdMapper.class, SessionIdMapperUpdater.class);
+            if (! Modifier.isStatic(addTokenStoreUpdatersMethod.getModifiers())
+              || ! Modifier.isPublic(addTokenStoreUpdatersMethod.getModifiers())
+              || ! SessionIdMapperUpdater.class.isAssignableFrom(addTokenStoreUpdatersMethod.getReturnType())) {
+                log.errorv("addTokenStoreUpdaters method in class {0} has to be public static. Ignoring class.", idMapperSessionUpdaterClass);
+                return previousIdMapperUpdater;
+            }
+
+            log.debugv("Initializing sessionIdMapperUpdater class {0}", idMapperSessionUpdaterClass);
+            return (SessionIdMapperUpdater) addTokenStoreUpdatersMethod.invoke(null, context, mapper, previousIdMapperUpdater);
+        } catch (ClassNotFoundException ex) {
+            log.warnv(ex, "Cannot use sessionIdMapperUpdater class {0}", idMapperSessionUpdaterClass);
+            return previousIdMapperUpdater;
+        } catch (NoSuchMethodException ex) {
+            log.warnv(ex, "Cannot use sessionIdMapperUpdater class {0}", idMapperSessionUpdaterClass);
+            return previousIdMapperUpdater;
+        } catch (SecurityException ex) {
+            log.warnv(ex, "Cannot use sessionIdMapperUpdater class {0}", idMapperSessionUpdaterClass);
+            return previousIdMapperUpdater;
+        } catch (IllegalAccessException ex) {
+            log.warnv(ex, "Cannot use {0}.addTokenStoreUpdaters(DeploymentInfo, SessionIdMapper) method", idMapperSessionUpdaterClass);
+            return previousIdMapperUpdater;
+        } catch (IllegalArgumentException ex) {
+            log.warnv(ex, "Cannot use {0}.addTokenStoreUpdaters(DeploymentInfo, SessionIdMapper) method", idMapperSessionUpdaterClass);
+            return previousIdMapperUpdater;
+        } catch (InvocationTargetException ex) {
+            log.warnv(ex, "Cannot use {0}.addTokenStoreUpdaters(DeploymentInfo, SessionIdMapper) method", idMapperSessionUpdaterClass);
+            return previousIdMapperUpdater;
+        }
+    }
+
+    public SessionIdMapperUpdater getIdMapperUpdater() {
+        return idMapperUpdater;
+    }
+
+    public void setIdMapperUpdater(SessionIdMapperUpdater idMapperUpdater) {
+        this.idMapperUpdater = idMapperUpdater;
+    }
 }

@@ -22,10 +22,11 @@ import org.apache.catalina.connector.Request;
 import org.apache.catalina.connector.Response;
 import org.apache.catalina.core.StandardContext;
 import org.apache.catalina.deploy.LoginConfig;
+
 import org.keycloak.adapters.jbossweb.JBossWebPrincipalFactory;
-import org.keycloak.adapters.saml.AbstractSamlAuthenticatorValve;
-import org.keycloak.adapters.saml.SamlDeployment;
-import org.keycloak.adapters.tomcat.GenericPrincipalFactory;
+import org.keycloak.adapters.saml.*;
+import org.keycloak.adapters.spi.SessionIdMapperUpdater;
+import org.keycloak.adapters.tomcat.PrincipalFactory;
 
 import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
@@ -68,7 +69,14 @@ public class SamlAuthenticatorValve extends AbstractSamlAuthenticatorValve {
     }
 
     @Override
-    protected GenericPrincipalFactory createPrincipalFactory() {
+    protected PrincipalFactory createPrincipalFactory() {
         return new JBossWebPrincipalFactory();
+    }
+
+    @Override
+    protected void addTokenStoreUpdaters() {
+        context.addApplicationListenerInstance(new IdMapperUpdaterSessionListener(mapper));
+        setIdMapperUpdater(SessionIdMapperUpdater.EXTERNAL);
+        super.addTokenStoreUpdaters();
     }
 }

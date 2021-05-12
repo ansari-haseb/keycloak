@@ -21,7 +21,7 @@
     <parent>
         <groupId>org.keycloak.testsuite</groupId>
         <artifactId>integration-arquillian-servers-app-server</artifactId>
-        <version>3.0.0.CR1-SNAPSHOT</version>
+        <version>14.0.0-SNAPSHOT</version>
     </parent>
     <modelVersion>4.0.0</modelVersion>
 
@@ -33,9 +33,6 @@
         <common.resources>${project.parent.basedir}/common</common.resources>
         <assembly.xml>${project.parent.basedir}/assembly.xml</assembly.xml>
         <app.server.karaf.home>${containers.home}/${app.server.karaf.unpacked.folder.name}</app.server.karaf.home>
-        <app.server.karaf.client.auth>-u karaf</app.server.karaf.client.auth>
-        <app.server.karaf.uninstall.pax>false</app.server.karaf.uninstall.pax>
-        <app.server.karaf.update.config>false</app.server.karaf.update.config>
     </properties>
 
     <profiles>
@@ -68,7 +65,7 @@
                                         </requireProperty>
                                         <requireOS>
                                             <family>!windows</family>
-                                            <message>Automated Kara/Fuse adapter configuration currently doesn't work on Windows.</message>
+                                            <message>Automated Karaf/Fuse adapter configuration currently doesn't work on Windows.</message>
                                         </requireOS>
                                     </rules>
                                 </configuration>
@@ -104,27 +101,6 @@
                         <artifactId>maven-resources-plugin</artifactId>
                         <executions>
                             <execution>
-                                <id>copy-clis</id>
-                                <phase>process-resources</phase>
-                                <goals>
-                                    <goal>copy-resources</goal>
-                                </goals>
-                                <configuration>
-                                    <outputDirectory>${app.server.karaf.home}/bin</outputDirectory>
-                                    <resources>
-                                        <resource>
-                                            <directory>src/main/resources</directory>
-                                            <includes>
-                                                <include>install-features.cli</include>
-                                                <include>update-config.cli</include>
-                                                <include>update-config-auth.cli</include>
-                                            </includes>
-                                            <filtering>true</filtering>
-                                        </resource>
-                                    </resources>
-                                </configuration>
-                            </execution>
-                            <execution>
                                 <id>copy-configs</id>
                                 <phase>process-resources</phase>
                                 <goals>
@@ -138,6 +114,8 @@
                                             <directory>src/main/resources</directory>
                                             <includes>
                                                 <include>users.properties</include>
+                                                <include>keycloak-bearer.json</include>
+                                                <include>cxf-customerservice-keycloak.json</include>
                                                 <include>keycloak-direct-access.json</include>
                                                 <include>keycloak-hawtio-client.json</include>
                                                 <include>keycloak-hawtio.json</include>
@@ -147,29 +125,6 @@
                                 </configuration>
                             </execution>
                         </executions>
-                    </plugin>
-                    <plugin>
-                        <groupId>org.codehaus.mojo</groupId>
-                        <artifactId>exec-maven-plugin</artifactId>
-                        <executions>
-                            <execution>
-                                <id>install-features</id>
-                                <phase>process-test-resources</phase>
-                                <goals>
-                                    <goal>exec</goal>
-                                </goals>
-                            </execution>
-                        </executions>
-                        <configuration>
-                            <executable>${common.resources}/install-features.${script.suffix}</executable>
-                            <workingDirectory>${app.server.karaf.home}/bin</workingDirectory>
-                            <environmentVariables>
-                                <JAVA_HOME>${app.server.java.home}</JAVA_HOME>
-                                <CLIENT_AUTH>${app.server.karaf.client.auth}</CLIENT_AUTH>
-                                <UNINSTALL_PAX>${app.server.karaf.uninstall.pax}</UNINSTALL_PAX>
-                                <UPDATE_CONFIG>${app.server.karaf.update.config}</UPDATE_CONFIG>
-                            </environmentVariables>
-                        </configuration>
                     </plugin>
                     <plugin>
                         <artifactId>maven-assembly-plugin</artifactId>
@@ -188,36 +143,35 @@
                                 </configuration>
                             </execution>
                         </executions>
-                    </plugin>                    
+                    </plugin>
                 </plugins>
             </build>
         </profile>
-        
-        <profile>
-            <id>app-server-karaf3</id>
-            <modules>
-                <module>karaf3</module>
-            </modules>
-        </profile>        
-        <profile>
-            <id>app-server-fuse61</id>
-            <modules>
-                <module>fuse61</module>
-            </modules>
-        </profile>        
-        <profile>
-            <id>app-server-fuse62</id>
-            <modules>
-                <module>fuse62</module>
-            </modules>
-        </profile>        
+
         <profile>
             <id>app-server-fuse63</id>
+            <activation>
+                <property>
+                    <name>app.server</name>
+                    <value>fuse63</value>
+                </property>
+            </activation>
             <modules>
                 <module>fuse63</module>
             </modules>
-        </profile>        
-        
+        </profile>
+        <profile>
+            <id>app-server-fuse7x</id>
+            <activation>
+                <property>
+                    <name>app.server</name>
+                    <value>fuse7x</value>
+                </property>
+            </activation>
+            <modules>
+                <module>fuse7x</module>
+            </modules>
+        </profile>
     </profiles>
 
 </project>

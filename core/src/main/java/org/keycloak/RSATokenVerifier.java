@@ -27,12 +27,13 @@ import java.security.PublicKey;
  * @author <a href="mailto:bill@burkecentral.com">Bill Burke</a>
  * @version $Revision: 1 $
  */
+@Deprecated
 public class RSATokenVerifier {
 
-    private TokenVerifier tokenVerifier;
+    private final TokenVerifier<AccessToken> tokenVerifier;
 
     private RSATokenVerifier(String tokenString) {
-        this.tokenVerifier = TokenVerifier.create(tokenString);
+        this.tokenVerifier = TokenVerifier.create(tokenString, AccessToken.class).withDefaultChecks();
     }
 
     public static RSATokenVerifier create(String tokenString) {

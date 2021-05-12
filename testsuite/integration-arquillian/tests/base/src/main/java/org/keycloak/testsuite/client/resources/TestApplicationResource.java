@@ -17,18 +17,17 @@
 
 package org.keycloak.testsuite.client.resources;
 
-import org.jboss.resteasy.annotations.cache.NoCache;
+import org.keycloak.representations.LogoutToken;
 import org.keycloak.representations.adapters.action.LogoutAction;
 import org.keycloak.representations.adapters.action.PushNotBeforeAction;
 import org.keycloak.representations.adapters.action.TestAvailabilityAction;
+import org.keycloak.utils.MediaType;
 
 import javax.ws.rs.GET;
 import javax.ws.rs.POST;
 import javax.ws.rs.Path;
 import javax.ws.rs.Produces;
 import javax.ws.rs.QueryParam;
-import javax.ws.rs.core.MediaType;
-import javax.ws.rs.core.Response;
 
 /**
  * @author <a href="mailto:sthorger@redhat.com">Stian Thorgersen</a>
@@ -40,6 +39,11 @@ public interface TestApplicationResource {
     @Produces(MediaType.APPLICATION_JSON)
     @Path("/poll-admin-logout")
     LogoutAction getAdminLogoutAction();
+
+    @GET
+    @Produces(MediaType.APPLICATION_JSON)
+    @Path("/poll-backchannel-logout")
+    LogoutToken getBackChannelLogoutToken();
 
     @GET
     @Produces(MediaType.APPLICATION_JSON)
@@ -56,7 +60,7 @@ public interface TestApplicationResource {
     void clearAdminActions();
 
     @GET
-    @Produces(MediaType.TEXT_HTML)
+    @Produces(MediaType.TEXT_HTML_UTF_8)
     @Path("/get-account-profile")
     String getAccountProfile(@QueryParam("token") String token, @QueryParam("account-uri") String accountUri);
 

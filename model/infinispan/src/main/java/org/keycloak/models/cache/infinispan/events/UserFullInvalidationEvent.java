@@ -17,19 +17,30 @@
 
 package org.keycloak.models.cache.infinispan.events;
 
-import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 import org.keycloak.models.FederatedIdentityModel;
 import org.keycloak.models.cache.infinispan.UserCacheManager;
+import org.keycloak.models.sessions.infinispan.util.KeycloakMarshallUtil;
+import java.io.IOException;
+import java.io.ObjectInput;
+import java.io.ObjectOutput;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
+import org.infinispan.commons.marshall.Externalizer;
+import org.infinispan.commons.marshall.MarshallUtil;
+import org.infinispan.commons.marshall.SerializeWith;
 
 /**
  * Used when user added/removed
  *
  * @author <a href="mailto:mposolda@redhat.com">Marek Posolda</a>
  */
+@SerializeWith(UserFullInvalidationEvent.ExternalizerImpl.class)
 public class UserFullInvalidationEvent extends InvalidationEvent implements UserCacheInvalidationEvent {
 
     private String userId;
@@ -39,7 +50,7 @@ public class UserFullInvalidationEvent extends InvalidationEvent implements User
     private boolean identityFederationEnabled;
     private Map<String, String> federatedIdentities;
 
-    public static UserFullInvalidationEvent create(String userId, String username, String email, String realmId, boolean identityFederationEnabled, Collection<FederatedIdentityModel> federatedIdentities) {
+    public static UserFullInvalidationEvent create(String userId, String username, String email, String realmId, boolean identityFederationEnabled, Stream<FederatedIdentityModel> federatedIdentities) {
         UserFullInvalidationEvent event = new UserFullInvalidationEvent();
         event.userId = userId;
         event.username = username;
@@ -48,10 +59,8 @@ public class UserFullInvalidationEvent extends InvalidationEvent implements User
 
         event.identityFederationEnabled = identityFederationEnabled;
         if (identityFederationEnabled) {
-            event.federatedIdentities = new HashMap<>();
-            for (FederatedIdentityModel socialLink : federatedIdentities) {
-                event.federatedIdentities.put(socialLink.getIdentityProvider(), socialLink.getUserId());
-            }
+            event.federatedIdentities = federatedIdentities.collect(Collectors.toMap(socialLink -> socialLink.getIdentityProvider(),
+                    socialLink -> socialLink.getUserId()));
         }
 
         return event;
@@ -74,5 +83,58 @@ public class UserFullInvalidationEvent extends InvalidationEvent implements User
     @Override
     public void addInvalidations(UserCacheManager userCache, Set<String> invalidations) {
         userCache.fullUserInvalidation(userId, username, email, realmId, identityFederationEnabled, federatedIdentities, invalidations);
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        if (!super.equals(o)) return false;
+        UserFullInvalidationEvent that = (UserFullInvalidationEvent) o;
+        return identityFederationEnabled == that.identityFederationEnabled && Objects.equals(userId, that.userId) && Objects.equals(username, that.username) && Objects.equals(email, that.email) && Objects.equals(realmId, that.realmId) && Objects.equals(federatedIdentities, that.federatedIdentities);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(super.hashCode(), userId, username, email, realmId, identityFederationEnabled, federatedIdentities);
+    }
+
+    public static class ExternalizerImpl implements Externalizer<UserFullInvalidationEvent> {
+
+        private static final int VERSION_1 = 1;
+
+        @Override
+        public void writeObject(ObjectOutput output, UserFullInvalidationEvent obj) throws IOException {
+            output.writeByte(VERSION_1);
+
+            MarshallUtil.marshallString(obj.userId, output);
+            MarshallUtil.marshallString(obj.username, output);
+            MarshallUtil.marshallString(obj.email, output);
+            MarshallUtil.marshallString(obj.realmId, output);
+            output.writeBoolean(obj.identityFederationEnabled);
+            KeycloakMarshallUtil.writeMap(obj.federatedIdentities, KeycloakMarshallUtil.STRING_EXT, KeycloakMarshallUtil.STRING_EXT, output);
+        }
+
+        @Override
+        public UserFullInvalidationEvent readObject(ObjectInput input) throws IOException, ClassNotFoundException {
+            switch (input.readByte()) {
+                case VERSION_1:
+                    return readObjectVersion1(input);
+                default:
+                    throw new IOException("Unknown version");
+            }
+        }
+
+        public UserFullInvalidationEvent readObjectVersion1(ObjectInput input) throws IOException, ClassNotFoundException {
+            UserFullInvalidationEvent res = new UserFullInvalidationEvent();
+            res.userId = MarshallUtil.unmarshallString(input);
+            res.username = MarshallUtil.unmarshallString(input);
+            res.email = MarshallUtil.unmarshallString(input);
+            res.realmId = MarshallUtil.unmarshallString(input);
+            res.identityFederationEnabled = input.readBoolean();
+            res.federatedIdentities = KeycloakMarshallUtil.readMap(input, KeycloakMarshallUtil.STRING_EXT, KeycloakMarshallUtil.STRING_EXT, HashMap::new);
+
+            return res;
+        }
     }
 }

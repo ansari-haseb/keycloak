@@ -17,13 +17,22 @@
 
 package org.keycloak.testsuite.pages;
 
+import org.jboss.arquillian.graphene.page.Page;
+import org.keycloak.testsuite.util.UIUtils;
+import org.openqa.selenium.NoSuchElementException;
 import org.openqa.selenium.WebElement;
 import org.openqa.selenium.support.FindBy;
+
+import static org.keycloak.testsuite.util.UIUtils.clickLink;
+import static org.keycloak.testsuite.util.UIUtils.getTextFromElement;
 
 /**
  * @author <a href="mailto:sthorger@redhat.com">Stian Thorgersen</a>
  */
 public class LoginUpdateProfilePage extends AbstractPage {
+
+    @Page
+    private UpdateProfileErrors errorsPage;
 
     @FindBy(id = "firstName")
     private WebElement firstNameInput;
@@ -36,9 +45,12 @@ public class LoginUpdateProfilePage extends AbstractPage {
 
     @FindBy(css = "input[type=\"submit\"]")
     private WebElement submitButton;
+    
+    @FindBy(name = "cancel-aia")
+    private WebElement cancelAIAButton;
 
     @FindBy(className = "alert-error")
-    private WebElement loginErrorMessage;
+    private WebElement loginAlertErrorMessage;
 
     public void update(String firstName, String lastName, String email) {
         if (firstName != null) {
@@ -53,11 +65,20 @@ public class LoginUpdateProfilePage extends AbstractPage {
             emailInput.clear();
             emailInput.sendKeys(email);
         }
-        submitButton.click();
+
+        clickLink(submitButton);
     }
 
-    public String getError() {
-        return loginErrorMessage != null ? loginErrorMessage.getText() : null;
+    public void cancel() {
+        cancelAIAButton.click();
+    }
+
+    public String getAlertError() {
+        try {
+            return UIUtils.getTextFromElement(loginAlertErrorMessage);
+        } catch (NoSuchElementException e) {
+            return null;
+        }
     }
 
     public String getFirstName() {
@@ -73,7 +94,11 @@ public class LoginUpdateProfilePage extends AbstractPage {
     }
 
     public boolean isCurrent() {
-        return driver.getTitle().equals("Update Account Information");
+        return PageUtils.getPageTitle(driver).equals("Update Account Information");
+    }
+
+    public UpdateProfileErrors getInputErrors() {
+        return errorsPage;
     }
 
     @Override
@@ -81,4 +106,59 @@ public class LoginUpdateProfilePage extends AbstractPage {
         throw new UnsupportedOperationException();
     }
 
+    public boolean isCancelDisplayed() {
+        try {
+            return cancelAIAButton.isDisplayed();
+        } catch (NoSuchElementException e) {
+            return false;
+        }
+    }
+
+    // For managing input errors
+    public static class UpdateProfileErrors {
+
+        @FindBy(id = "input-error-firstname")
+        private WebElement inputErrorFirstName;
+
+        @FindBy(id = "input-error-lastname")
+        private WebElement inputErrorLastName;
+
+        @FindBy(id = "input-error-email")
+        private WebElement inputErrorEmail;
+
+        @FindBy(id = "input-error-username")
+        private WebElement inputErrorUsername;
+
+        public String getFirstNameError() {
+            try {
+                return getTextFromElement(inputErrorFirstName);
+            } catch (NoSuchElementException e) {
+                return null;
+            }
+        }
+
+        public String getLastNameError() {
+            try {
+                return getTextFromElement(inputErrorLastName);
+            } catch (NoSuchElementException e) {
+                return null;
+            }
+        }
+
+        public String getEmailError() {
+            try {
+                return getTextFromElement(inputErrorEmail);
+            } catch (NoSuchElementException e) {
+                return null;
+            }
+        }
+
+        public String getUsernameError() {
+            try {
+                return getTextFromElement(inputErrorUsername);
+            } catch (NoSuchElementException e) {
+                return null;
+            }
+        }
+    }
 }

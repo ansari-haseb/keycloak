@@ -21,11 +21,10 @@ import org.jboss.resteasy.spi.HttpRequest;
 import org.keycloak.common.ClientConnection;
 import org.keycloak.events.EventBuilder;
 import org.keycloak.forms.login.LoginFormsProvider;
-import org.keycloak.models.ClientSessionModel;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.UserModel;
-import org.keycloak.models.UserSessionModel;
+import org.keycloak.sessions.AuthenticationSessionModel;
 
 import javax.ws.rs.core.Response;
 import javax.ws.rs.core.UriInfo;
@@ -38,11 +37,17 @@ import java.net.URI;
  * @version $Revision: 1 $
  */
 public interface RequiredActionContext {
-    public static enum Status {
+    enum Status {
         CHALLENGE,
         SUCCESS,
         IGNORE,
         FAILURE
+    }
+
+    enum KcActionStatus {
+        SUCCESS,
+        CANCELLED,
+        ERROR
     }
 
     /**
@@ -59,6 +64,15 @@ public interface RequiredActionContext {
      * @return
      */
     URI getActionUrl();
+
+    /**
+     * Get the action URL for the required action.  This auto-generates the access code.
+     *
+     * @param authSessionIdParam if true, will embed session id as query param.  Useful for clients that don't support cookies (i.e. console)
+     *
+     * @return
+     */
+    URI getActionUrl(boolean authSessionIdParam);
 
     /**
      * Create a Freemarker form builder that presets the user, action URI, and a generated access code
@@ -90,8 +104,7 @@ public interface RequiredActionContext {
      */
     UserModel getUser();
     RealmModel getRealm();
-    ClientSessionModel getClientSession();
-    UserSessionModel getUserSession();
+    AuthenticationSessionModel getAuthenticationSession();
     ClientConnection getConnection();
     UriInfo getUriInfo();
     KeycloakSession getSession();

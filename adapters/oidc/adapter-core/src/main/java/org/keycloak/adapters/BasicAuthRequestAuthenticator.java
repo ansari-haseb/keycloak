@@ -50,7 +50,7 @@ public class BasicAuthRequestAuthenticator extends BearerTokenRequestAuthenticat
 
     public AuthOutcome authenticate(HttpFacade exchange)  {
         List<String> authHeaders = exchange.getRequest().getHeaders("Authorization");
-        if (authHeaders == null || authHeaders.size() == 0) {
+        if (authHeaders == null || authHeaders.isEmpty()) {
             challenge = challengeResponse(exchange, OIDCAuthenticationError.Reason.NO_AUTHORIZATION_HEADER, null, null);
             return AuthOutcome.NOT_ATTEMPTED;
         }
@@ -58,7 +58,7 @@ public class BasicAuthRequestAuthenticator extends BearerTokenRequestAuthenticat
         tokenString = null;
         for (String authHeader : authHeaders) {
             String[] split = authHeader.trim().split("\\s+");
-            if (split == null || split.length != 2) continue;
+            if (split.length != 2) continue;
             if (!split[0].equalsIgnoreCase("Basic")) continue;
             tokenString = split[1];
         }
@@ -71,9 +71,10 @@ public class BasicAuthRequestAuthenticator extends BearerTokenRequestAuthenticat
         AccessTokenResponse atr=null;        
         try {
             String userpw=new String(Base64.decode(tokenString));
-            String[] parts=userpw.split(":");
-            
-            atr = getToken(parts[0], parts[1]);
+            int seperatorIndex = userpw.indexOf(":");
+            String user = userpw.substring(0, seperatorIndex);
+            String pw = userpw.substring(seperatorIndex + 1);
+            atr = getToken(user, pw);
             tokenString = atr.getToken();
         } catch (Exception e) {
             log.debug("Failed to obtain token", e);
@@ -82,9 +83,9 @@ public class BasicAuthRequestAuthenticator extends BearerTokenRequestAuthenticat
         }
 
         return authenticateToken(exchange, atr.getToken());
-    }
-    
-    private AccessTokenResponse getToken(String username, String password) throws Exception {
+    } 
+ 
+    protected AccessTokenResponse getToken(String username, String password) throws Exception {
     	AccessTokenResponse tokenResponse=null;
     	HttpClient client = deployment.getClient();
 

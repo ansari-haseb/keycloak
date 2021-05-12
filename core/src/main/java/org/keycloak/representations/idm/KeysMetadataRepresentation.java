@@ -54,6 +54,7 @@ public class KeysMetadataRepresentation {
         private String status;
 
         private String type;
+        private String algorithm;
 
         private String publicKey;
         private String certificate;
@@ -96,6 +97,14 @@ public class KeysMetadataRepresentation {
 
         public void setType(String type) {
             this.type = type;
+        }
+
+        public String getAlgorithm() {
+            return algorithm;
+        }
+
+        public void setAlgorithm(String algorithm) {
+            this.algorithm = algorithm;
         }
 
         public String getPublicKey() {

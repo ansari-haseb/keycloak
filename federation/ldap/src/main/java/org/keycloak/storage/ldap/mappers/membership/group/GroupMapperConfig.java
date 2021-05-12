@@ -17,6 +17,7 @@
 
 package org.keycloak.storage.ldap.mappers.membership.group;
 
+import org.keycloak.common.util.ObjectUtil;
 import org.keycloak.component.ComponentModel;
 import org.keycloak.models.LDAPConstants;
 import org.keycloak.models.ModelException;
@@ -44,6 +45,9 @@ public class GroupMapperConfig extends CommonLDAPGroupMapperConfig {
     // Flag whether group inheritance from LDAP should be propagated to Keycloak group inheritance.
     public static final String PRESERVE_GROUP_INHERITANCE = "preserve.group.inheritance";
 
+    // Flag whether missing groups should be ignored.
+    public static final String IGNORE_MISSING_GROUPS = "ignore.missing.groups";
+
     // Customized LDAP filter which is added to the whole LDAP query
     public static final String GROUPS_LDAP_FILTER = "groups.ldap.filter";
 
@@ -57,6 +61,10 @@ public class GroupMapperConfig extends CommonLDAPGroupMapperConfig {
     public static final String LOAD_GROUPS_BY_MEMBER_ATTRIBUTE = "LOAD_GROUPS_BY_MEMBER_ATTRIBUTE";
     public static final String GET_GROUPS_FROM_USER_MEMBEROF_ATTRIBUTE = "GET_GROUPS_FROM_USER_MEMBEROF_ATTRIBUTE";
     public static final String LOAD_GROUPS_BY_MEMBER_ATTRIBUTE_RECURSIVELY = "LOAD_GROUPS_BY_MEMBER_ATTRIBUTE_RECURSIVELY";
+
+    // Keycloak group path the LDAP groups are added to (default: top level "/")
+    public static final String LDAP_GROUPS_PATH = "groups.path";
+    public static final String DEFAULT_LDAP_GROUPS_PATH = "/";
 
     public GroupMapperConfig(ComponentModel mapperModel) {
         super(mapperModel);
@@ -90,6 +98,10 @@ public class GroupMapperConfig extends CommonLDAPGroupMapperConfig {
         return AbstractLDAPStorageMapper.parseBooleanParameter(mapperModel, PRESERVE_GROUP_INHERITANCE);
     }
 
+    public boolean isIgnoreMissingGroups() {
+        return AbstractLDAPStorageMapper.parseBooleanParameter(mapperModel, IGNORE_MISSING_GROUPS);
+    }
+
     public Collection<String> getGroupObjectClasses(LDAPStorageProvider ldapProvider) {
         String objectClasses = mapperModel.getConfig().getFirst(GROUP_OBJECT_CLASSES);
         if (objectClasses == null) {
@@ -116,5 +128,22 @@ public class GroupMapperConfig extends CommonLDAPGroupMapperConfig {
     public String getUserGroupsRetrieveStrategy() {
         String strategyString = mapperModel.getConfig().getFirst(USER_ROLES_RETRIEVE_STRATEGY);
         return strategyString!=null ? strategyString : LOAD_GROUPS_BY_MEMBER_ATTRIBUTE;
+    }
+
+    public String getGroupsPath() {
+        String groupsPath = mapperModel.getConfig().getFirst(LDAP_GROUPS_PATH);
+        return ObjectUtil.isBlank(groupsPath) ? DEFAULT_LDAP_GROUPS_PATH : groupsPath.trim();
+    }
+
+    public String getGroupsPathWithTrailingSlash() {
+        String path = getGroupsPath();
+        while (!path.endsWith("/")) {
+            path = getGroupsPath() + "/";
+        }
+        return path;
+    }
+
+    public boolean isTopLevelGroupsPath() {
+        return "/".equals(getGroupsPath());
     }
 }

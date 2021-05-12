@@ -19,10 +19,14 @@ package org.keycloak.testsuite.pages;
 import org.openqa.selenium.WebElement;
 import org.openqa.selenium.support.FindBy;
 
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
+import static org.keycloak.testsuite.util.UIUtils.isElementVisible;
+
 /**
  * @author <a href="mailto:sthorger@redhat.com">Stian Thorgersen</a>
  */
-public class LoginPasswordUpdatePage extends AbstractPage {
+public class LoginPasswordUpdatePage extends LanguageComboboxAwarePage {
 
     @FindBy(id = "password-new")
     private WebElement newPasswordInput;
@@ -36,15 +40,28 @@ public class LoginPasswordUpdatePage extends AbstractPage {
     @FindBy(className = "alert-error")
     private WebElement loginErrorMessage;
 
+    @FindBy(className = "kc-feedback-text")
+    private WebElement feedbackMessage;
+
+    @FindBy(id = "logout-sessions")
+    private WebElement logoutSessionsCheckbox;
+    
+    @FindBy(name = "cancel-aia")
+    private WebElement cancelAIAButton;
+
     public void changePassword(String newPassword, String passwordConfirm) {
         newPasswordInput.sendKeys(newPassword);
         passwordConfirmInput.sendKeys(passwordConfirm);
 
         submitButton.click();
     }
+    
+    public void cancel() {
+        cancelAIAButton.click();
+    }
 
     public boolean isCurrent() {
-        return driver.getTitle().equals("Update password");
+        return PageUtils.getPageTitle(driver).equals("Update password");
     }
 
     public void open() {
@@ -53,6 +70,32 @@ public class LoginPasswordUpdatePage extends AbstractPage {
 
     public String getError() {
         return loginErrorMessage != null ? loginErrorMessage.getText() : null;
+    }
+
+    public String getFeedbackMessage() {
+        return feedbackMessage.getText();
+    }
+
+    public boolean isLogoutSessionDisplayed() {
+        return isElementVisible(logoutSessionsCheckbox);
+    }
+
+    public boolean isLogoutSessionsChecked() {
+        return logoutSessionsCheckbox.isSelected();
+    }
+
+    public void checkLogoutSessions() {
+        assertFalse("Logout sessions is checked", isLogoutSessionsChecked());
+        logoutSessionsCheckbox.click();
+    }
+
+    public void uncheckLogoutSessions() {
+        assertTrue("Logout sessions is not checked", isLogoutSessionsChecked());
+        logoutSessionsCheckbox.click();
+    }
+
+    public boolean isCancelDisplayed() {
+        return isElementVisible(cancelAIAButton);
     }
 
 }

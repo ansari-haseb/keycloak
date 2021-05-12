@@ -17,8 +17,16 @@
 
 package org.keycloak.testsuite.arquillian.migration;
 
+import java.io.BufferedWriter;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileWriter;
+import java.io.PrintWriter;
+import java.nio.charset.Charset;
+
 import org.jboss.logging.Logger;
 import org.keycloak.OAuth2Constants;
+import org.keycloak.common.util.StreamUtil;
 import org.keycloak.testsuite.util.OAuthClient;
 
 /**
@@ -28,31 +36,61 @@ public class MigrationContext {
 
     public static final Logger logger = Logger.getLogger(MigrationContext.class);
 
-    private String offlineToken;
 
-    public String getOfflineToken() {
-        return offlineToken;
+    public String loadOfflineToken() throws Exception {
+        String file = getOfflineTokenLocation();
+        logger.infof("Reading previously saved offline token from the file: %s", file);
+
+        try (FileInputStream fis = new FileInputStream(file)) {
+            String offlineToken = StreamUtil.readString(fis, Charset.forName("UTF-8"));
+            logger.infof("Successfully read offline token: %s", offlineToken);
+            File f = new File(file);
+            f.delete();
+            logger.infof("Deleted file with offline token: %s", file);
+
+            return offlineToken;
+        }
     }
 
 
     // Do some actions on the old container
-    public void runPreMigrationTask() {
-        requestOfflineToken();
+    public void runPreMigrationTask() throws Exception {
+        String offlineToken = requestOfflineToken();
+        saveOfflineToken(offlineToken);
     }
 
-    private void requestOfflineToken() {
+    private String requestOfflineToken() {
         logger.info("Requesting offline token on the old container");
         try {
             OAuthClient oauth = new OAuthClient();
-            oauth.init(null, null);
+            oauth.init(null);
             oauth.scope(OAuth2Constants.OFFLINE_ACCESS);
             oauth.realm("Migration");
             oauth.clientId("migration-test-client");
-            OAuthClient.AccessTokenResponse tokenResponse = oauth.doGrantAccessTokenRequest("b2c07929-69e3-44c6-8d7f-76939000b3e4", "migration-test-user", "admin");
-            offlineToken = tokenResponse.getRefreshToken();
+            OAuthClient.AccessTokenResponse tokenResponse = oauth.doGrantAccessTokenRequest("secret", "offline-test-user", "password2");
+            return tokenResponse.getRefreshToken();
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
+    }
+
+
+    private void saveOfflineToken(String offlineToken) throws Exception {
+        String file = getOfflineTokenLocation();
+        logger.infof("Saving offline token to file: %s, Offline token is: %s", file, offlineToken);
+
+        try (PrintWriter writer = new PrintWriter(new BufferedWriter(new FileWriter(file)))) {
+            writer.print(offlineToken);
+        }
+    }
+
+
+    private String getOfflineTokenLocation() {
+        String tmpDir = System.getProperty("java.io.tmpdir", "");
+        if (tmpDir == null) {
+            tmpDir = System.getProperty("basedir");
+        }
+        return tmpDir + "/offline-token.txt";
     }
 
 }

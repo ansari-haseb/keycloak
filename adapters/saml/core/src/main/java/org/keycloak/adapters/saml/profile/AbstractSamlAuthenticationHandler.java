@@ -17,6 +17,8 @@
 
 package org.keycloak.adapters.saml.profile;
 
+import static org.keycloak.adapters.saml.SamlPrincipal.DEFAULT_ROLE_ATTRIBUTE_NAME;
+
 import org.jboss.logging.Logger;
 import org.keycloak.adapters.saml.AbstractInitiateLogin;
 import org.keycloak.adapters.saml.OnSessionCreated;
@@ -51,10 +53,12 @@ import org.keycloak.saml.SAML2AuthnRequestBuilder;
 import org.keycloak.saml.SAMLRequestParser;
 import org.keycloak.saml.SignatureAlgorithm;
 import org.keycloak.saml.common.constants.GeneralConstants;
+import org.keycloak.saml.common.constants.JBossSAMLConstants;
 import org.keycloak.saml.common.constants.JBossSAMLURIConstants;
 import org.keycloak.saml.common.exceptions.ConfigurationException;
 import org.keycloak.saml.common.exceptions.ProcessingException;
 import org.keycloak.saml.common.util.Base64;
+import org.keycloak.saml.common.util.DocumentUtil;
 import org.keycloak.saml.processing.api.saml.v2.sig.SAML2Signature;
 import org.keycloak.saml.processing.core.saml.v2.common.SAMLDocumentHolder;
 import org.keycloak.saml.processing.core.saml.v2.util.AssertionUtil;
@@ -72,10 +76,19 @@ import java.security.PublicKey;
 import java.security.Signature;
 import java.security.SignatureException;
 import java.util.*;
+
+import javax.xml.datatype.XMLGregorianCalendar;
+import javax.xml.namespace.QName;
+
 import org.keycloak.dom.saml.v2.SAML2Object;
 import org.keycloak.dom.saml.v2.protocol.ExtensionsType;
 import org.keycloak.rotation.KeyLocator;
 import org.keycloak.saml.processing.core.util.KeycloakKeySamlExtensionGenerator;
+import org.keycloak.saml.processing.core.util.XMLEncryptionUtil;
+import org.keycloak.saml.validators.ConditionsValidator;
+import org.keycloak.saml.validators.DestinationValidator;
+import javax.xml.crypto.dsig.XMLSignature;
+import org.w3c.dom.NodeList;
 
 /**
  *
@@ -89,6 +102,35 @@ public abstract class AbstractSamlAuthenticationHandler implements SamlAuthentic
     protected final SamlSessionStore sessionStore;
     protected  final SamlDeployment deployment;
     protected AuthChallenge challenge;
+    private final DestinationValidator destinationValidator = DestinationValidator.forProtocolMap(null);
+    private static final AuthChallenge CHALLENGE_EXTRACTION_FAILURE =  new AuthChallenge() {
+            @Override
+            public boolean challenge(HttpFacade exchange) {
+                SamlAuthenticationError error = new SamlAuthenticationError(SamlAuthenticationError.Reason.EXTRACTION_FAILURE);
+                exchange.getRequest().setError(error);
+                exchange.getResponse().sendError(403);
+                return true;
+            }
+
+            @Override
+            public int getResponseCode() {
+                return 403;
+            }
+        };
+    private static final AuthChallenge CHALLENGE_INVALID_SIGNATURE = new AuthChallenge() {
+            @Override
+            public boolean challenge(HttpFacade exchange) {
+                SamlAuthenticationError error = new SamlAuthenticationError(SamlAuthenticationError.Reason.INVALID_SIGNATURE);
+                exchange.getRequest().setError(error);
+                exchange.getResponse().sendError(403);
+                return true;
+            }
+
+            @Override
+            public int getResponseCode() {
+                return 403;
+            }
+        };
 
     public AbstractSamlAuthenticationHandler(HttpFacade facade, SamlDeployment deployment, SamlSessionStore sessionStore) {
         this.facade = facade;
@@ -105,7 +147,7 @@ public abstract class AbstractSamlAuthenticationHandler implements SamlAuthentic
         } else if (samlResponse != null) {
             return handleSamlResponse(samlResponse, relayState, onCreateSession);
         } else if (sessionStore.isLoggedIn()) {
-            if (verifySSL()) return AuthOutcome.FAILED;
+            if (verifySSL()) return failedTerminal();
             log.debug("AUTHENTICATED: was cached");
             return handleRequest();
         }
@@ -136,10 +178,18 @@ public abstract class AbstractSamlAuthenticationHandler implements SamlAuthentic
             postBinding = true;
             holder = SAMLRequestParser.parseRequestPostBinding(samlRequest);
         }
+        if (holder == null) {
+            log.error("Error parsing SAML document");
+            return failedTerminal();
+        }
         RequestAbstractType requestAbstractType = (RequestAbstractType) holder.getSamlObject();
-        if (!requestUri.equals(requestAbstractType.getDestination().toString())) {
-            log.error("expected destination '" + requestUri + "' got '" + requestAbstractType.getDestination() + "'");
-            return AuthOutcome.FAILED;
+        if (requestAbstractType.getDestination() == null && containsUnencryptedSignature(holder, postBinding)) {
+            log.error("Destination field required.");
+            return failed(CHALLENGE_EXTRACTION_FAILURE);
+        }
+        if (! destinationValidator.validate(requestUri, requestAbstractType.getDestination())) {
+            log.error("Expected destination '" + requestUri + "' got '" + requestAbstractType.getDestination() + "'");
+            return failedTerminal();
         }
 
         if (requestAbstractType instanceof LogoutRequestType) {
@@ -148,7 +198,7 @@ public abstract class AbstractSamlAuthenticationHandler implements SamlAuthentic
                     validateSamlSignature(holder, postBinding, GeneralConstants.SAML_REQUEST_KEY);
                 } catch (VerificationException e) {
                     log.error("Failed to verify saml request signature", e);
-                    return AuthOutcome.FAILED;
+                    return failedTerminal();
                 }
             }
             LogoutRequestType logout = (LogoutRequestType) requestAbstractType;
@@ -156,7 +206,7 @@ public abstract class AbstractSamlAuthenticationHandler implements SamlAuthentic
 
         } else {
             log.error("unknown SAML request type");
-            return AuthOutcome.FAILED;
+            return failedTerminal();
         }
     }
 
@@ -176,11 +226,19 @@ public abstract class AbstractSamlAuthenticationHandler implements SamlAuthentic
             postBinding = true;
             holder = extractPostBindingResponse(samlResponse);
         }
+        if (holder == null) {
+            log.error("Error parsing SAML document");
+            return failed(CHALLENGE_EXTRACTION_FAILURE);
+        }
         final StatusResponseType statusResponse = (StatusResponseType) holder.getSamlObject();
         // validate destination
-        if (!requestUri.equals(statusResponse.getDestination())) {
-            log.error("Request URI does not match SAML request destination");
-            return AuthOutcome.FAILED;
+        if (statusResponse.getDestination() == null && containsUnencryptedSignature(holder, postBinding)) {
+            log.error("Destination field required.");
+            return failed(CHALLENGE_EXTRACTION_FAILURE);
+        }
+        if (! destinationValidator.validate(requestUri, statusResponse.getDestination())) {
+            log.error("Request URI '" + requestUri + "' does not match SAML request destination '" + statusResponse.getDestination() + "'");
+            return failedTerminal();
         }
 
         if (statusResponse instanceof ResponseType) {
@@ -191,24 +249,10 @@ public abstract class AbstractSamlAuthenticationHandler implements SamlAuthentic
                     } catch (VerificationException e) {
                         log.error("Failed to verify saml response signature", e);
 
-                        challenge = new AuthChallenge() {
-                            @Override
-                            public boolean challenge(HttpFacade exchange) {
-                                SamlAuthenticationError error = new SamlAuthenticationError(SamlAuthenticationError.Reason.INVALID_SIGNATURE, statusResponse);
-                                exchange.getRequest().setError(error);
-                                exchange.getResponse().sendError(403);
-                                return true;
-                            }
-
-                            @Override
-                            public int getResponseCode() {
-                                return 403;
-                            }
-                        };
-                        return AuthOutcome.FAILED;
+                        return failed(CHALLENGE_INVALID_SIGNATURE);
                     }
                 }
-                return handleLoginResponse((ResponseType) statusResponse, postBinding, onCreateSession);
+                return handleLoginResponse(holder, postBinding, onCreateSession);
             } finally {
                 sessionStore.setCurrentAction(SamlSessionStore.CurrentAction.NONE);
             }
@@ -221,7 +265,7 @@ public abstract class AbstractSamlAuthenticationHandler implements SamlAuthentic
                             validateSamlSignature(holder, postBinding, GeneralConstants.SAML_RESPONSE_KEY);
                         } catch (VerificationException e) {
                             log.error("Failed to verify saml response signature", e);
-                            return AuthOutcome.FAILED;
+                            return failedTerminal();
                         }
                     }
                     return handleLogoutResponse(holder, statusResponse, relayState);
@@ -239,28 +283,29 @@ public abstract class AbstractSamlAuthenticationHandler implements SamlAuthentic
                         return AuthOutcome.NOT_AUTHENTICATED;
                     }
 
-                    challenge = new AuthChallenge() {
-                        @Override
-                        public boolean challenge(HttpFacade exchange) {
-                            SamlAuthenticationError error = new SamlAuthenticationError(SamlAuthenticationError.Reason.ERROR_STATUS, statusResponse);
-                            exchange.getRequest().setError(error);
-                            exchange.getResponse().sendError(403);
-                            return true;
-                        }
-
-                        @Override
-                        public int getResponseCode() {
-                            return 403;
-                        }
-                    };
-                    return AuthOutcome.FAILED;
+                    return failed(createAuthChallenge403(statusResponse));
                 } finally {
                     sessionStore.setCurrentAction(SamlSessionStore.CurrentAction.NONE);
                 }
             }
+
+            log.warn("Keycloak Adapter obtained Response, that is not understood. This may be because the containers " +
+                    "cookies are not properly configured with SameSite settings. Refer to KEYCLOAK-14103 for more details.");
+
             return AuthOutcome.NOT_ATTEMPTED;
         }
 
+    }
+
+    private boolean containsUnencryptedSignature(SAMLDocumentHolder documentHolder, boolean postBinding) {
+        if (postBinding) {
+            Document signedDoc = documentHolder.getSamlDocument();
+            NodeList nl = signedDoc.getElementsByTagNameNS(XMLSignature.XMLNS, "Signature");
+            return nl != null && nl.getLength() > 0;
+        } else {
+            String algorithm = facade.getRequest().getQueryParamValue(GeneralConstants.SAML_SIG_ALG_REQUEST_KEY);
+            return algorithm != null;
+        }
     }
 
     private void validateSamlSignature(SAMLDocumentHolder holder, boolean postBinding, String paramKey) throws VerificationException {
@@ -310,81 +355,59 @@ public abstract class AbstractSamlAuthenticationHandler implements SamlAuthentic
         return false;
     }
 
-    protected AuthOutcome handleLoginResponse(final ResponseType responseType, boolean postBinding, OnSessionCreated onCreateSession) {
+    protected AuthOutcome handleLoginResponse(SAMLDocumentHolder responseHolder, boolean postBinding, OnSessionCreated onCreateSession) {
+        if (!sessionStore.isLoggingIn()) {
+            log.warn("Adapter obtained LoginResponse, however containers session is not aware of sending any request. " +
+                    "This may be because the session cookies created by container are not properly configured " +
+                    "with SameSite settings. Refer to KEYCLOAK-14103 for more details.");
+        }
+
+    	final ResponseType responseType = (ResponseType) responseHolder.getSamlObject();
         AssertionType assertion = null;
         if (! isSuccessfulSamlResponse(responseType) || responseType.getAssertions() == null || responseType.getAssertions().isEmpty()) {
-            challenge = new AuthChallenge() {
-                @Override
-                public boolean challenge(HttpFacade exchange) {
-                    SamlAuthenticationError error = new SamlAuthenticationError(SamlAuthenticationError.Reason.ERROR_STATUS, responseType);
-                    exchange.getRequest().setError(error);
-                    exchange.getResponse().sendError(403);
-                    return true;
-                }
-
-                @Override
-                public int getResponseCode() {
-                    return 403;
-                }
-            };
-            return AuthOutcome.FAILED;
+            return failed(createAuthChallenge403(responseType));
         }
         try {
-            assertion = AssertionUtil.getAssertion(responseType, deployment.getDecryptionKey());
-            if (AssertionUtil.hasExpired(assertion)) {
+            assertion = AssertionUtil.getAssertion(responseHolder, responseType, deployment.getDecryptionKey());
+            ConditionsValidator.Builder cvb = new ConditionsValidator.Builder(assertion.getID(), assertion.getConditions(), destinationValidator);
+            try {
+                cvb.clockSkewInMillis(deployment.getIDP().getAllowedClockSkew());
+                cvb.addAllowedAudience(URI.create(deployment.getEntityID()));
+                if (responseType.getDestination() != null) {
+                  // getDestination has been validated to match request URL already so it matches SAML endpoint
+                  cvb.addAllowedAudience(URI.create(responseType.getDestination()));
+                }
+            } catch (IllegalArgumentException ex) {
+                // warning has been already emitted in DeploymentBuilder
+            }
+            if (! cvb.build().isValid()) {
                 return initiateLogin();
             }
         } catch (Exception e) {
             log.error("Error extracting SAML assertion: " + e.getMessage());
-            challenge = new AuthChallenge() {
-                @Override
-                public boolean challenge(HttpFacade exchange) {
-                    SamlAuthenticationError error = new SamlAuthenticationError(SamlAuthenticationError.Reason.EXTRACTION_FAILURE);
-                    exchange.getRequest().setError(error);
-                    exchange.getResponse().sendError(403);
-                    return true;
-                }
-
-                @Override
-                public int getResponseCode() {
-                    return 403;
-                }
-            };
-            return AuthOutcome.FAILED;
+            return failed(CHALLENGE_EXTRACTION_FAILURE);
         }
 
+        Element assertionElement = null;
         if (deployment.getIDP().getSingleSignOnService().validateAssertionSignature()) {
             try {
-                validateSamlSignature(new SAMLDocumentHolder(AssertionUtil.asDocument(assertion)), postBinding, GeneralConstants.SAML_RESPONSE_KEY);
-            } catch (VerificationException e) {
-                log.error("Failed to verify saml assertion signature", e);
-
-                challenge = new AuthChallenge() {
-                    @Override
-                    public boolean challenge(HttpFacade exchange) {
-                        SamlAuthenticationError error = new SamlAuthenticationError(SamlAuthenticationError.Reason.INVALID_SIGNATURE, responseType);
-                        exchange.getRequest().setError(error);
-                        exchange.getResponse().sendError(403);
-                        return true;
-                    }
-
-                    @Override
-                    public int getResponseCode() {
-                        return 403;
-                    }
-                };
-                return AuthOutcome.FAILED;
-            } catch (ProcessingException e) {
-                e.printStackTrace();
+                assertionElement = getAssertionFromResponse(responseHolder);
+                if (!AssertionUtil.isSignatureValid(assertionElement, deployment.getIDP().getSignatureValidationKeyLocator())) {
+                    log.error("Failed to verify saml assertion signature");
+                    return failed(CHALLENGE_INVALID_SIGNATURE);
+                }
+            } catch (Exception e) {
+                log.error("Error processing validation of SAML assertion: " + e.getMessage());
+                return failed(CHALLENGE_EXTRACTION_FAILURE);
             }
         }
 
         SubjectType subject = assertion.getSubject();
         SubjectType.STSubType subType = subject.getSubType();
-        NameIDType subjectNameID = (NameIDType) subType.getBaseID();
-        String principalName = subjectNameID.getValue();
+        NameIDType subjectNameID = subType == null ? null : (NameIDType) subType.getBaseID();
+        String principalName = subjectNameID == null ? null : subjectNameID.getValue();
 
-        final Set<String> roles = new HashSet<>();
+        Set<String> roles = new HashSet<>();
         MultivaluedHashMap<String, String> attributes = new MultivaluedHashMap<>();
         MultivaluedHashMap<String, String> friendlyAttributes = new MultivaluedHashMap<>();
 
@@ -422,6 +445,7 @@ public abstract class AbstractSamlAuthenticationHandler implements SamlAuthentic
                 }
             }
         }
+
         if (deployment.getPrincipalNamePolicy() == SamlDeployment.PrincipalNamePolicy.FROM_ATTRIBUTE) {
             if (deployment.getPrincipalAttributeName() != null) {
                 String attribute = attributes.getFirst(deployment.getPrincipalAttributeName());
@@ -433,6 +457,15 @@ public abstract class AbstractSamlAuthenticationHandler implements SamlAuthentic
             }
         }
 
+        // use the configured role mappings provider to map roles if necessary.
+        if (deployment.getRoleMappingsProvider() != null)  {
+            roles = deployment.getRoleMappingsProvider().map(principalName, roles);
+        }
+
+        // roles should also be there as regular attributes
+        // this mainly required for elytron and its ABAC nature
+        attributes.put(DEFAULT_ROLE_ATTRIBUTE_NAME, new ArrayList<>(roles));
+
         AuthnStatementType authn = null;
         for (Object statement : assertion.getStatements()) {
             if (statement instanceof AuthnStatementType) {
@@ -442,12 +475,18 @@ public abstract class AbstractSamlAuthenticationHandler implements SamlAuthentic
         }
 
 
-        URI nameFormat = subjectNameID.getFormat();
+        URI nameFormat = subjectNameID == null ? null : subjectNameID.getFormat();
         String nameFormatString = nameFormat == null ? JBossSAMLURIConstants.NAMEID_FORMAT_UNSPECIFIED.get() : nameFormat.toString();
-        final SamlPrincipal principal = new SamlPrincipal(assertion, principalName, principalName, nameFormatString, attributes, friendlyAttributes);
-        String index = authn == null ? null : authn.getSessionIndex();
-        final String sessionIndex = index;
-        SamlSession account = new SamlSession(principal, roles, sessionIndex);
+        if (deployment.isKeepDOMAssertion() && assertionElement == null) {
+            // obtain the assertion from the response to add the DOM document to the principal
+            assertionElement = getAssertionFromResponseNoException(responseHolder);
+        }
+        final SamlPrincipal principal = new SamlPrincipal(assertion,
+                deployment.isKeepDOMAssertion()? getAssertionDocumentFromElement(assertionElement) : null,
+                principalName, principalName, nameFormatString, attributes, friendlyAttributes);
+        final String sessionIndex = authn == null ? null : authn.getSessionIndex();
+        final XMLGregorianCalendar sessionNotOnOrAfter = authn == null ? null : authn.getSessionNotOnOrAfter();
+        SamlSession account = new SamlSession(principal, roles, sessionIndex, sessionNotOnOrAfter);
         sessionStore.saveAccount(account);
         onCreateSession.onSessionCreated(account);
 
@@ -465,6 +504,20 @@ public abstract class AbstractSamlAuthenticationHandler implements SamlAuthentic
         return AuthOutcome.AUTHENTICATED;
     }
 
+    private AuthOutcome failed(AuthChallenge challenge) {
+        this.challenge = challenge;
+        return AuthOutcome.FAILED;
+    }
+
+    /**
+     * Used to indicate failure without returning a challenge back to caller.
+     * @param challenge
+     * @return
+     */
+    private AuthOutcome failedTerminal() {
+        return failed(null);
+    }
+
     private boolean isSuccessfulSamlResponse(ResponseType responseType) {
         return responseType != null
           && responseType.getStatus() != null
@@ -473,20 +526,57 @@ public abstract class AbstractSamlAuthenticationHandler implements SamlAuthentic
           && Objects.equals(responseType.getStatus().getStatusCode().getValue().toString(), JBossSAMLURIConstants.STATUS_SUCCESS.get());
     }
 
+    private Element getAssertionFromResponse(final SAMLDocumentHolder responseHolder) throws ConfigurationException, ProcessingException {
+        Element encryptedAssertion = DocumentUtil.getElement(responseHolder.getSamlDocument(), new QName(JBossSAMLConstants.ENCRYPTED_ASSERTION.get()));
+        if (encryptedAssertion != null) {
+            // encrypted assertion.
+            // We'll need to decrypt it first.
+            Document encryptedAssertionDocument = DocumentUtil.createDocument();
+            encryptedAssertionDocument.appendChild(encryptedAssertionDocument.importNode(encryptedAssertion, true));
+            return XMLEncryptionUtil.decryptElementInDocument(encryptedAssertionDocument, deployment.getDecryptionKey());
+        }
+        return DocumentUtil.getElement(responseHolder.getSamlDocument(), new QName(JBossSAMLConstants.ASSERTION.get()));
+    }
+
+    private Element getAssertionFromResponseNoException(final SAMLDocumentHolder responseHolder) {
+        try {
+            return getAssertionFromResponse(responseHolder);
+        } catch (ConfigurationException|ProcessingException e) {
+            log.warn("Cannot obtain DOM assertion element", e);
+            return null;
+        }
+    }
+
+    private Document getAssertionDocumentFromElement(final Element assertionElement) {
+        if (assertionElement == null) {
+            return null;
+        }
+        try {
+            Document assertionDoc = DocumentUtil.createDocument();
+            assertionDoc.adoptNode(assertionElement);
+            assertionDoc.appendChild(assertionElement);
+            return assertionDoc;
+        } catch (ConfigurationException e) {
+            log.warn("Cannot obtain DOM assertion document", e);
+            return null;
+        }
+    }
+
     private String getAttributeValue(Object attrValue) {
-        String value = null;
-        if (attrValue instanceof String) {
-            value = (String) attrValue;
+        if (attrValue == null) {
+            return "";
+        } else if (attrValue instanceof String) {
+            return (String) attrValue;
         } else if (attrValue instanceof Node) {
             Node roleNode = (Node) attrValue;
-            value = roleNode.getFirstChild().getNodeValue();
+            return roleNode.getFirstChild().getNodeValue();
         } else if (attrValue instanceof NameIDType) {
             NameIDType nameIdType = (NameIDType) attrValue;
-            value = nameIdType.getValue();
+            return nameIdType.getValue();
         } else {
             log.warn("Unable to extract unknown SAML assertion attribute value type: " + attrValue.getClass().getName());
         }
-        return value;
+        return null;
     }
 
     protected boolean isRole(AttributeType attribute) {
@@ -522,9 +612,15 @@ public abstract class AbstractSamlAuthenticationHandler implements SamlAuthentic
         return new AbstractInitiateLogin(deployment, sessionStore) {
             @Override
             protected void sendAuthnRequest(HttpFacade httpFacade, SAML2AuthnRequestBuilder authnRequestBuilder, BaseSAML2BindingBuilder binding) throws ProcessingException, ConfigurationException, IOException {
-                Document document = authnRequestBuilder.toDocument();
-                SamlDeployment.Binding samlBinding = deployment.getIDP().getSingleSignOnService().getRequestBinding();
-                SamlUtil.sendSaml(true, httpFacade, deployment.getIDP().getSingleSignOnService().getRequestBindingUrl(), binding, document, samlBinding);
+                if (isAutodetectedBearerOnly(httpFacade.getRequest())) {
+                    httpFacade.getResponse().setStatus(401);
+                    httpFacade.getResponse().end();
+                }
+                else {
+                    Document document = authnRequestBuilder.toDocument();
+                    SamlDeployment.Binding samlBinding = deployment.getIDP().getSingleSignOnService().getRequestBinding();
+                    SamlUtil.sendSaml(true, httpFacade, deployment.getIDP().getSingleSignOnService().getRequestBindingUrl(), binding, document, samlBinding);
+                }
             }
         };
     }
@@ -647,4 +743,55 @@ public abstract class AbstractSamlAuthenticationHandler implements SamlAuthentic
 
         return signature.verify(decodedSignature);
     }
+
+    protected boolean isAutodetectedBearerOnly(HttpFacade.Request request) {
+        if (!deployment.isAutodetectBearerOnly()) return false;
+
+        String headerValue = facade.getRequest().getHeader(GeneralConstants.HTTP_HEADER_X_REQUESTED_WITH);
+        if (headerValue != null && headerValue.equalsIgnoreCase("XMLHttpRequest")) {
+            return true;
+        }
+
+        headerValue = facade.getRequest().getHeader("Faces-Request");
+        if (headerValue != null && headerValue.startsWith("partial/")) {
+            return true;
+        }
+
+        headerValue = facade.getRequest().getHeader("SOAPAction");
+        if (headerValue != null) {
+            return true;
+        }
+
+        List<String> accepts = facade.getRequest().getHeaders("Accept");
+        if (accepts == null) accepts = Collections.emptyList();
+
+        for (String accept : accepts) {
+            if (accept.contains("text/html") || accept.contains("text/*") || accept.contains("*/*")) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static AuthChallenge createAuthChallenge(final int httpError, final SamlAuthenticationError error) {
+        return new AuthChallenge() {
+            @Override
+            public boolean challenge(HttpFacade exchange) {
+                exchange.getRequest().setError(error);
+                exchange.getResponse().sendError(httpError);
+                return true;
+            }
+
+            @Override
+            public int getResponseCode() {
+                return httpError;
+            }
+        };
+    }
+
+    private static AuthChallenge createAuthChallenge403(final StatusResponseType responseType) {
+        return createAuthChallenge(403, new SamlAuthenticationError(SamlAuthenticationError.Reason.ERROR_STATUS, responseType));
+    }
+
 }

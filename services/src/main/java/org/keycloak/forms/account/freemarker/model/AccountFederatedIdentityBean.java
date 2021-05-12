@@ -20,19 +20,18 @@ package org.keycloak.forms.account.freemarker.model;
 import org.keycloak.models.FederatedIdentityModel;
 import org.keycloak.models.IdentityProviderModel;
 import org.keycloak.models.KeycloakSession;
+import org.keycloak.models.OrderedModel;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.UserModel;
 import org.keycloak.models.utils.KeycloakModelUtils;
-import org.keycloak.services.resources.AccountService;
-import org.keycloak.services.Urls;
+import org.keycloak.services.resources.account.AccountFormService;
 
-import javax.ws.rs.core.UriBuilder;
 import java.net.URI;
-import java.util.Comparator;
-import java.util.LinkedList;
 import java.util.List;
-import java.util.Set;
-import java.util.TreeSet;
+import java.util.Objects;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * @author <a href="mailto:mposolda@redhat.com">Marek Posolda</a>
@@ -40,56 +39,41 @@ import java.util.TreeSet;
  */
 public class AccountFederatedIdentityBean {
 
+    private static OrderedModel.OrderedModelComparator<FederatedIdentityEntry> IDP_COMPARATOR_INSTANCE = new OrderedModel.OrderedModelComparator<>();
+
     private final List<FederatedIdentityEntry> identities;
     private final boolean removeLinkPossible;
     private final KeycloakSession session;
 
     public AccountFederatedIdentityBean(KeycloakSession session, RealmModel realm, UserModel user, URI baseUri, String stateChecker) {
         this.session = session;
-        URI accountIdentityUpdateUri = Urls.accountFederatedIdentityUpdate(baseUri, realm.getName());
 
-        List<IdentityProviderModel> identityProviders = realm.getIdentityProviders();
-        Set<FederatedIdentityModel> identities = session.users().getFederatedIdentities(user, realm);
+        AtomicInteger availableIdentities = new AtomicInteger(0);
+        this.identities = realm.getIdentityProvidersStream()
+                .filter(IdentityProviderModel::isEnabled)
+                .map(provider -> {
+                    String providerId = provider.getAlias();
 
-        Set<FederatedIdentityEntry> orderedSet = new TreeSet<>(IdentityProviderComparator.INSTANCE);       
-        int availableIdentities = 0;
-        if (identityProviders != null && !identityProviders.isEmpty()) {
-            for (IdentityProviderModel provider : identityProviders) {
-                String providerId = provider.getAlias();
+                    FederatedIdentityModel identity = getIdentity(session.users().getFederatedIdentitiesStream(realm, user), providerId);
 
-                FederatedIdentityModel identity = getIdentity(identities, providerId);
+                    if (identity != null) {
+                        availableIdentities.getAndIncrement();
+                    }
 
-                if (identity != null) {
-                    availableIdentities++;
-                }
-
-                String action = identity != null ? "remove" : "add";
-                String actionUrl = UriBuilder.fromUri(accountIdentityUpdateUri)
-                        .queryParam("action", action)
-                        .queryParam("provider_id", providerId)
-                        .queryParam("stateChecker", stateChecker)
-                        .build().toString();
-
-                String displayName = KeycloakModelUtils.getIdentityProviderDisplayName(session, provider);
-                FederatedIdentityEntry entry = new FederatedIdentityEntry(identity, displayName, provider.getAlias(), provider.getAlias(), actionUrl,
-                		  															provider.getConfig() != null ? provider.getConfig().get("guiOrder") : null);
-                orderedSet.add(entry);
-            }
-        }
-        
-        this.identities = new LinkedList<FederatedIdentityEntry>(orderedSet); 
+                    String displayName = KeycloakModelUtils.getIdentityProviderDisplayName(session, provider);
+                    return new FederatedIdentityEntry(identity, displayName, provider.getAlias(), provider.getAlias(),
+                            provider.getConfig() != null ? provider.getConfig().get("guiOrder") : null);
+                })
+                .sorted(IDP_COMPARATOR_INSTANCE)
+                .collect(Collectors.toList());
 
         // Removing last social provider is not possible if you don't have other possibility to authenticate
-        this.removeLinkPossible = availableIdentities > 1 || user.getFederationLink() != null || AccountService.isPasswordSet(session, realm, user);
+        this.removeLinkPossible = availableIdentities.get() > 1 || user.getFederationLink() != null || AccountFormService.isPasswordSet(session, realm, user);
     }
 
-    private FederatedIdentityModel getIdentity(Set<FederatedIdentityModel> identities, String providerId) {
-        for (FederatedIdentityModel link : identities) {
-            if (providerId.equals(link.getIdentityProvider())) {
-                return link;
-            }
-        }
-        return null;
+    private FederatedIdentityModel getIdentity(Stream<FederatedIdentityModel> identities, String providerId) {
+        return identities.filter(federatedIdentityModel -> Objects.equals(federatedIdentityModel.getIdentityProvider(), providerId))
+                .findFirst().orElse(null);
     }
 
     public List<FederatedIdentityEntry> getIdentities() {
@@ -100,22 +84,20 @@ public class AccountFederatedIdentityBean {
         return removeLinkPossible;
     }
 
-    public class FederatedIdentityEntry {
+    public static class FederatedIdentityEntry implements OrderedModel {
 
         private FederatedIdentityModel federatedIdentityModel;
         private final String providerId;
 		private final String providerName;
-        private final String actionUrl;
         private final String guiOrder;
         private final String displayName;
 
         public FederatedIdentityEntry(FederatedIdentityModel federatedIdentityModel, String displayName, String providerId,
-                                      String providerName, String actionUrl, String guiOrder) {
+                                      String providerName, String guiOrder) {
             this.federatedIdentityModel = federatedIdentityModel;
             this.displayName = displayName;
             this.providerId = providerId;
             this.providerName = providerName;
-            this.actionUrl = actionUrl;
             this.guiOrder = guiOrder;
         }
 
@@ -139,10 +121,7 @@ public class AccountFederatedIdentityBean {
             return federatedIdentityModel != null;
         }
 
-        public String getActionUrl() {
-            return actionUrl;
-        }
-        
+        @Override
         public String getGuiOrder() {
             return guiOrder;
         }
@@ -152,38 +131,5 @@ public class AccountFederatedIdentityBean {
         }
 
     }
-    
-	public static class IdentityProviderComparator implements Comparator<FederatedIdentityEntry> {
 
-		public static IdentityProviderComparator INSTANCE = new IdentityProviderComparator();
-
-		private IdentityProviderComparator() {
-
-		}
-
-		@Override
-		public int compare(FederatedIdentityEntry o1, FederatedIdentityEntry o2) {
-
-			int o1order = parseOrder(o1);
-			int o2order = parseOrder(o2);
-
-			if (o1order > o2order)
-				return 1;
-			else if (o1order < o2order)
-				return -1;
-
-			return 1;
-		}
-
-		private int parseOrder(FederatedIdentityEntry ip) {
-			if (ip != null && ip.getGuiOrder() != null) {
-				try {
-					return Integer.parseInt(ip.getGuiOrder());
-				} catch (NumberFormatException e) {
-					// ignore it and use defaulr
-				}
-			}
-			return 10000;
-		}
-	}
 }

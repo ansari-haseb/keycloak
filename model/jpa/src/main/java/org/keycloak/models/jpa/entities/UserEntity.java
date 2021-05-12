@@ -17,6 +17,10 @@
 
 package org.keycloak.models.jpa.entities;
 
+import org.hibernate.annotations.BatchSize;
+import org.hibernate.annotations.Fetch;
+import org.hibernate.annotations.FetchMode;
+import org.hibernate.annotations.Nationalized;
 import org.keycloak.models.utils.KeycloakModelUtils;
 
 import javax.persistence.Access;
@@ -30,8 +34,8 @@ import javax.persistence.NamedQuery;
 import javax.persistence.OneToMany;
 import javax.persistence.Table;
 import javax.persistence.UniqueConstraint;
-import java.util.ArrayList;
 import java.util.Collection;
+import java.util.LinkedList;
 
 /**
  * @author <a href="mailto:bill@burkecentral.com">Bill Burke</a>
@@ -40,15 +44,17 @@ import java.util.Collection;
 @NamedQueries({
         @NamedQuery(name="getAllUsersByRealm", query="select u from UserEntity u where u.realmId = :realmId order by u.username"),
         @NamedQuery(name="getAllUsersByRealmExcludeServiceAccount", query="select u from UserEntity u where u.realmId = :realmId and (u.serviceAccountClientLink is null) order by u.username"),
-        @NamedQuery(name="searchForUser", query="select u from UserEntity u where u.realmId = :realmId and (u.serviceAccountClientLink is null) and " +
-                "( lower(u.username) like :search or lower(concat(u.firstName, ' ', u.lastName)) like :search or u.email like :search ) order by u.username"),
-        @NamedQuery(name="getRealmUserById", query="select u from UserEntity u where u.id = :id and u.realmId = :realmId"),
+        @NamedQuery(name="searchForUserCount", query="select count(u) from UserEntity u where u.realmId = :realmId and (u.serviceAccountClientLink is null) and " +
+                "( lower(u.username) like :search or lower(concat(coalesce(u.firstName, ''), ' ', coalesce(u.lastName, ''))) like :search or u.email like :search )"),
         @NamedQuery(name="getRealmUserByUsername", query="select u from UserEntity u where u.username = :username and u.realmId = :realmId"),
         @NamedQuery(name="getRealmUserByEmail", query="select u from UserEntity u where u.email = :email and u.realmId = :realmId"),
         @NamedQuery(name="getRealmUserByLastName", query="select u from UserEntity u where u.lastName = :lastName and u.realmId = :realmId"),
         @NamedQuery(name="getRealmUserByFirstLastName", query="select u from UserEntity u where u.firstName = :first and u.lastName = :last and u.realmId = :realmId"),
         @NamedQuery(name="getRealmUserByServiceAccount", query="select u from UserEntity u where u.serviceAccountClientLink = :clientInternalId and u.realmId = :realmId"),
         @NamedQuery(name="getRealmUserCount", query="select count(u) from UserEntity u where u.realmId = :realmId"),
+        @NamedQuery(name="getRealmUserCountExcludeServiceAccount", query="select count(u) from UserEntity u where u.realmId = :realmId and (u.serviceAccountClientLink is null)"),
+        @NamedQuery(name="getRealmUsersByAttributeNameAndValue", query="select u from UserEntity u join u.attributes attr " +
+                "where u.realmId = :realmId and attr.name = :name and attr.value = :value"),
         @NamedQuery(name="deleteUsersByRealm", query="delete from UserEntity u where u.realmId = :realmId"),
         @NamedQuery(name="deleteUsersByRealmAndLink", query="delete from UserEntity u where u.realmId = :realmId and u.federationLink=:link"),
         @NamedQuery(name="unlinkUsers", query="update UserEntity u set u.federationLink = null where u.realmId = :realmId and u.federationLink=:link")
@@ -64,12 +70,15 @@ public class UserEntity {
     @Access(AccessType.PROPERTY) // we do this because relationships often fetch id, but not entity.  This avoids an extra SQL
     protected String id;
 
+    @Nationalized
     @Column(name = "USERNAME")
     protected String username;
+    @Nationalized
     @Column(name = "FIRST_NAME")
     protected String firstName;
     @Column(name = "CREATED_TIMESTAMP")
     protected Long createdTimestamp;
+    @Nationalized
     @Column(name = "LAST_NAME")
     protected String lastName;
     @Column(name = "EMAIL")
@@ -87,19 +96,33 @@ public class UserEntity {
     protected String realmId;
 
     @OneToMany(cascade = CascadeType.REMOVE, orphanRemoval = true, mappedBy="user")
-    protected Collection<UserAttributeEntity> attributes = new ArrayList<UserAttributeEntity>();
+    @Fetch(FetchMode.SELECT)
+    @BatchSize(size = 20)
+    protected Collection<UserAttributeEntity> attributes;
 
     @OneToMany(cascade = CascadeType.REMOVE, orphanRemoval = true, mappedBy="user")
-    protected Collection<UserRequiredActionEntity> requiredActions = new ArrayList<UserRequiredActionEntity>();
+    @Fetch(FetchMode.SELECT)
+    @BatchSize(size = 20)
+    protected Collection<UserRequiredActionEntity> requiredActions;
 
     @OneToMany(cascade = CascadeType.REMOVE, orphanRemoval = true, mappedBy="user")
-    protected Collection<CredentialEntity> credentials = new ArrayList<CredentialEntity>();
+    @Fetch(FetchMode.SELECT)
+    @BatchSize(size = 20)
+    protected Collection<CredentialEntity> credentials;
+
+    @OneToMany(cascade = CascadeType.REMOVE, orphanRemoval = true, mappedBy="user")
+    @Fetch(FetchMode.SELECT)
+    @BatchSize(size = 20)
+    protected Collection<FederatedIdentityEntity> federatedIdentities;
 
     @Column(name="FEDERATION_LINK")
     protected String federationLink;
 
     @Column(name="SERVICE_ACCOUNT_CLIENT_LINK")
     protected String serviceAccountClientLink;
+
+    @Column(name="NOT_BEFORE")
+    protected int notBefore;
 
     public String getId() {
         return id;
@@ -175,6 +198,9 @@ public class UserEntity {
     }
 
     public Collection<UserAttributeEntity> getAttributes() {
+        if (attributes == null) {
+            attributes = new LinkedList<>();
+        }
         return attributes;
     }
 
@@ -183,6 +209,9 @@ public class UserEntity {
     }
 
     public Collection<UserRequiredActionEntity> getRequiredActions() {
+        if (requiredActions == null) {
+            requiredActions = new LinkedList<>();
+        }
         return requiredActions;
     }
 
@@ -199,11 +228,25 @@ public class UserEntity {
     }
 
     public Collection<CredentialEntity> getCredentials() {
+        if (credentials == null) {
+            credentials = new LinkedList<>();
+        }
         return credentials;
     }
 
     public void setCredentials(Collection<CredentialEntity> credentials) {
         this.credentials = credentials;
+    }
+
+    public Collection<FederatedIdentityEntity> getFederatedIdentities() {
+        if (federatedIdentities == null) {
+            federatedIdentities = new LinkedList<>();
+        }
+        return federatedIdentities;
+    }
+
+    public void setFederatedIdentities(Collection<FederatedIdentityEntity> federatedIdentities) {
+        this.federatedIdentities = federatedIdentities;
     }
 
     public String getFederationLink() {
@@ -220,6 +263,14 @@ public class UserEntity {
 
     public void setServiceAccountClientLink(String serviceAccountClientLink) {
         this.serviceAccountClientLink = serviceAccountClientLink;
+    }
+
+    public int getNotBefore() {
+        return notBefore;
+    }
+
+    public void setNotBefore(int notBefore) {
+        this.notBefore = notBefore;
     }
 
     @Override

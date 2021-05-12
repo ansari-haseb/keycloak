@@ -18,19 +18,21 @@
 
 package org.keycloak.authorization.store;
 
+import java.util.HashMap;
+import java.util.Map;
+
 import org.keycloak.authorization.store.syncronization.ClientApplicationSynchronizer;
+import org.keycloak.authorization.store.syncronization.GroupSynchronizer;
 import org.keycloak.authorization.store.syncronization.RealmSynchronizer;
 import org.keycloak.authorization.store.syncronization.Synchronizer;
 import org.keycloak.authorization.store.syncronization.UserSynchronizer;
+import org.keycloak.models.GroupModel;
 import org.keycloak.models.KeycloakSessionFactory;
-import org.keycloak.models.RealmModel.ClientRemovedEvent;
+import org.keycloak.models.ClientModel.ClientRemovedEvent;
 import org.keycloak.models.RealmModel.RealmRemovedEvent;
 import org.keycloak.models.UserModel.UserRemovedEvent;
 import org.keycloak.provider.ProviderEvent;
 import org.keycloak.provider.ProviderFactory;
-
-import java.util.HashMap;
-import java.util.Map;
 
 /**
  * @author <a href="mailto:psilva@redhat.com">Pedro Igor</a>
@@ -48,6 +50,7 @@ public interface AuthorizationStoreFactory extends ProviderFactory<StoreFactory>
         synchronizers.put(ClientRemovedEvent.class, new ClientApplicationSynchronizer());
         synchronizers.put(RealmRemovedEvent.class, new RealmSynchronizer());
         synchronizers.put(UserRemovedEvent.class, new UserSynchronizer());
+        synchronizers.put(GroupModel.GroupRemovedEvent.class, new GroupSynchronizer());
 
         factory.register(event -> {
             try {

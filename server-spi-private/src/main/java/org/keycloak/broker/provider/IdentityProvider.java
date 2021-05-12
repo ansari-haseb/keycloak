@@ -17,7 +17,6 @@
 package org.keycloak.broker.provider;
 
 import org.keycloak.events.EventBuilder;
-import org.keycloak.models.ClientSessionModel;
 import org.keycloak.models.FederatedIdentityModel;
 import org.keycloak.models.IdentityProviderModel;
 import org.keycloak.models.KeycloakSession;
@@ -25,6 +24,7 @@ import org.keycloak.models.RealmModel;
 import org.keycloak.models.UserModel;
 import org.keycloak.models.UserSessionModel;
 import org.keycloak.provider.Provider;
+import org.keycloak.sessions.AuthenticationSessionModel;
 
 import javax.ws.rs.core.Response;
 import javax.ws.rs.core.UriInfo;
@@ -34,24 +34,48 @@ import javax.ws.rs.core.UriInfo;
  */
 public interface IdentityProvider<C extends IdentityProviderModel> extends Provider {
 
+    String EXTERNAL_IDENTITY_PROVIDER = "EXTERNAL_IDENTITY_PROVIDER";
+    String FEDERATED_ACCESS_TOKEN = "FEDERATED_ACCESS_TOKEN";
+
     interface AuthenticationCallback {
+
+        /**
+         * Common method to return current authenticationSession and verify if it is not expired
+         *
+         * @param encodedCode
+         * @return see description
+         */
+        AuthenticationSessionModel getAndVerifyAuthenticationSession(String encodedCode);
+
         /**
          * This method should be called by provider after the JAXRS callback endpoint has finished authentication
-         * with the remote IDP
+         * with the remote IDP. There is an assumption that authenticationSession is set in the context when this method is called
          *
          * @param context
-         * @return
+         * @return see description
          */
         Response authenticated(BrokeredIdentityContext context);
 
-        Response cancelled(String code);
+        /**
+         * Called when user cancelled authentication on the IDP side - for example user didn't approve consent page on the IDP side.
+         * Assumption is that authenticationSession is set in the {@link org.keycloak.models.KeycloakContext} when this method is called
+         *
+         * @return see description
+         */
+        Response cancelled();
 
-        Response error(String code, String message);
+        /**
+         * Called when error happened on the IDP side.
+         * Assumption is that authenticationSession is set in the {@link org.keycloak.models.KeycloakContext} when this method is called
+         *
+         * @return see description
+         */
+        Response error(String message);
     }
 
 
     void preprocessFederatedIdentity(KeycloakSession session, RealmModel realm, BrokeredIdentityContext context);
-    void attachUserSession(UserSessionModel userSession, ClientSessionModel clientSession, BrokeredIdentityContext context);
+    void authenticationFinished(AuthenticationSessionModel authSession, BrokeredIdentityContext context);
     void importNewUser(KeycloakSession session, RealmModel realm, UserModel user, BrokeredIdentityContext context);
     void updateBrokeredUser(KeycloakSession session, RealmModel realm, UserModel user, BrokeredIdentityContext context);
 

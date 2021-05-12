@@ -21,6 +21,8 @@ import org.keycloak.representations.idm.RealmRepresentation;
 import org.keycloak.representations.idm.UserRepresentation;
 import org.keycloak.saml.processing.api.saml.v2.request.SAML2Request;
 import org.keycloak.testsuite.util.SamlClient;
+import org.keycloak.testsuite.util.saml.LoginBuilder;
+import org.keycloak.testsuite.utils.io.IOUtil;
 
 import java.io.IOException;
 import java.net.URI;
@@ -42,7 +44,6 @@ import org.junit.Test;
 import org.w3c.dom.Document;
 
 import static org.keycloak.testsuite.util.SamlClient.*;
-import static org.keycloak.testsuite.util.IOUtil.loadRealm;
 
 /**
  *
@@ -90,7 +91,7 @@ public class ConcurrentAuthnRequestTest extends AbstractSamlTest {
             String loginPageText = EntityUtils.toString(response.getEntity(), "UTF-8");
             response.close();
 
-            HttpUriRequest loginRequest = handleLoginPage(user, loginPageText);
+            HttpUriRequest loginRequest = LoginBuilder.handleLoginPage(user, loginPageText);
 
             strategy.setRedirectable(false);
             response = client.execute(loginRequest, context);
@@ -107,9 +108,10 @@ public class ConcurrentAuthnRequestTest extends AbstractSamlTest {
 
     @Override
     public void addTestRealms(List<RealmRepresentation> testRealms) {
-        testRealms.add(loadRealm("/adapter-test/keycloak-saml/testsaml.json"));
+        testRealms.add(IOUtil.loadRealm("/adapter-test/keycloak-saml/testsaml.json"));
     }
 
+    @Override
     public AuthnRequestType createLoginRequestDocument(String issuer, String assertionConsumerURL, String realmName) {
         return SamlClient.createLoginRequestDocument(issuer, assertionConsumerURL, getAuthServerSamlEndpoint(realmName));
     }

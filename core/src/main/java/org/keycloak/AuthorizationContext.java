@@ -22,9 +22,9 @@ import org.keycloak.representations.AccessToken.Authorization;
 import org.keycloak.representations.adapters.config.PolicyEnforcerConfig.PathConfig;
 import org.keycloak.representations.idm.authorization.Permission;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 
 /**
  * @author <a href="mailto:psilva@redhat.com">Pedro Igor</a>
@@ -32,12 +32,12 @@ import java.util.Map;
 public class AuthorizationContext {
 
     private final AccessToken authzToken;
-    private final Map<String, PathConfig> paths;
+    private final PathConfig current;
     private boolean granted;
 
-    public AuthorizationContext(AccessToken authzToken, Map<String, PathConfig> paths) {
+    public AuthorizationContext(AccessToken authzToken, PathConfig current) {
         this.authzToken = authzToken;
-        this.paths = paths;
+        this.current = current;
         this.granted = true;
     }
 
@@ -58,14 +58,20 @@ public class AuthorizationContext {
         }
 
         for (Permission permission : authorization.getPermissions()) {
-            for (PathConfig pathHolder : this.paths.values()) {
-                if (pathHolder.getName().equals(resourceName)) {
-                    if (pathHolder.getId().equals(permission.getResourceSetId())) {
-                        if (permission.getScopes().contains(scopeName)) {
-                            return true;
-                        }
-                    }
+            if (resourceName.equalsIgnoreCase(permission.getResourceName()) || resourceName.equalsIgnoreCase(permission.getResourceId())) {
+                if (scopeName == null) {
+                    return true;
                 }
+
+                if (permission.getScopes().contains(scopeName)) {
+                    return true;
+                }
+            }
+        }
+
+        if (current != null && scopeName == null) {
+            if (current.getName().equals(resourceName)) {
+                return true;
             }
         }
 
@@ -73,27 +79,7 @@ public class AuthorizationContext {
     }
 
     public boolean hasResourcePermission(String resourceName) {
-        if (this.authzToken == null) {
-            return false;
-        }
-
-        Authorization authorization = this.authzToken.getAuthorization();
-
-        if (authorization == null) {
-            return false;
-        }
-
-        for (Permission permission : authorization.getPermissions()) {
-            for (PathConfig pathHolder : this.paths.values()) {
-                if (pathHolder.getName().equals(resourceName)) {
-                    if (pathHolder.getId().equals(permission.getResourceSetId())) {
-                        return true;
-                    }
-                }
-            }
-        }
-
-        return false;
+        return hasPermission(resourceName, null);
     }
 
     public boolean hasScopePermission(String scopeName) {
@@ -127,7 +113,7 @@ public class AuthorizationContext {
             return Collections.emptyList();
         }
 
-        return Collections.unmodifiableList(authorization.getPermissions());
+        return Collections.unmodifiableList(new ArrayList<>(authorization.getPermissions()));
     }
 
     public boolean isGranted() {

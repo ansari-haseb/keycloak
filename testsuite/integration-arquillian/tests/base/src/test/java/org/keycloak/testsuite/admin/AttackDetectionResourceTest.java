@@ -31,11 +31,14 @@ import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
+import org.keycloak.testsuite.arquillian.annotation.AuthServerContainerExclude;
+import org.keycloak.testsuite.arquillian.annotation.AuthServerContainerExclude.AuthServer;
 
 /**
  *
  * @author <a href="mailto:sthorger@redhat.com">Stian Thorgersen</a>
  */
+@AuthServerContainerExclude(AuthServer.REMOTE)
 public class AttackDetectionResourceTest extends AbstractAdminTest {
 
     @ArquillianResource
@@ -63,7 +66,7 @@ public class AttackDetectionResourceTest extends AbstractAdminTest {
         oauthClient.doLogin("test-user2", "invalid");
         oauthClient.doLogin("nosuchuser", "invalid");
 
-        assertBruteForce(detection.bruteForceUserStatus(findUser("test-user@localhost").getId()), 3, true, true);
+        assertBruteForce(detection.bruteForceUserStatus(findUser("test-user@localhost").getId()), 2, true, true);
         assertBruteForce(detection.bruteForceUserStatus(findUser("test-user2").getId()), 2, true, true);
         assertBruteForce(detection.bruteForceUserStatus("nosuchuser"), 0, false, false);
 

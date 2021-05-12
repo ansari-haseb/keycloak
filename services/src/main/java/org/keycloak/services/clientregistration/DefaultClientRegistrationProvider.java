@@ -17,6 +17,7 @@
 
 package org.keycloak.services.clientregistration;
 
+import org.keycloak.models.ClientModel;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.representations.idm.ClientRepresentation;
 
@@ -47,6 +48,7 @@ public class DefaultClientRegistrationProvider extends AbstractClientRegistratio
     public Response createDefault(ClientRepresentation client) {
         DefaultClientRegistrationContext context = new DefaultClientRegistrationContext(session, client, this);
         client = create(context);
+        validateClient(client, true);
         URI uri = session.getContext().getUri().getAbsolutePathBuilder().path(client.getClientId()).build();
         return Response.created(uri).entity(client).build();
     }
@@ -55,8 +57,9 @@ public class DefaultClientRegistrationProvider extends AbstractClientRegistratio
     @Path("{clientId}")
     @Produces(MediaType.APPLICATION_JSON)
     public Response getDefault(@PathParam("clientId") String clientId) {
-        ClientRepresentation client = get(clientId);
-        return Response.ok(client).build();
+        ClientModel client = session.getContext().getRealm().getClientByClientId(clientId);
+        ClientRepresentation clientRepresentation = get(client);
+        return Response.ok(clientRepresentation).build();
     }
 
     @PUT
@@ -66,6 +69,7 @@ public class DefaultClientRegistrationProvider extends AbstractClientRegistratio
     public Response updateDefault(@PathParam("clientId") String clientId, ClientRepresentation client) {
         DefaultClientRegistrationContext context = new DefaultClientRegistrationContext(session, client, this);
         client = update(clientId, context);
+        validateClient(client, false);
         return Response.ok(client).build();
     }
 

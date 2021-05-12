@@ -19,13 +19,11 @@ package org.keycloak.storage.ldap.mappers.msad;
 
 import org.jboss.logging.Logger;
 import org.keycloak.component.ComponentModel;
-import org.keycloak.credential.CredentialInput;
 import org.keycloak.models.LDAPConstants;
 import org.keycloak.models.ModelException;
 import org.keycloak.models.RealmModel;
+import org.keycloak.models.UserCredentialModel;
 import org.keycloak.models.UserModel;
-import org.keycloak.models.credential.PasswordUserCredentialModel;
-import org.keycloak.models.utils.UserModelDelegate;
 import org.keycloak.storage.UserStorageProvider;
 import org.keycloak.storage.ldap.LDAPStorageProvider;
 import org.keycloak.storage.ldap.idm.model.LDAPObject;
@@ -36,10 +34,10 @@ import org.keycloak.storage.ldap.mappers.PasswordUpdateCallback;
 import org.keycloak.storage.ldap.mappers.TxAwareLDAPUserModelDelegate;
 
 import javax.naming.AuthenticationException;
-import java.util.HashSet;
-import java.util.Set;
+import java.util.Objects;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Stream;
 
 /**
  * Mapper specific to MSAD. It's able to read the userAccountControl and pwdLastSet attributes and set actions in Keycloak based on that.
@@ -75,7 +73,7 @@ public class MSADUserAccountControlStorageMapper extends AbstractLDAPStorageMapp
     }
 
     @Override
-    public LDAPOperationDecorator beforePasswordUpdate(UserModel user, LDAPObject ldapUser, PasswordUserCredentialModel password) {
+    public LDAPOperationDecorator beforePasswordUpdate(UserModel user, LDAPObject ldapUser, UserCredentialModel password) {
         // Not apply policies if password is reset by admin (not by user himself)
         if (password.isAdminRequest()) {
             return null;
@@ -86,7 +84,7 @@ public class MSADUserAccountControlStorageMapper extends AbstractLDAPStorageMapp
     }
 
     @Override
-    public void passwordUpdated(UserModel user, LDAPObject ldapUser, PasswordUserCredentialModel password) {
+    public void passwordUpdated(UserModel user, LDAPObject ldapUser, UserCredentialModel password) {
         logger.debugf("Going to update userAccountControl for ldap user '%s' after successful password update", ldapUser.getDn().toString());
 
         // Normally it's read-only
@@ -106,7 +104,7 @@ public class MSADUserAccountControlStorageMapper extends AbstractLDAPStorageMapp
     }
 
     @Override
-    public void passwordUpdateFailed(UserModel user, LDAPObject ldapUser, PasswordUserCredentialModel password, ModelException exception) {
+    public void passwordUpdateFailed(UserModel user, LDAPObject ldapUser, UserCredentialModel password, ModelException exception) {
         throw processFailedPasswordUpdateException(exception);
     }
 
@@ -143,7 +141,7 @@ public class MSADUserAccountControlStorageMapper extends AbstractLDAPStorageMapp
         if (ldapProvider.getEditMode() == UserStorageProvider.EditMode.WRITABLE) {
             if (errorCode.equals("532") || errorCode.equals("773")) {
                 // User needs to change his MSAD password. Allow him to login, but add UPDATE_PASSWORD required action
-                if (!user.getRequiredActions().contains(UserModel.RequiredAction.UPDATE_PASSWORD.name())) {
+                if (user.getRequiredActionsStream().noneMatch(action -> Objects.equals(action, UserModel.RequiredAction.UPDATE_PASSWORD.name()))) {
                     user.addRequiredAction(UserModel.RequiredAction.UPDATE_PASSWORD);
                 }
                 return true;
@@ -243,7 +241,7 @@ public class MSADUserAccountControlStorageMapper extends AbstractLDAPStorageMapp
                     control.add(UserAccountControl.ACCOUNTDISABLE);
                 }
 
-                ensureTransactionStarted();
+                markUpdatedAttributeInTransaction(LDAPConstants.ENABLED);
 
                 updateUserAccountControl(false, ldapUser, control);
             }
@@ -268,7 +266,7 @@ public class MSADUserAccountControlStorageMapper extends AbstractLDAPStorageMapp
 
                 ldapUser.setSingleAttribute(LDAPConstants.PWD_LAST_SET, "0");
 
-                ensureTransactionStarted();
+                markUpdatedRequiredActionInTransaction(action);
             }
         }
 
@@ -295,24 +293,20 @@ public class MSADUserAccountControlStorageMapper extends AbstractLDAPStorageMapp
 
                     ldapUser.setSingleAttribute(LDAPConstants.PWD_LAST_SET, "-1");
 
-                    ensureTransactionStarted();
+                    markUpdatedRequiredActionInTransaction(action);
                 }
             }
         }
 
         @Override
-        public Set<String> getRequiredActions() {
-            Set<String> requiredActions = super.getRequiredActions();
-
+        public Stream<String> getRequiredActionsStream() {
             if (ldapProvider.getEditMode() == UserStorageProvider.EditMode.WRITABLE) {
                 if (getPwdLastSet() == 0 || getUserAccountControl(ldapUser).has(UserAccountControl.PASSWORD_EXPIRED)) {
-                    requiredActions = new HashSet<>(requiredActions);
-                    requiredActions.add(RequiredAction.UPDATE_PASSWORD.toString());
-                    return requiredActions;
+                    return Stream.concat(super.getRequiredActionsStream(), Stream.of(RequiredAction.UPDATE_PASSWORD.toString()))
+                            .distinct();
                 }
             }
-
-            return requiredActions;
+            return super.getRequiredActionsStream();
         }
 
         protected long getPwdLastSet() {

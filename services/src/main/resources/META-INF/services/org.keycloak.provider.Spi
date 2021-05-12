@@ -19,4 +19,10 @@ org.keycloak.exportimport.ClientDescriptionConverterSpi
 org.keycloak.wellknown.WellKnownSpi
 org.keycloak.services.clientregistration.ClientRegistrationSpi
 org.keycloak.services.clientregistration.policy.ClientRegistrationPolicySpi
-
+org.keycloak.authentication.actiontoken.ActionTokenHandlerSpi
+org.keycloak.services.x509.X509ClientCertificateLookupSpi
+org.keycloak.protocol.oidc.ext.OIDCExtSPI
+org.keycloak.protocol.saml.preprocessor.SamlAuthenticationPreprocessorSpi
+org.keycloak.encoding.ResourceEncodingSpi
+org.keycloak.protocol.oidc.grants.ciba.channel.AuthenticationChannelSpi
+org.keycloak.protocol.oidc.grants.ciba.resolvers.CIBALoginUserResolverSpi

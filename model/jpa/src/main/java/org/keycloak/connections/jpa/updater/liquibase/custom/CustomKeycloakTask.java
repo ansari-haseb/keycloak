@@ -26,6 +26,7 @@ import liquibase.exception.ValidationErrors;
 import liquibase.resource.ResourceAccessor;
 import liquibase.snapshot.SnapshotGeneratorFactory;
 import liquibase.statement.SqlStatement;
+import liquibase.structure.core.Schema;
 import liquibase.structure.core.Table;
 import org.jboss.logging.Logger;
 import org.keycloak.connections.jpa.updater.liquibase.LiquibaseJpaUpdaterProvider;
@@ -35,6 +36,7 @@ import org.keycloak.services.DefaultKeycloakSessionFactory;
 
 import java.sql.Connection;
 import java.sql.ResultSet;
+import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -106,11 +108,8 @@ public abstract class CustomKeycloakTask implements CustomSqlChange {
         try {
             String correctedTableName = database.correctObjectName("REALM", Table.class);
             if (SnapshotGeneratorFactory.getInstance().has(new Table().setName(correctedTableName), database)) {
-                ResultSet resultSet = connection.createStatement().executeQuery("SELECT ID FROM " + getTableName(correctedTableName));
-                try {
+                try (Statement st = connection.createStatement(); ResultSet resultSet = st.executeQuery("SELECT ID FROM " + getTableName(correctedTableName))) {
                     return (resultSet.next());
-                } finally {
-                    resultSet.close();
                 }
             } else {
                 return false;
@@ -129,6 +128,7 @@ public abstract class CustomKeycloakTask implements CustomSqlChange {
 
     // get Table name for sql selects
     protected String getTableName(String tableName) {
-       return LiquibaseJpaUpdaterProvider.getTable(tableName, database.getDefaultSchemaName());
+        String correctedSchemaName = database.escapeObjectName(database.getDefaultSchemaName(), Schema.class);
+        return LiquibaseJpaUpdaterProvider.getTable(tableName, correctedSchemaName);
     }
 }

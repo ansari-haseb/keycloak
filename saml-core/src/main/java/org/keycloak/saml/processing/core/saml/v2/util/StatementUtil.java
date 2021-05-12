@@ -64,7 +64,7 @@ public class StatementUtil {
         AuthnContextType authnContext = new AuthnContextType();
         AuthnContextClassRefType authnContextClassRef = new AuthnContextClassRefType(URI.create(authnContextClassRefValue));
 
-        AuthnContextType.AuthnContextTypeSequence sequence = (authnContext).new AuthnContextTypeSequence();
+        AuthnContextType.AuthnContextTypeSequence sequence = new AuthnContextType.AuthnContextTypeSequence();
         sequence.setClassRef(authnContextClassRef);
         authnContext.setSequence(sequence);
 
@@ -192,10 +192,10 @@ public class StatementUtil {
     }
 
     public static Map<String, Object> asMap(Set<AttributeStatementType> attributeStatementTypes) {
-        Map<String, Object> attrMap = new HashMap<String, Object>();
+        Map<String, Object> attrMap = new HashMap<>();
 
         if (attributeStatementTypes != null && !attributeStatementTypes.isEmpty()) {
-            attrMap = new HashMap<String, Object>();
+            attrMap = new HashMap<>();
 
             for (StatementAbstractType statement : attributeStatementTypes) {
                 if (statement instanceof AttributeStatementType) {

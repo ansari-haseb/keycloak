@@ -18,12 +18,15 @@
 package org.keycloak.authentication.authenticators.browser;
 
 import org.keycloak.Config;
+import org.keycloak.OAuth2Constants;
 import org.keycloak.authentication.Authenticator;
 import org.keycloak.authentication.AuthenticatorFactory;
+import org.keycloak.authentication.DisplayTypeAuthenticatorFactory;
+import org.keycloak.authentication.authenticators.console.ConsoleUsernamePasswordAuthenticator;
 import org.keycloak.models.AuthenticationExecutionModel;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.KeycloakSessionFactory;
-import org.keycloak.models.UserCredentialModel;
+import org.keycloak.models.credential.PasswordCredentialModel;
 import org.keycloak.provider.ProviderConfigProperty;
 
 import java.util.List;
@@ -32,7 +35,7 @@ import java.util.List;
  * @author <a href="mailto:bill@burkecentral.com">Bill Burke</a>
  * @version $Revision: 1 $
  */
-public class UsernamePasswordFormFactory implements AuthenticatorFactory {
+public class UsernamePasswordFormFactory implements AuthenticatorFactory, DisplayTypeAuthenticatorFactory {
 
     public static final String PROVIDER_ID = "auth-username-password-form";
     public static final UsernamePasswordForm SINGLETON = new UsernamePasswordForm();
@@ -40,6 +43,13 @@ public class UsernamePasswordFormFactory implements AuthenticatorFactory {
     @Override
     public Authenticator create(KeycloakSession session) {
         return SINGLETON;
+    }
+
+    @Override
+    public Authenticator createDisplay(KeycloakSession session, String displayType) {
+        if (displayType == null) return SINGLETON;
+        if (!OAuth2Constants.DISPLAY_CONSOLE.equalsIgnoreCase(displayType)) return null;
+        return ConsoleUsernamePasswordAuthenticator.SINGLETON;
     }
 
     @Override
@@ -64,7 +74,7 @@ public class UsernamePasswordFormFactory implements AuthenticatorFactory {
 
     @Override
     public String getReferenceCategory() {
-        return UserCredentialModel.PASSWORD;
+        return PasswordCredentialModel.TYPE;
     }
 
     @Override

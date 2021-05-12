@@ -45,15 +45,30 @@ public class OIDCHybridResponseTypeCodeTokenTest extends AbstractOIDCResponseTyp
     }
 
 
-    protected List<IDToken> retrieveIDTokens(EventRepresentation loginEvent) {
+    @Override
+    protected boolean isFragment() {
+        return true;
+    }
+
+
+    protected List<IDToken> testAuthzResponseAndRetrieveIDTokens(OAuthClient.AuthorizationEndpointResponse authzResponse, EventRepresentation loginEvent) {
         Assert.assertEquals(OIDCResponseType.CODE + " " + OIDCResponseType.TOKEN, loginEvent.getDetails().get(Details.RESPONSE_TYPE));
 
-        OAuthClient.AuthorizationEndpointResponse authzResponse = new OAuthClient.AuthorizationEndpointResponse(oauth, true);
         Assert.assertNotNull(authzResponse.getAccessToken());
         Assert.assertNull(authzResponse.getIdToken());
 
         // IDToken exchanged for the code
-        IDToken idToken2 = sendTokenRequestAndGetIDToken(loginEvent);
+        OAuthClient.AccessTokenResponse authzResponse2 = sendTokenRequestAndGetResponse(loginEvent);
+        IDToken idToken2 = oauth.verifyIDToken(authzResponse2.getIdToken());
+
+        // Validate "at_hash"
+        assertValidAccessTokenHash(idToken2.getAccessTokenHash(), authzResponse2.getAccessToken());
+
+        // Validate if token_type is present
+        Assert.assertNotNull(authzResponse.getTokenType());
+
+        // Validate if expires_in is present
+        Assert.assertNotNull(authzResponse.getExpiresIn());
 
         return Collections.singletonList(idToken2);
     }

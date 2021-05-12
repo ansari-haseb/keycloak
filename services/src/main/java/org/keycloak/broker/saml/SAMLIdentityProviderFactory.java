@@ -16,7 +16,18 @@
  */
 package org.keycloak.broker.saml;
 
+import java.io.InputStream;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+import javax.xml.namespace.QName;
+
+import org.keycloak.Config.Scope;
 import org.keycloak.broker.provider.AbstractIdentityProviderFactory;
+import org.keycloak.common.util.Time;
+import org.keycloak.dom.saml.v2.assertion.AttributeType;
 import org.keycloak.dom.saml.v2.metadata.EndpointType;
 import org.keycloak.dom.saml.v2.metadata.EntitiesDescriptorType;
 import org.keycloak.dom.saml.v2.metadata.EntityDescriptorType;
@@ -29,13 +40,8 @@ import org.keycloak.saml.common.constants.JBossSAMLURIConstants;
 import org.keycloak.saml.common.exceptions.ParsingException;
 import org.keycloak.saml.common.util.DocumentUtil;
 import org.keycloak.saml.processing.core.parsers.saml.SAMLParser;
+import org.keycloak.saml.validators.DestinationValidator;
 import org.w3c.dom.Element;
-
-import javax.xml.namespace.QName;
-import java.io.InputStream;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
 
 /**
  * @author Pedro Igor
@@ -44,6 +50,11 @@ public class SAMLIdentityProviderFactory extends AbstractIdentityProviderFactory
 
     public static final String PROVIDER_ID = "saml";
 
+    private static final String MACEDIR_ENTITY_CATEGORY = "http://macedir.org/entity-category";
+    private static final String REFEDS_HIDE_FROM_DISCOVERY = "http://refeds.org/category/hide-from-discovery";
+
+    private DestinationValidator destinationValidator;
+
     @Override
     public String getName() {
         return "SAML v2.0";
@@ -51,13 +62,18 @@ public class SAMLIdentityProviderFactory extends AbstractIdentityProviderFactory
 
     @Override
     public SAMLIdentityProvider create(KeycloakSession session, IdentityProviderModel model) {
-        return new SAMLIdentityProvider(session, new SAMLIdentityProviderConfig(model));
+        return new SAMLIdentityProvider(session, new SAMLIdentityProviderConfig(model), destinationValidator);
+    }
+
+    @Override
+    public SAMLIdentityProviderConfig createConfig() {
+        return new SAMLIdentityProviderConfig();
     }
 
     @Override
     public Map<String, String> parseConfig(KeycloakSession session, InputStream inputStream) {
         try {
-            Object parsedObject = new SAMLParser().parse(inputStream);
+            Object parsedObject = SAMLParser.getInstance().parse(inputStream);
             EntityDescriptorType entityType;
 
             if (EntitiesDescriptorType.class.isInstance(parsedObject)) {
@@ -84,11 +100,12 @@ public class SAMLIdentityProviderFactory extends AbstractIdentityProviderFactory
                 if (idpDescriptor != null) {
                     SAMLIdentityProviderConfig samlIdentityProviderConfig = new SAMLIdentityProviderConfig();
                     String singleSignOnServiceUrl = null;
-                    boolean postBinding = false;
+                    boolean postBindingResponse = false;
+                    boolean postBindingLogout = false;
                     for (EndpointType endpoint : idpDescriptor.getSingleSignOnService()) {
                         if (endpoint.getBinding().toString().equals(JBossSAMLURIConstants.SAML_HTTP_POST_BINDING.get())) {
                             singleSignOnServiceUrl = endpoint.getLocation().toString();
-                            postBinding = true;
+                            postBindingResponse = true;
                             break;
                         } else if (endpoint.getBinding().toString().equals(JBossSAMLURIConstants.SAML_HTTP_REDIRECT_BINDING.get())){
                             singleSignOnServiceUrl = endpoint.getLocation().toString();
@@ -96,10 +113,11 @@ public class SAMLIdentityProviderFactory extends AbstractIdentityProviderFactory
                     }
                     String singleLogoutServiceUrl = null;
                     for (EndpointType endpoint : idpDescriptor.getSingleLogoutService()) {
-                        if (postBinding && endpoint.getBinding().toString().equals(JBossSAMLURIConstants.SAML_HTTP_POST_BINDING.get())) {
+                        if (postBindingResponse && endpoint.getBinding().toString().equals(JBossSAMLURIConstants.SAML_HTTP_POST_BINDING.get())) {
                             singleLogoutServiceUrl = endpoint.getLocation().toString();
+                            postBindingLogout = true;
                             break;
-                        } else if (!postBinding && endpoint.getBinding().toString().equals(JBossSAMLURIConstants.SAML_HTTP_REDIRECT_BINDING.get())){
+                        } else if (!postBindingResponse && endpoint.getBinding().toString().equals(JBossSAMLURIConstants.SAML_HTTP_REDIRECT_BINDING.get())){
                             singleLogoutServiceUrl = endpoint.getLocation().toString();
                             break;
                         }
@@ -110,8 +128,14 @@ public class SAMLIdentityProviderFactory extends AbstractIdentityProviderFactory
                     samlIdentityProviderConfig.setWantAuthnRequestsSigned(idpDescriptor.isWantAuthnRequestsSigned());
                     samlIdentityProviderConfig.setAddExtensionsElementWithKeyInfo(false);
                     samlIdentityProviderConfig.setValidateSignature(idpDescriptor.isWantAuthnRequestsSigned());
-                    samlIdentityProviderConfig.setPostBindingResponse(postBinding);
-                    samlIdentityProviderConfig.setPostBindingAuthnRequest(postBinding);
+                    samlIdentityProviderConfig.setPostBindingResponse(postBindingResponse);
+                    samlIdentityProviderConfig.setPostBindingAuthnRequest(postBindingResponse);
+                    samlIdentityProviderConfig.setPostBindingLogout(postBindingLogout);
+                    samlIdentityProviderConfig.setLoginHint(false);
+
+                    List<String> nameIdFormatList = idpDescriptor.getNameIDFormat();
+                    if (nameIdFormatList != null && !nameIdFormatList.isEmpty())
+                        samlIdentityProviderConfig.setNameIDPolicyFormat(nameIdFormatList.get(0));
 
                     List<KeyDescriptorType> keyDescriptor = idpDescriptor.getKeyDescriptor();
                     String defaultCertificate = null;
@@ -141,6 +165,20 @@ public class SAMLIdentityProviderFactory extends AbstractIdentityProviderFactory
                         }
                     }
 
+                    samlIdentityProviderConfig.setEnabledFromMetadata(entityType.getValidUntil() == null
+                        || entityType.getValidUntil().toGregorianCalendar().getTime().after(new Date(System.currentTimeMillis())));
+
+                    // check for hide on login attribute
+                    if (entityType.getExtensions() != null && entityType.getExtensions().getEntityAttributes() != null) {
+                        for (AttributeType attribute : entityType.getExtensions().getEntityAttributes().getAttribute()) {
+                            if (MACEDIR_ENTITY_CATEGORY.equals(attribute.getName())
+                                && attribute.getAttributeValue().contains(REFEDS_HIDE_FROM_DISCOVERY)) {
+                                samlIdentityProviderConfig.setHideOnLogin(true);
+                            }
+                        }
+
+                    }
+
                     return samlIdentityProviderConfig.getConfig();
                 }
             }
@@ -148,7 +186,7 @@ public class SAMLIdentityProviderFactory extends AbstractIdentityProviderFactory
             throw new RuntimeException("Could not parse IdP SAML Metadata", pe);
         }
 
-        return new HashMap<String, String>();
+        return new HashMap<>();
     }
 
     @Override
@@ -156,4 +194,10 @@ public class SAMLIdentityProviderFactory extends AbstractIdentityProviderFactory
         return PROVIDER_ID;
     }
 
+    @Override
+    public void init(Scope config) {
+        super.init(config);
+
+        this.destinationValidator = DestinationValidator.forProtocolMap(config.getArray("knownProtocols"));
+    }
 }

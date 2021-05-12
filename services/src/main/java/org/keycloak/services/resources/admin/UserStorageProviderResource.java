@@ -18,7 +18,7 @@ package org.keycloak.services.resources.admin;
 
 import org.jboss.logging.Logger;
 import org.jboss.resteasy.annotations.cache.NoCache;
-import org.jboss.resteasy.spi.NotFoundException;
+import javax.ws.rs.NotFoundException;
 import org.keycloak.common.ClientConnection;
 import org.keycloak.component.ComponentModel;
 import org.keycloak.events.admin.OperationType;
@@ -26,6 +26,7 @@ import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
 import org.keycloak.services.ServicesLogger;
 import org.keycloak.services.managers.UserStorageSyncManager;
+import org.keycloak.services.resources.admin.permissions.AdminPermissionEvaluator;
 import org.keycloak.storage.UserStorageProvider;
 import org.keycloak.storage.UserStorageProviderModel;
 import org.keycloak.storage.ldap.LDAPStorageProvider;
@@ -33,6 +34,7 @@ import org.keycloak.storage.ldap.mappers.LDAPStorageMapper;
 import org.keycloak.storage.user.SynchronizationResult;
 
 import javax.ws.rs.BadRequestException;
+import javax.ws.rs.GET;
 import javax.ws.rs.POST;
 import javax.ws.rs.Path;
 import javax.ws.rs.PathParam;
@@ -41,7 +43,6 @@ import javax.ws.rs.QueryParam;
 import javax.ws.rs.core.Context;
 import javax.ws.rs.core.HttpHeaders;
 import javax.ws.rs.core.MediaType;
-import javax.ws.rs.core.UriInfo;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -55,7 +56,7 @@ public class UserStorageProviderResource {
 
     protected RealmModel realm;
 
-    protected RealmAuth auth;
+    protected AdminPermissionEvaluator auth;
 
     protected AdminEventBuilder adminEvent;
 
@@ -63,21 +64,46 @@ public class UserStorageProviderResource {
     protected ClientConnection clientConnection;
 
     @Context
-    protected UriInfo uriInfo;
-
-    @Context
     protected KeycloakSession session;
 
     @Context
     protected HttpHeaders headers;
 
-    public UserStorageProviderResource(RealmModel realm, RealmAuth auth, AdminEventBuilder adminEvent) {
+    public UserStorageProviderResource(RealmModel realm, AdminPermissionEvaluator auth, AdminEventBuilder adminEvent) {
         this.auth = auth;
         this.realm = realm;
         this.adminEvent = adminEvent;
-
-        auth.init(RealmAuth.Resource.USER);
     }
+
+    /**
+     * Need this for admin console to display simple name of provider when displaying user detail
+     *
+     * KEYCLOAK-4328
+     *
+     * @param id
+     * @return
+     */
+    @GET
+    @Path("{id}/name")
+    @NoCache
+    @Produces(MediaType.APPLICATION_JSON)
+    public Map<String, String> getSimpleName(@PathParam("id") String id) {
+        auth.users().requireQuery();
+
+        ComponentModel model = realm.getComponent(id);
+        if (model == null) {
+            throw new NotFoundException("Could not find component");
+        }
+        if (!model.getProviderType().equals(UserStorageProvider.class.getName())) {
+            throw new NotFoundException("found, but not a UserStorageProvider");
+        }
+
+        Map<String, String> data = new HashMap<>();
+        data.put("id", model.getId());
+        data.put("name", model.getName());
+        return data;
+    }
+
 
     /**
      * Trigger sync of users
@@ -94,7 +120,7 @@ public class UserStorageProviderResource {
     @Produces(MediaType.APPLICATION_JSON)
     public SynchronizationResult syncUsers(@PathParam("id") String id,
                                            @QueryParam("action") String action) {
-        auth.requireManage();
+        auth.users().requireManage();
 
         ComponentModel model = realm.getComponent(id);
         if (model == null) {
@@ -116,14 +142,18 @@ public class UserStorageProviderResource {
             syncResult = syncManager.syncAllUsers(session.getKeycloakSessionFactory(), realm.getId(), providerModel);
         } else if ("triggerChangedUsersSync".equals(action)) {
             syncResult = syncManager.syncChangedUsers(session.getKeycloakSessionFactory(), realm.getId(), providerModel);
+        } else if (action == null || action == "") {
+            logger.debug("Missing action");
+            throw new BadRequestException("Missing action");
         } else {
-            throw new NotFoundException("Unknown action: " + action);
+            logger.debug("Unknown action: " + action);
+            throw new BadRequestException("Unknown action: " + action);
         }
 
         Map<String, Object> eventRep = new HashMap<>();
         eventRep.put("action", action);
         eventRep.put("result", syncResult);
-        adminEvent.operation(OperationType.ACTION).resourcePath(uriInfo).representation(eventRep).success();
+        adminEvent.operation(OperationType.ACTION).resourcePath(session.getContext().getUri()).representation(eventRep).success();
 
         return syncResult;
     }
@@ -139,7 +169,7 @@ public class UserStorageProviderResource {
     @Path("{id}/remove-imported-users")
     @NoCache
     public void removeImportedUsers(@PathParam("id") String id) {
-        auth.requireManage();
+        auth.users().requireManage();
 
         ComponentModel model = realm.getComponent(id);
         if (model == null) {
@@ -162,7 +192,7 @@ public class UserStorageProviderResource {
     @Path("{id}/unlink-users")
     @NoCache
     public void unlinkUsers(@PathParam("id") String id) {
-        auth.requireManage();
+        auth.users().requireManage();
 
         ComponentModel model = realm.getComponent(id);
         if (model == null) {
@@ -187,7 +217,7 @@ public class UserStorageProviderResource {
     @NoCache
     @Produces(MediaType.APPLICATION_JSON)
     public SynchronizationResult syncMapperData(@PathParam("parentId") String parentId, @PathParam("id") String mapperId, @QueryParam("direction") String direction) {
-        auth.requireManage();
+        auth.users().requireManage();
 
         ComponentModel parentModel = realm.getComponent(parentId);
         if (parentModel == null) throw new NotFoundException("Parent model not found");
@@ -211,11 +241,7 @@ public class UserStorageProviderResource {
         Map<String, Object> eventRep = new HashMap<>();
         eventRep.put("action", direction);
         eventRep.put("result", syncResult);
-        adminEvent.operation(OperationType.ACTION).resourcePath(uriInfo).representation(eventRep).success();
+        adminEvent.operation(OperationType.ACTION).resourcePath(session.getContext().getUri()).representation(eventRep).success();
         return syncResult;
     }
-
-
-
-
 }

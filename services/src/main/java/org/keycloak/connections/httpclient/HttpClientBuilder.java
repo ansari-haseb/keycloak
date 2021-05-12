@@ -24,6 +24,7 @@ import org.apache.http.conn.ssl.SSLConnectionSocketFactory;
 import org.apache.http.conn.ssl.SSLContexts;
 import org.apache.http.conn.ssl.StrictHostnameVerifier;
 import org.apache.http.conn.ssl.X509HostnameVerifier;
+import org.apache.http.impl.NoConnectionReuseStrategy;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClients;
 
@@ -52,7 +53,7 @@ import java.util.concurrent.TimeUnit;
  * @version $Revision: 1 $
  */
 public class HttpClientBuilder {
-    public static enum HostnameVerificationPolicy {
+    public enum HostnameVerificationPolicy {
         /**
          * Hostname verification is not done on the server's certificate
          */
@@ -95,6 +96,7 @@ public class HttpClientBuilder {
     protected int connectionPoolSize = 128;
     protected int maxPooledPerRoute = 64;
     protected long connectionTTL = -1;
+    protected boolean reuseConnections = true;
     protected TimeUnit connectionTTLUnit = TimeUnit.MILLISECONDS;
     protected long maxConnectionIdleTime = 900000;
     protected TimeUnit maxConnectionIdleTimeUnit = TimeUnit.MILLISECONDS;
@@ -104,7 +106,7 @@ public class HttpClientBuilder {
     protected long establishConnectionTimeout = -1;
     protected TimeUnit establishConnectionTimeoutUnits = TimeUnit.MILLISECONDS;
     protected boolean disableCookies = false;
-
+    protected ProxyMappings proxyMappings;
 
     /**
      * Socket inactivity timeout
@@ -137,6 +139,11 @@ public class HttpClientBuilder {
     public HttpClientBuilder connectionTTL(long ttl, TimeUnit unit) {
         this.connectionTTL = ttl;
         this.connectionTTLUnit = unit;
+        return this;
+    }
+
+    public HttpClientBuilder reuseConnections(boolean reuseConnections) {
+        this.reuseConnections = reuseConnections;
         return this;
     }
 
@@ -208,6 +215,11 @@ public class HttpClientBuilder {
         return this;
     }
 
+    public HttpClientBuilder proxyMappings(ProxyMappings proxyMappings) {
+        this.proxyMappings = proxyMappings;
+        return this;
+    }
+
 
     static class VerifierWrapper implements X509HostnameVerifier {
         protected HostnameVerifier verifier;
@@ -272,6 +284,7 @@ public class HttpClientBuilder {
                 tlsContext.init(null, null, null);
                 sslsf = new SSLConnectionSocketFactory(tlsContext, verifier);
             }
+
             RequestConfig requestConfig = RequestConfig.custom()
                     .setConnectTimeout((int) establishConnectionTimeout)
                     .setSocketTimeout((int) socketTimeout).build();
@@ -282,6 +295,14 @@ public class HttpClientBuilder {
                     .setMaxConnTotal(connectionPoolSize)
                     .setMaxConnPerRoute(maxPooledPerRoute)
                     .setConnectionTimeToLive(connectionTTL, connectionTTLUnit);
+
+            if (!reuseConnections) {
+                builder.setConnectionReuseStrategy(new NoConnectionReuseStrategy());
+            }
+
+            if (proxyMappings != null && !proxyMappings.isEmpty()) {
+                builder.setRoutePlanner(new ProxyMappingsAwareRoutePlanner(proxyMappings));
+            }
 
             if (maxConnectionIdleTime > 0) {
                 // Will start background cleaner thread

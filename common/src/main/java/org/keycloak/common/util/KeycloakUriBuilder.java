@@ -429,7 +429,9 @@ public class KeycloakUriBuilder {
                 if ("".equals(host)) throw new RuntimeException("empty host name");
                 replaceParameter(paramMap, fromEncodedMap, isTemplate, host, buffer, encodeSlash);
             }
-            if (port != -1) buffer.append(":").append(Integer.toString(port));
+            if (port != -1 && !(("http".equals(scheme) && port == 80) || ("https".equals(scheme) && port == 443))) {
+                buffer.append(":").append(Integer.toString(port));
+            }
         } else if (authority != null) {
             buffer.append("//");
             replaceParameter(paramMap, fromEncodedMap, isTemplate, authority, buffer, encodeSlash);
@@ -614,7 +616,7 @@ public class KeycloakUriBuilder {
             if (value == null) throw new IllegalArgumentException("A passed in value was null");
             if (query == null) query = "";
             else query += "&";
-            query += Encode.encodeQueryParam(name) + "=" + Encode.encodeQueryParam(value.toString());
+            query += Encode.encodeQueryParamAsIs(name) + "=" + Encode.encodeQueryParamAsIs(value.toString());
         }
         return this;
     }

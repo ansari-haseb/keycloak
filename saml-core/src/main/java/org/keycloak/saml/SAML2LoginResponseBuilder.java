@@ -21,7 +21,10 @@ import org.keycloak.dom.saml.v2.assertion.AssertionType;
 import org.keycloak.dom.saml.v2.assertion.AudienceRestrictionType;
 import org.keycloak.dom.saml.v2.assertion.AuthnStatementType;
 import org.keycloak.dom.saml.v2.assertion.ConditionsType;
+import org.keycloak.dom.saml.v2.assertion.NameIDType;
+import org.keycloak.dom.saml.v2.assertion.OneTimeUseType;
 import org.keycloak.dom.saml.v2.assertion.SubjectConfirmationDataType;
+import org.keycloak.dom.saml.v2.protocol.ExtensionsType;
 import org.keycloak.dom.saml.v2.protocol.ResponseType;
 import org.keycloak.saml.common.PicketLinkLogger;
 import org.keycloak.saml.common.PicketLinkLoggerFactory;
@@ -29,6 +32,7 @@ import org.keycloak.saml.common.constants.JBossSAMLURIConstants;
 import org.keycloak.saml.common.exceptions.ConfigurationException;
 import org.keycloak.saml.common.exceptions.ProcessingException;
 import org.keycloak.saml.common.util.DocumentUtil;
+import org.keycloak.saml.SAML2NameIDBuilder;
 import org.keycloak.saml.processing.api.saml.v2.response.SAML2Response;
 import org.keycloak.saml.processing.core.saml.v2.common.IDGenerator;
 import org.keycloak.saml.processing.core.saml.v2.holders.IDPInfoHolder;
@@ -41,7 +45,6 @@ import org.w3c.dom.Document;
 import java.net.URI;
 import java.util.LinkedList;
 import java.util.List;
-import org.keycloak.dom.saml.v2.protocol.ExtensionsType;
 
 import static org.keycloak.saml.common.util.StringUtil.isNotNull;
 
@@ -56,9 +59,10 @@ public class SAML2LoginResponseBuilder implements SamlProtocolExtensionsAwareBui
     protected static final PicketLinkLogger logger = PicketLinkLoggerFactory.getLogger();
 
     protected String destination;
-    protected String issuer;
+    protected NameIDType issuer;
     protected int subjectExpiration;
     protected int assertionExpiration;
+    protected int sessionExpiration;
     protected String nameId;
     protected String nameIdFormat;
     protected boolean multiValuedRoles;
@@ -68,7 +72,7 @@ public class SAML2LoginResponseBuilder implements SamlProtocolExtensionsAwareBui
     protected String requestIssuer;
     protected String sessionIndex;
     protected final List<NodeGenerator> extensions = new LinkedList<>();
-
+    protected boolean includeOneTimeUseCondition;
 
     public SAML2LoginResponseBuilder sessionIndex(String sessionIndex) {
         this.sessionIndex = sessionIndex;
@@ -80,9 +84,13 @@ public class SAML2LoginResponseBuilder implements SamlProtocolExtensionsAwareBui
         return this;
     }
 
-    public SAML2LoginResponseBuilder issuer(String issuer) {
+    public SAML2LoginResponseBuilder issuer(NameIDType issuer) {
         this.issuer = issuer;
         return this;
+    }
+
+    public SAML2LoginResponseBuilder issuer(String issuer) {
+        return issuer(SAML2NameIDBuilder.value(issuer).build());
     }
 
     /**
@@ -94,6 +102,18 @@ public class SAML2LoginResponseBuilder implements SamlProtocolExtensionsAwareBui
      */
     public SAML2LoginResponseBuilder subjectExpiration(int subjectExpiration) {
         this.subjectExpiration = subjectExpiration;
+        return this;
+    }
+
+    /**
+     * Length of time in seconds the idp session will be valid
+     * See SAML core specification 2.7.2 SessionNotOnOrAfter
+     *
+     * @param sessionExpiration Number of seconds the session should be valid
+     * @return
+     */
+    public SAML2LoginResponseBuilder sessionExpiration(int sessionExpiration) {
+        this.sessionExpiration = sessionExpiration;
         return this;
     }
 
@@ -110,12 +130,12 @@ public class SAML2LoginResponseBuilder implements SamlProtocolExtensionsAwareBui
     }
 
     public SAML2LoginResponseBuilder requestID(String requestID) {
-        this.requestID =requestID;
+        this.requestID = requestID;
         return this;
     }
 
     public SAML2LoginResponseBuilder requestIssuer(String requestIssuer) {
-        this.requestIssuer =requestIssuer;
+        this.requestIssuer = requestIssuer;
         return this;
     }
 
@@ -137,6 +157,11 @@ public class SAML2LoginResponseBuilder implements SamlProtocolExtensionsAwareBui
 
     public SAML2LoginResponseBuilder disableAuthnStatement(boolean disableAuthnStatement) {
         this.disableAuthnStatement = disableAuthnStatement;
+        return this;
+    }
+
+    public SAML2LoginResponseBuilder includeOneTimeUseCondition(boolean includeOneTimeUseCondition) {
+        this.includeOneTimeUseCondition = includeOneTimeUseCondition;
         return this;
     }
 
@@ -194,13 +219,13 @@ public class SAML2LoginResponseBuilder implements SamlProtocolExtensionsAwareBui
         //Update Conditions NotOnOrAfter
         if(assertionExpiration > 0) {
             ConditionsType conditions = assertion.getConditions();
-            conditions.setNotOnOrAfter(XMLTimeUtil.add(conditions.getNotBefore(), assertionExpiration * 1000));
+            conditions.setNotOnOrAfter(XMLTimeUtil.add(conditions.getNotBefore(), assertionExpiration * 1000L));
         }
 
         //Update SubjectConfirmationData NotOnOrAfter
         if(subjectExpiration > 0) {
             SubjectConfirmationDataType subjectConfirmationData = assertion.getSubject().getConfirmation().get(0).getSubjectConfirmationData();
-            subjectConfirmationData.setNotOnOrAfter(XMLTimeUtil.add(assertion.getConditions().getNotBefore(), subjectExpiration * 1000));
+            subjectConfirmationData.setNotOnOrAfter(XMLTimeUtil.add(assertion.getConditions().getNotBefore(), subjectExpiration * 1000L));
         }
 
         // Create an AuthnStatementType
@@ -211,13 +236,21 @@ public class SAML2LoginResponseBuilder implements SamlProtocolExtensionsAwareBui
 
             AuthnStatementType authnStatement = StatementUtil.createAuthnStatement(XMLTimeUtil.getIssueInstant(),
                     authContextRef);
+
+            if (sessionExpiration > 0)
+                authnStatement.setSessionNotOnOrAfter(XMLTimeUtil.add(authnStatement.getAuthnInstant(), sessionExpiration * 1000L));
+
             if (sessionIndex != null) authnStatement.setSessionIndex(sessionIndex);
             else authnStatement.setSessionIndex(assertion.getID());
 
             assertion.addStatement(authnStatement);
         }
 
-        if (! this.extensions.isEmpty()) {
+        if (includeOneTimeUseCondition) {
+            assertion.getConditions().addCondition(new OneTimeUseType());
+        }
+
+        if (!this.extensions.isEmpty()) {
             ExtensionsType extensionsType = new ExtensionsType();
             for (NodeGenerator extension : this.extensions) {
                 extensionsType.addExtension(extension);

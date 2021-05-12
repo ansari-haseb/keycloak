@@ -17,12 +17,14 @@
 package org.keycloak.services.clientregistration.oidc;
 
 import org.jboss.logging.Logger;
+import org.keycloak.OAuth2Constants;
 import org.keycloak.common.util.Time;
 import org.keycloak.models.ClientModel;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.ProtocolMapperModel;
 import org.keycloak.models.utils.ModelToRepresentation;
 import org.keycloak.models.utils.RepresentationToModel;
+import org.keycloak.protocol.oidc.OIDCAdvancedConfigWrapper;
 import org.keycloak.protocol.oidc.mappers.AbstractPairwiseSubMapper;
 import org.keycloak.protocol.oidc.mappers.PairwiseSubMapperHelper;
 import org.keycloak.protocol.oidc.mappers.SHA256PairwiseSubMapper;
@@ -47,9 +49,9 @@ import javax.ws.rs.Produces;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import java.net.URI;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Collectors;
 
 /**
  * @author <a href="mailto:sthorger@redhat.com">Stian Thorgersen</a>
@@ -72,12 +74,24 @@ public class OIDCClientRegistrationProvider extends AbstractClientRegistrationPr
 
         try {
             ClientRepresentation client = DescriptionConverter.toInternal(session, clientOIDC);
+            List<String> grantTypes = clientOIDC.getGrantTypes();
+
+            if (grantTypes != null && grantTypes.contains(OAuth2Constants.UMA_GRANT_TYPE)) {
+                client.setAuthorizationServicesEnabled(true);
+            }
+
+            if (!(grantTypes == null || grantTypes.contains(OAuth2Constants.REFRESH_TOKEN))) {
+                OIDCAdvancedConfigWrapper.fromClientRepresentation(client).setUseRefreshToken(false);
+            }
+
             OIDCClientRegistrationContext oidcContext = new OIDCClientRegistrationContext(session, client, this, clientOIDC);
             client = create(oidcContext);
 
             ClientModel clientModel = session.getContext().getRealm().getClientByClientId(client.getClientId());
             updatePairwiseSubMappers(clientModel, SubjectType.parse(clientOIDC.getSubjectType()), clientOIDC.getSectorIdentifierUri());
             updateClientRepWithProtocolMappers(clientModel, client);
+
+            validateClient(clientModel, clientOIDC, true);
 
             URI uri = session.getContext().getUri().getAbsolutePathBuilder().path(client.getClientId()).build();
             clientOIDC = DescriptionConverter.toExternalResponse(session, client, uri);
@@ -93,8 +107,11 @@ public class OIDCClientRegistrationProvider extends AbstractClientRegistrationPr
     @Path("{clientId}")
     @Produces(MediaType.APPLICATION_JSON)
     public Response getOIDC(@PathParam("clientId") String clientId) {
-        ClientRepresentation client = get(clientId);
-        OIDCClientRepresentation clientOIDC = DescriptionConverter.toExternalResponse(session, client, session.getContext().getUri().getRequestUri());
+        ClientModel client = session.getContext().getRealm().getClientByClientId(clientId);
+
+        ClientRepresentation clientRepresentation = get(client);
+
+        OIDCClientRepresentation clientOIDC = DescriptionConverter.toExternalResponse(session, clientRepresentation, session.getContext().getUri().getRequestUri());
         return Response.ok(clientOIDC).build();
     }
 
@@ -111,6 +128,8 @@ public class OIDCClientRegistrationProvider extends AbstractClientRegistrationPr
             ClientModel clientModel = session.getContext().getRealm().getClientByClientId(client.getClientId());
             updatePairwiseSubMappers(clientModel, SubjectType.parse(clientOIDC.getSubjectType()), clientOIDC.getSectorIdentifierUri());
             updateClientRepWithProtocolMappers(clientModel, client);
+
+            validateClient(clientModel, clientOIDC, false);
 
             URI uri = session.getContext().getUri().getAbsolutePathBuilder().path(client.getClientId()).build();
             clientOIDC = DescriptionConverter.toExternalResponse(session, client, uri);
@@ -133,7 +152,7 @@ public class OIDCClientRegistrationProvider extends AbstractClientRegistrationPr
             // See if we have existing pairwise mapper and update it. Otherwise create new
             AtomicBoolean foundPairwise = new AtomicBoolean(false);
 
-            clientModel.getProtocolMappers().stream().filter((ProtocolMapperModel mapping) -> {
+            clientModel.getProtocolMappersStream().filter((ProtocolMapperModel mapping) -> {
                 if (mapping.getProtocolMapper().endsWith(AbstractPairwiseSubMapper.PROVIDER_ID_SUFFIX)) {
                     foundPairwise.set(true);
                     return true;
@@ -153,20 +172,16 @@ public class OIDCClientRegistrationProvider extends AbstractClientRegistrationPr
 
         } else {
             // Rather find and remove all pairwise mappers
-            clientModel.getProtocolMappers().stream().filter((ProtocolMapperModel mapperRep) -> {
-                return mapperRep.getProtocolMapper().endsWith(AbstractPairwiseSubMapper.PROVIDER_ID_SUFFIX);
-            }).forEach((ProtocolMapperModel mapping) -> {
-                clientModel.getProtocolMappers().remove(mapping);
-            });
+            clientModel.getProtocolMappersStream()
+                    .filter(mapperRep -> mapperRep.getProtocolMapper().endsWith(AbstractPairwiseSubMapper.PROVIDER_ID_SUFFIX))
+                    .collect(Collectors.toList())
+                    .forEach(clientModel::removeProtocolMapper);
         }
     }
 
     private void updateClientRepWithProtocolMappers(ClientModel clientModel, ClientRepresentation rep) {
-        List<ProtocolMapperRepresentation> mappings = new LinkedList<>();
-        for (ProtocolMapperModel model : clientModel.getProtocolMappers()) {
-            mappings.add(ModelToRepresentation.toRepresentation(model));
-        }
+        List<ProtocolMapperRepresentation> mappings =
+                clientModel.getProtocolMappersStream().map(ModelToRepresentation::toRepresentation).collect(Collectors.toList());
         rep.setProtocolMappers(mappings);
     }
-
 }

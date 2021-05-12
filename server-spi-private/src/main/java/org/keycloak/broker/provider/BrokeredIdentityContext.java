@@ -16,9 +16,9 @@
  */
 package org.keycloak.broker.provider;
 
-import org.keycloak.models.ClientSessionModel;
 import org.keycloak.models.Constants;
 import org.keycloak.models.IdentityProviderModel;
+import org.keycloak.sessions.AuthenticationSessionModel;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -34,6 +34,7 @@ import java.util.Map;
 public class BrokeredIdentityContext {
 
     private String id;
+    private String legacyId;
     private String username;
     private String modelUsername;
     private String email;
@@ -41,12 +42,11 @@ public class BrokeredIdentityContext {
     private String lastName;
     private String brokerSessionId;
     private String brokerUserId;
-    private String code;
     private String token;
     private IdentityProviderModel idpConfig;
     private IdentityProvider idp;
     private Map<String, Object> contextData = new HashMap<>();
-    private ClientSessionModel clientSession;
+    private AuthenticationSessionModel authenticationSession;
 
     public BrokeredIdentityContext(String id) {
         if (id == null) {
@@ -62,6 +62,19 @@ public class BrokeredIdentityContext {
 
     public void setId(String id) {
         this.id = id;
+    }
+
+    /**
+     * ID from older API version. For API migrations.
+     *
+     * @return legacy ID
+     */
+    public String getLegacyId() {
+        return legacyId;
+    }
+
+    public void setLegacyId(String legacyId) {
+        this.legacyId = legacyId;
     }
 
     /**
@@ -122,14 +135,6 @@ public class BrokeredIdentityContext {
         this.token = token;
     }
 
-    public String getCode() {
-        return code;
-    }
-
-    public void setCode(String code) {
-        this.code = code;
-    }
-
     public IdentityProviderModel getIdpConfig() {
         return idpConfig;
     }
@@ -161,6 +166,11 @@ public class BrokeredIdentityContext {
         getContextData().put(Constants.USER_ATTRIBUTES_PREFIX + attributeName, list);
     }
 
+    // Remove an attribute attribute, which would otherwise be available on "Update profile" page and in authenticators
+    public void removeUserAttribute(String attributeName) {
+        getContextData().remove(Constants.USER_ATTRIBUTES_PREFIX + attributeName);
+    }
+
     public void setUserAttribute(String attributeName, List<String> attributeValues) {
         getContextData().put(Constants.USER_ATTRIBUTES_PREFIX + attributeName, attributeValues);
     }
@@ -190,14 +200,19 @@ public class BrokeredIdentityContext {
         this.lastName = lastName;
     }
 
-    public ClientSessionModel getClientSession() {
-        return clientSession;
+    public AuthenticationSessionModel getAuthenticationSession() {
+        return authenticationSession;
     }
 
-    public void setClientSession(ClientSessionModel clientSession) {
-        this.clientSession = clientSession;
+    public void setAuthenticationSession(AuthenticationSessionModel authenticationSession) {
+        this.authenticationSession = authenticationSession;
     }
 
+    /**
+     * @deprecated use {@link #setFirstName(String)} and {@link #setLastName(String)} instead
+     * @param name
+     */
+    @Deprecated
     public void setName(String name) {
         if (name != null) {
             int i = name.lastIndexOf(' ');

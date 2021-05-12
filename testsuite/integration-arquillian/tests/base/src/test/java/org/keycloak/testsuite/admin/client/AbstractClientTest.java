@@ -29,7 +29,7 @@ import org.keycloak.representations.idm.UserRepresentation;
 import org.keycloak.testsuite.AbstractAuthTest;
 import org.keycloak.testsuite.Assert;
 import org.keycloak.testsuite.admin.ApiUtil;
-import org.keycloak.testsuite.events.EventsListenerProviderFactory;
+import org.keycloak.testsuite.events.TestEventsListenerProviderFactory;
 import org.keycloak.testsuite.util.AdminEventPaths;
 import org.keycloak.testsuite.util.AssertAdminEvents;
 import org.keycloak.testsuite.util.RealmBuilder;
@@ -56,7 +56,7 @@ public abstract class AbstractClientTest extends AbstractAuthTest {
     @Before
     public void setupAdminEvents() {
         RealmRepresentation realm = testRealmResource().toRepresentation();
-        if (realm.getEventsListeners() == null || !realm.getEventsListeners().contains(EventsListenerProviderFactory.PROVIDER_ID)) {
+        if (realm.getEventsListeners() == null || !realm.getEventsListeners().contains(TestEventsListenerProviderFactory.PROVIDER_ID)) {
             realm = RealmBuilder.edit(testRealmResource().toRepresentation()).testEventListener().build();
             testRealmResource().update(realm);
         }
@@ -101,21 +101,22 @@ public abstract class AbstractClientTest extends AbstractAuthTest {
         return createClient(clientRep);
     }
 
-    protected String createOidcBearerOnlyClientWithAuthz(String name) {
+    protected String createOidcConfidentialClientWithAuthz(String name) {
         ClientRepresentation clientRep = createOidcClientRep(name);
-        clientRep.setBearerOnly(Boolean.TRUE);
+        clientRep.setBearerOnly(Boolean.FALSE);
         clientRep.setPublicClient(Boolean.FALSE);
         clientRep.setAuthorizationServicesEnabled(Boolean.TRUE);
         clientRep.setServiceAccountsEnabled(Boolean.TRUE);
-        return createClient(clientRep);
+        String id = createClient(clientRep);
+        assertAdminEvents.assertEvent(getRealmId(), OperationType.CREATE, AdminEventPaths.clientResourcePath(id), ResourceType.AUTHORIZATION_RESOURCE_SERVER);
+        return id;
     }
 
     protected ClientRepresentation createOidcClientRep(String name) {
         ClientRepresentation clientRep = new ClientRepresentation();
         clientRep.setClientId(name);
         clientRep.setName(name);
-        clientRep.setRootUrl("foo");
-        clientRep.setProtocol("openid-connect"); 
+        clientRep.setProtocol("openid-connect");
         return clientRep;
     }
 
@@ -124,7 +125,6 @@ public abstract class AbstractClientTest extends AbstractAuthTest {
         clientRep.setClientId(name);
         clientRep.setName(name);
         clientRep.setProtocol("saml");
-        clientRep.setAdminUrl("samlEndpoint");
         return createClient(clientRep);
     }
 

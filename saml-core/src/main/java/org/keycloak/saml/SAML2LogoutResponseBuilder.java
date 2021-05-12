@@ -21,6 +21,7 @@ import org.keycloak.dom.saml.v2.assertion.NameIDType;
 import org.keycloak.dom.saml.v2.protocol.StatusCodeType;
 import org.keycloak.dom.saml.v2.protocol.StatusResponseType;
 import org.keycloak.dom.saml.v2.protocol.StatusType;
+import org.keycloak.saml.SAML2NameIDBuilder;
 import org.keycloak.saml.common.constants.JBossSAMLURIConstants;
 import org.keycloak.saml.common.exceptions.ConfigurationException;
 import org.keycloak.saml.common.exceptions.ParsingException;
@@ -30,7 +31,6 @@ import org.keycloak.saml.processing.core.saml.v2.common.IDGenerator;
 import org.keycloak.saml.processing.core.saml.v2.util.XMLTimeUtil;
 import org.w3c.dom.Document;
 
-import java.net.URI;
 import java.util.LinkedList;
 import java.util.List;
 import org.keycloak.dom.saml.v2.protocol.ExtensionsType;
@@ -43,7 +43,7 @@ public class SAML2LogoutResponseBuilder implements SamlProtocolExtensionsAwareBu
 
     protected String logoutRequestID;
     protected String destination;
-    protected String issuer;
+    protected NameIDType issuer;
     protected final List<NodeGenerator> extensions = new LinkedList<>();
 
     public SAML2LogoutResponseBuilder logoutRequestID(String logoutRequestID) {
@@ -56,9 +56,13 @@ public class SAML2LogoutResponseBuilder implements SamlProtocolExtensionsAwareBu
         return this;
     }
 
-    public SAML2LogoutResponseBuilder issuer(String issuer) {
+    public SAML2LogoutResponseBuilder issuer(NameIDType issuer) {
         this.issuer = issuer;
         return this;
+    }
+
+    public SAML2LogoutResponseBuilder issuer(String issuer) {
+        return issuer(SAML2NameIDBuilder.value(issuer).build());
     }
 
     @Override
@@ -67,32 +71,35 @@ public class SAML2LogoutResponseBuilder implements SamlProtocolExtensionsAwareBu
         return this;
     }
 
+    public StatusResponseType buildModel() throws ConfigurationException {
+        StatusResponseType statusResponse = new StatusResponseType(IDGenerator.create("ID_"), XMLTimeUtil.getIssueInstant());
+
+        // Status
+        StatusType statusType = new StatusType();
+        StatusCodeType statusCodeType = new StatusCodeType();
+        statusCodeType.setValue(JBossSAMLURIConstants.STATUS_SUCCESS.getUri());
+        statusType.setStatusCode(statusCodeType);
+
+        statusResponse.setStatus(statusType);
+        statusResponse.setInResponseTo(logoutRequestID);
+        statusResponse.setIssuer(issuer);
+        statusResponse.setDestination(destination);
+
+        if (! this.extensions.isEmpty()) {
+            ExtensionsType extensionsType = new ExtensionsType();
+            for (NodeGenerator extension : this.extensions) {
+                extensionsType.addExtension(extension);
+            }
+            statusResponse.setExtensions(extensionsType);
+        }
+
+        return statusResponse;
+    }
+
     public Document buildDocument() throws ProcessingException {
         Document samlResponse = null;
         try {
-            StatusResponseType statusResponse = new StatusResponseType(IDGenerator.create("ID_"), XMLTimeUtil.getIssueInstant());
-
-            // Status
-            StatusType statusType = new StatusType();
-            StatusCodeType statusCodeType = new StatusCodeType();
-            statusCodeType.setValue(URI.create(JBossSAMLURIConstants.STATUS_SUCCESS.get()));
-            statusType.setStatusCode(statusCodeType);
-
-            statusResponse.setStatus(statusType);
-            statusResponse.setInResponseTo(logoutRequestID);
-            NameIDType issuer = new NameIDType();
-            issuer.setValue(this.issuer);
-
-            statusResponse.setIssuer(issuer);
-            statusResponse.setDestination(destination);
-
-            if (! this.extensions.isEmpty()) {
-                ExtensionsType extensionsType = new ExtensionsType();
-                for (NodeGenerator extension : this.extensions) {
-                    extensionsType.addExtension(extension);
-                }
-                statusResponse.setExtensions(extensionsType);
-            }
+            StatusResponseType statusResponse = buildModel();
 
             SAML2Response saml2Response = new SAML2Response();
             samlResponse = saml2Response.convert(statusResponse);

@@ -31,7 +31,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.io.PrintWriter;
 import java.io.StringWriter;
-import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
@@ -118,7 +118,7 @@ public class NewObjectCmd extends AbstractGlobalOptionsCmd {
         }
 
         if (body == null && ctx.getContent() != null) {
-            body = new ByteArrayInputStream(ctx.getContent().getBytes(Charset.forName("utf-8")));
+            body = new ByteArrayInputStream(ctx.getContent().getBytes(StandardCharsets.UTF_8));
         }
 
         AccessibleBufferOutputStream abos = new AccessibleBufferOutputStream(System.out);
@@ -167,7 +167,7 @@ public class NewObjectCmd extends AbstractGlobalOptionsCmd {
         out.println();
         out.println("Command to compose JSON objects from attributes, and merge changes into existing JSON documents.");
         out.println();
-        out.println("This is a local command that does not perform any server requests. It's functionality is fully ");
+        out.println("This is a local command that does not perform any server requests. Its functionality is fully ");
         out.println("integrated into 'create', 'update' and 'delete' commands. It's supposed to be a helper tool only.");
         out.println();
         out.println("Arguments:");

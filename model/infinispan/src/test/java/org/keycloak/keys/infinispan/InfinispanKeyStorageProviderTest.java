@@ -17,7 +17,6 @@
 
 package org.keycloak.keys.infinispan;
 
-import java.security.PublicKey;
 import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
@@ -36,10 +35,10 @@ import org.infinispan.manager.DefaultCacheManager;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
-import org.junit.Ignore;
 import org.junit.Test;
 import org.keycloak.common.util.Time;
 import org.keycloak.connections.infinispan.InfinispanConnectionProvider;
+import org.keycloak.crypto.KeyWrapper;
 import org.keycloak.keys.PublicKeyLoader;
 
 /**
@@ -145,7 +144,7 @@ public class InfinispanKeyStorageProviderTest {
         }
 
         @Override
-        public Map<String, PublicKey> loadKeys() throws Exception {
+        public Map<String, KeyWrapper> loadKeys() throws Exception {
             counters.putIfAbsent(modelKey, new AtomicInteger(0));
             AtomicInteger currentCounter = counters.get(modelKey);
 
@@ -157,15 +156,18 @@ public class InfinispanKeyStorageProviderTest {
 
     protected Cache<String, PublicKeysEntry> getKeysCache() {
         GlobalConfigurationBuilder gcb = new GlobalConfigurationBuilder();
-        gcb.globalJmxStatistics().allowDuplicateDomains(true);
-
+        gcb.jmx().domain(InfinispanConnectionProvider.JMX_DOMAIN).enable();
         final DefaultCacheManager cacheManager = new DefaultCacheManager(gcb.build());
 
         ConfigurationBuilder cb = new ConfigurationBuilder();
-        cb.eviction().strategy(EvictionStrategy.LRU).type(EvictionType.COUNT).size(InfinispanConnectionProvider.KEYS_CACHE_DEFAULT_MAX);
+        cb.memory()
+                .evictionStrategy(EvictionStrategy.REMOVE)
+                .evictionType(EvictionType.COUNT)
+                .size(InfinispanConnectionProvider.KEYS_CACHE_DEFAULT_MAX);
+        cb.jmxStatistics().enabled(true);
         Configuration cfg = cb.build();
-
         cacheManager.defineConfiguration(InfinispanConnectionProvider.KEYS_CACHE_NAME, cfg);
+
         return cacheManager.getCache(InfinispanConnectionProvider.KEYS_CACHE_NAME);
     }
 }

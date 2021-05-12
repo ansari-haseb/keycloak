@@ -50,6 +50,7 @@ public class MailAssert {
             if (message.getContent() instanceof MimeMultipart) {
                 MimeMultipart mimeMultipart = (MimeMultipart) message.getContent();
 
+                // TEXT content is on index 0
                 messageContent = String.valueOf(mimeMultipart.getBodyPart(0).getContent());
             } else {
                 messageContent = String.valueOf(message.getContent());
@@ -60,7 +61,9 @@ public class MailAssert {
 
             assertTrue(errorMessage, messageContent.contains(content));
             for (String string : messageContent.split("\n")) {
-                if (string.contains("http://")) {
+                if (string.startsWith("http")) {
+                    // Ampersand escaped in the text version. Needs to be replaced to have correct URL
+                    string = string.replace("&amp;", "&");
                     return string;
                 }
             }

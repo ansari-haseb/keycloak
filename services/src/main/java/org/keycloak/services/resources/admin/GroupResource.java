@@ -17,18 +17,23 @@
 package org.keycloak.services.resources.admin;
 
 import org.jboss.resteasy.annotations.cache.NoCache;
-import org.jboss.resteasy.spi.NotFoundException;
+import javax.ws.rs.NotFoundException;
 import org.jboss.resteasy.spi.ResteasyProviderFactory;
+import org.keycloak.common.util.ObjectUtil;
 import org.keycloak.events.admin.OperationType;
 import org.keycloak.events.admin.ResourceType;
 import org.keycloak.models.Constants;
 import org.keycloak.models.GroupModel;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
-import org.keycloak.models.UserModel;
 import org.keycloak.models.utils.ModelToRepresentation;
 import org.keycloak.representations.idm.GroupRepresentation;
+import org.keycloak.representations.idm.ManagementPermissionReference;
 import org.keycloak.representations.idm.UserRepresentation;
+import org.keycloak.services.ErrorResponse;
+import org.keycloak.services.resources.admin.permissions.AdminPermissionEvaluator;
+import org.keycloak.services.resources.admin.permissions.AdminPermissionManagement;
+import org.keycloak.services.resources.admin.permissions.AdminPermissions;
 
 import javax.ws.rs.Consumes;
 import javax.ws.rs.DELETE;
@@ -38,17 +43,15 @@ import javax.ws.rs.PUT;
 import javax.ws.rs.Path;
 import javax.ws.rs.Produces;
 import javax.ws.rs.QueryParam;
-import javax.ws.rs.core.Context;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
-import javax.ws.rs.core.UriInfo;
 import java.net.URI;
-import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
-import org.keycloak.services.ErrorResponse;
+import java.util.stream.Stream;
 
 /**
  * @resource Groups
@@ -58,11 +61,11 @@ public class GroupResource {
 
     private final RealmModel realm;
     private final KeycloakSession session;
-    private final RealmAuth auth;
+    private final AdminPermissionEvaluator auth;
     private final AdminEventBuilder adminEvent;
     private final GroupModel group;
 
-    public GroupResource(RealmModel realm, GroupModel group, KeycloakSession session, RealmAuth auth, AdminEventBuilder adminEvent) {
+    public GroupResource(RealmModel realm, GroupModel group, KeycloakSession session, AdminPermissionEvaluator auth, AdminEventBuilder adminEvent) {
         this.realm = realm;
         this.session = session;
         this.auth = auth;
@@ -70,9 +73,7 @@ public class GroupResource {
         this.group = group;
     }
 
-    @Context private UriInfo uriInfo;
-
-    /**
+     /**
      *
      *
      * @return
@@ -81,13 +82,13 @@ public class GroupResource {
     @NoCache
     @Produces(MediaType.APPLICATION_JSON)
     public GroupRepresentation getGroup() {
-        this.auth.requireView();
+        this.auth.groups().requireView(group);
 
-        if (group == null) {
-            throw new NotFoundException("Could not find group by id");
-        }
+        GroupRepresentation rep = ModelToRepresentation.toGroupHierarchy(group, true);
 
-        return ModelToRepresentation.toGroupHierarchy(group, true);
+        rep.setAccess(auth.groups().getAccess(group));
+
+        return rep;
     }
 
     /**
@@ -97,29 +98,40 @@ public class GroupResource {
      */
     @PUT
     @Consumes(MediaType.APPLICATION_JSON)
-    public void updateGroup(GroupRepresentation rep) {
-        this.auth.requireManage();
+    public Response updateGroup(GroupRepresentation rep) {
+        this.auth.groups().requireManage(group);
 
-        if (group == null) {
-            throw new NotFoundException("Could not find group by id");
+        String groupName = rep.getName();
+        if (ObjectUtil.isBlank(groupName)) {
+            return ErrorResponse.error("Group name is missing", Response.Status.BAD_REQUEST);
         }
 
+        boolean exists = siblings().filter(s -> !Objects.equals(s.getId(), group.getId()))
+                .anyMatch(s -> Objects.equals(s.getName(), groupName));
+        if (exists) {
+            return ErrorResponse.exists("Sibling group named '" + groupName + "' already exists.");
+        }
+        
         updateGroup(rep, group);
-        adminEvent.operation(OperationType.UPDATE).resourcePath(uriInfo).representation(rep).success();
-
-
+        adminEvent.operation(OperationType.UPDATE).resourcePath(session.getContext().getUri()).representation(rep).success();
+        
+        return Response.noContent().build();
+    }
+    
+    private Stream<GroupModel> siblings() {
+        if (group.getParentId() == null) {
+            return realm.getTopLevelGroupsStream();
+        } else {
+            return group.getParent().getSubGroupsStream();
+        }
     }
 
     @DELETE
     public void deleteGroup() {
-        this.auth.requireManage();
-
-        if (group == null) {
-            throw new NotFoundException("Could not find group by id");
-        }
+        this.auth.groups().requireManage(group);
 
         realm.removeGroup(group);
-        adminEvent.operation(OperationType.DELETE).resourcePath(uriInfo).success();
+        adminEvent.operation(OperationType.DELETE).resourcePath(session.getContext().getUri()).success();
     }
 
 
@@ -135,16 +147,11 @@ public class GroupResource {
     @Produces(MediaType.APPLICATION_JSON)
     @Consumes(MediaType.APPLICATION_JSON)
     public Response addChild(GroupRepresentation rep) {
-        this.auth.requireManage();
+        this.auth.groups().requireManage(group);
 
-        if (group == null) {
-            throw new NotFoundException("Could not find group by id");
-        }
-        
-        for (GroupModel group : group.getSubGroups()) {
-            if (group.getName().equals(rep.getName())) {
-                return ErrorResponse.exists("Parent already contains subgroup named '" + rep.getName() + "'");
-            }
+        String groupName = rep.getName();
+        if (ObjectUtil.isBlank(groupName)) {
+            return ErrorResponse.error("Group name is missing", Response.Status.BAD_REQUEST);
         }
 
         Response.ResponseBuilder builder = Response.status(204);
@@ -154,20 +161,20 @@ public class GroupResource {
             if (child == null) {
                 throw new NotFoundException("Could not find child by id");
             }
+            realm.moveGroup(child, group);
             adminEvent.operation(OperationType.UPDATE);
         } else {
-            child = realm.createGroup(rep.getName());
+            child = realm.createGroup(groupName, group);
             updateGroup(rep, child);
-            URI uri = uriInfo.getBaseUriBuilder()
-                                           .path(uriInfo.getMatchedURIs().get(2))
+            URI uri = session.getContext().getUri().getBaseUriBuilder()
+                                           .path(session.getContext().getUri().getMatchedURIs().get(2))
                                            .path(child.getId()).build();
             builder.status(201).location(uri);
             rep.setId(child.getId());
             adminEvent.operation(OperationType.CREATE);
 
         }
-        realm.moveGroup(child, group);
-        adminEvent.resourcePath(uriInfo).representation(rep).success();
+        adminEvent.resourcePath(session.getContext().getUri()).representation(rep).success();
 
         GroupRepresentation childRep = ModelToRepresentation.toGroupHierarchy(child, true);
         return builder.type(MediaType.APPLICATION_JSON_TYPE).entity(childRep).build();
@@ -191,9 +198,9 @@ public class GroupResource {
 
     @Path("role-mappings")
     public RoleMapperResource getRoleMappings() {
-        auth.init(RealmAuth.Resource.USER);
-
-        RoleMapperResource resource =  new RoleMapperResource(realm, auth, group, adminEvent);
+        AdminPermissionEvaluator.RequirePermissionCheck manageCheck = () -> auth.groups().requireManage(group);
+        AdminPermissionEvaluator.RequirePermissionCheck viewCheck = () -> auth.groups().requireView(group);
+        RoleMapperResource resource =  new RoleMapperResource(realm, auth, group, adminEvent, manageCheck, viewCheck);
         ResteasyProviderFactory.getInstance().injectProperties(resource);
         return resource;
 
@@ -202,34 +209,83 @@ public class GroupResource {
     /**
      * Get users
      *
-     * Returns a list of users, filtered according to query parameters
+     * Returns a stream of users, filtered according to query parameters
      *
      * @param firstResult Pagination offset
      * @param maxResults Maximum results size (defaults to 100)
-     * @return
+     * @param briefRepresentation Only return basic information (only guaranteed to return id, username, created, first and last name,
+     *  email, enabled state, email verification state, federation link, and access.
+     *  Note that it means that namely user attributes, required actions, and not before are not returned.)
+     * @return a non-null {@code Stream} of users
      */
     @GET
     @NoCache
     @Path("members")
     @Produces(MediaType.APPLICATION_JSON)
-    public List<UserRepresentation> getMembers(@QueryParam("first") Integer firstResult,
-                                               @QueryParam("max") Integer maxResults) {
-        auth.requireView();
-
-        if (group == null) {
-            throw new NotFoundException("Could not find group by id");
-        }
-
+    public Stream<UserRepresentation> getMembers(@QueryParam("first") Integer firstResult,
+                                               @QueryParam("max") Integer maxResults,
+                                               @QueryParam("briefRepresentation") Boolean briefRepresentation) {
+        this.auth.groups().requireViewMembers(group);
+        
         firstResult = firstResult != null ? firstResult : 0;
         maxResults = maxResults != null ? maxResults : Constants.DEFAULT_MAX_RESULTS;
+        boolean briefRepresentationB = briefRepresentation != null && briefRepresentation;
 
-        List<UserRepresentation> results = new ArrayList<UserRepresentation>();
-        List<UserModel> userModels = session.users().getGroupMembers(realm, group, firstResult, maxResults);
+        return session.users().getGroupMembersStream(realm, group, firstResult, maxResults)
+                .map(user -> briefRepresentationB
+                        ? ModelToRepresentation.toBriefRepresentation(user)
+                        : ModelToRepresentation.toRepresentation(session, realm, user));
+    }
 
-        for (UserModel user : userModels) {
-            results.add(ModelToRepresentation.toRepresentation(session, realm, user));
+    /**
+     * Return object stating whether client Authorization permissions have been initialized or not and a reference
+     *
+     * @return
+     */
+    @Path("management/permissions")
+    @GET
+    @Produces(MediaType.APPLICATION_JSON)
+    @NoCache
+    public ManagementPermissionReference getManagementPermissions() {
+        auth.groups().requireView(group);
+
+        AdminPermissionManagement permissions = AdminPermissions.management(session, realm);
+        if (!permissions.groups().isPermissionsEnabled(group)) {
+            return new ManagementPermissionReference();
         }
-        return results;
+        return toMgmtRef(group, permissions);
+    }
+
+    public static ManagementPermissionReference toMgmtRef(GroupModel group, AdminPermissionManagement permissions) {
+        ManagementPermissionReference ref = new ManagementPermissionReference();
+        ref.setEnabled(true);
+        ref.setResource(permissions.groups().resource(group).getId());
+        ref.setScopePermissions(permissions.groups().getPermissions(group));
+        return ref;
+    }
+
+
+    /**
+     * Return object stating whether client Authorization permissions have been initialized or not and a reference
+     *
+     *
+     * @return initialized manage permissions reference
+     */
+    @Path("management/permissions")
+    @PUT
+    @Produces(MediaType.APPLICATION_JSON)
+    @Consumes(MediaType.APPLICATION_JSON)
+    @NoCache
+    public ManagementPermissionReference setManagementPermissionsEnabled(ManagementPermissionReference ref) {
+        auth.groups().requireManage(group);
+        AdminPermissionManagement permissions = AdminPermissions.management(session, realm);
+        permissions.groups().setPermissionsEnabled(group, ref.isEnabled());
+        if (ref.isEnabled()) {
+            return toMgmtRef(group, permissions);
+        } else {
+            return new ManagementPermissionReference();
+        }
     }
 
 }
+

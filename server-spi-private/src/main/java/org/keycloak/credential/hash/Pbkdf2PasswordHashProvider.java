@@ -17,16 +17,13 @@
 
 package org.keycloak.credential.hash;
 
-import org.keycloak.Config;
 import org.keycloak.common.util.Base64;
-import org.keycloak.credential.CredentialModel;
-import org.keycloak.models.KeycloakSession;
-import org.keycloak.models.KeycloakSessionFactory;
 import org.keycloak.models.PasswordPolicy;
-import org.keycloak.models.UserCredentialModel;
+import org.keycloak.models.credential.PasswordCredentialModel;
 
 import javax.crypto.SecretKeyFactory;
 import javax.crypto.spec.PBEKeySpec;
+import java.io.IOException;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.security.spec.InvalidKeySpecException;
@@ -35,72 +32,78 @@ import java.security.spec.KeySpec;
 /**
  * @author <a href="mailto:me@tsudot.com">Kunal Kerkar</a>
  */
-public class Pbkdf2PasswordHashProvider implements PasswordHashProviderFactory, PasswordHashProvider {
+public class Pbkdf2PasswordHashProvider implements PasswordHashProvider {
 
-    public static final String ID = "pbkdf2";
+    private final String providerId;
 
-    private static final String PBKDF2_ALGORITHM = "PBKDF2WithHmacSHA1";
-    private static final int DERIVED_KEY_SIZE = 512;
+    private final String pbkdf2Algorithm;
+    private final int defaultIterations;
+    private final int derivedKeySize;
+    public static final int DEFAULT_DERIVED_KEY_SIZE = 512;
 
-    public CredentialModel encode(String rawPassword, int iterations) {
+    public Pbkdf2PasswordHashProvider(String providerId, String pbkdf2Algorithm, int defaultIterations) {
+        this(providerId, pbkdf2Algorithm, defaultIterations, DEFAULT_DERIVED_KEY_SIZE);
+    }
+    public Pbkdf2PasswordHashProvider(String providerId, String pbkdf2Algorithm, int defaultIterations, int derivedKeySize) {
+        this.providerId = providerId;
+        this.pbkdf2Algorithm = pbkdf2Algorithm;
+        this.defaultIterations = defaultIterations;
+        this.derivedKeySize = derivedKeySize;
+    }
+
+    @Override
+    public boolean policyCheck(PasswordPolicy policy, PasswordCredentialModel credential) {
+        int policyHashIterations = policy.getHashIterations();
+        if (policyHashIterations == -1) {
+            policyHashIterations = defaultIterations;
+        }
+
+        return credential.getPasswordCredentialData().getHashIterations() == policyHashIterations
+                && providerId.equals(credential.getPasswordCredentialData().getAlgorithm())
+                && derivedKeySize == keySize(credential);
+    }
+
+    @Override
+    public PasswordCredentialModel encodedCredential(String rawPassword, int iterations) {
+        if (iterations == -1) {
+            iterations = defaultIterations;
+        }
+
         byte[] salt = getSalt();
-        String encodedPassword = encode(rawPassword, iterations, salt);
+        String encodedPassword = encodedCredential(rawPassword, iterations, salt, derivedKeySize);
 
-        CredentialModel credentials = new CredentialModel();
-        credentials.setAlgorithm(ID);
-        credentials.setType(UserCredentialModel.PASSWORD);
-        credentials.setSalt(salt);
-        credentials.setHashIterations(iterations);
-        credentials.setValue(encodedPassword);
-        return credentials;
+        return PasswordCredentialModel.createFromValues(providerId, salt, iterations, encodedPassword);
     }
 
     @Override
-    public boolean policyCheck(PasswordPolicy policy, CredentialModel credential) {
-        return credential.getHashIterations() == policy.getHashIterations() && ID.equals(credential.getAlgorithm());
-    }
+    public String encode(String rawPassword, int iterations) {
+        if (iterations == -1) {
+            iterations = defaultIterations;
+        }
 
-    @Override
-    public void encode(String rawPassword, PasswordPolicy policy, CredentialModel credential) {
         byte[] salt = getSalt();
-        String encodedPassword = encode(rawPassword, policy.getHashIterations(), salt);
-
-        credential.setAlgorithm(ID);
-        credential.setType(UserCredentialModel.PASSWORD);
-        credential.setSalt(salt);
-        credential.setHashIterations(policy.getHashIterations());
-        credential.setValue(encodedPassword);
-
+        return encodedCredential(rawPassword, iterations, salt, derivedKeySize);
     }
 
     @Override
-    public boolean verify(String rawPassword, CredentialModel credential) {
-        return encode(rawPassword, credential.getHashIterations(), credential.getSalt()).equals(credential.getValue());
+    public boolean verify(String rawPassword, PasswordCredentialModel credential) {
+        return encodedCredential(rawPassword, credential.getPasswordCredentialData().getHashIterations(), credential.getPasswordSecretData().getSalt(), keySize(credential)).equals(credential.getPasswordSecretData().getValue());
     }
 
-    @Override
-    public PasswordHashProvider create(KeycloakSession session) {
-        return this;
-    }
-
-    @Override
-    public void init(Config.Scope config) {
-    }
-
-    @Override
-    public void postInit(KeycloakSessionFactory factory) {
+    private int keySize(PasswordCredentialModel credential) {
+        try {
+            byte[] bytes = Base64.decode(credential.getPasswordSecretData().getValue());
+            return bytes.length * 8;
+        } catch (IOException e) {
+            throw new RuntimeException("Credential could not be decoded", e);
+        }
     }
 
     public void close() {
     }
 
-    @Override
-    public String getId() {
-        return ID;
-    }
-
-    private String encode(String rawPassword, int iterations, byte[] salt) {
-        KeySpec spec = new PBEKeySpec(rawPassword.toCharArray(), salt, iterations, DERIVED_KEY_SIZE);
+    private String encodedCredential(String rawPassword, int iterations, byte[] salt, int derivedKeySize) {
+        KeySpec spec = new PBEKeySpec(rawPassword.toCharArray(), salt, iterations, derivedKeySize);
 
         try {
             byte[] key = getSecretKeyFactory().generateSecret(spec).getEncoded();
@@ -108,7 +111,6 @@ public class Pbkdf2PasswordHashProvider implements PasswordHashProviderFactory, 
         } catch (InvalidKeySpecException e) {
             throw new RuntimeException("Credential could not be encoded", e);
         } catch (Exception e) {
-            e.printStackTrace();
             throw new RuntimeException(e);
         }
     }
@@ -122,10 +124,9 @@ public class Pbkdf2PasswordHashProvider implements PasswordHashProviderFactory, 
 
     private SecretKeyFactory getSecretKeyFactory() {
         try {
-            return SecretKeyFactory.getInstance(PBKDF2_ALGORITHM);
+            return SecretKeyFactory.getInstance(pbkdf2Algorithm);
         } catch (NoSuchAlgorithmException e) {
             throw new RuntimeException("PBKDF2 algorithm not found", e);
         }
     }
-
 }

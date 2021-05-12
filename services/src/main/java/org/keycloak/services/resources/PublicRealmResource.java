@@ -25,7 +25,7 @@ import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
 import org.keycloak.protocol.oidc.OIDCLoginProtocolService;
 import org.keycloak.representations.idm.PublishedRealmRepresentation;
-import org.keycloak.services.resources.admin.AdminRoot;
+import org.keycloak.services.resources.account.AccountFormService;
 
 import javax.ws.rs.GET;
 import javax.ws.rs.OPTIONS;
@@ -44,9 +44,6 @@ import javax.ws.rs.core.UriInfo;
  */
 public class PublicRealmResource {
     protected static final Logger logger = Logger.getLogger(PublicRealmResource.class);
-
-    @Context
-    protected UriInfo uriInfo;
 
     @Context
     protected HttpRequest request;
@@ -84,15 +81,14 @@ public class PublicRealmResource {
     @Produces(MediaType.APPLICATION_JSON)
     public PublishedRealmRepresentation getRealm() {
         Cors.add(request).allowedOrigins(Cors.ACCESS_CONTROL_ALLOW_ORIGIN_WILDCARD).auth().build(response);
-        return realmRep(session, realm, uriInfo);
+        return realmRep(session, realm, session.getContext().getUri());
     }
 
     public static PublishedRealmRepresentation realmRep(KeycloakSession session, RealmModel realm, UriInfo uriInfo) {
         PublishedRealmRepresentation rep = new PublishedRealmRepresentation();
         rep.setRealm(realm.getName());
         rep.setTokenServiceUrl(OIDCLoginProtocolService.tokenServiceBaseUrl(uriInfo).build(realm.getName()).toString());
-        rep.setAccountServiceUrl(AccountService.accountServiceBaseUrl(uriInfo).build(realm.getName()).toString());
-        rep.setAdminApiUrl(uriInfo.getBaseUriBuilder().path(AdminRoot.class).build().toString());
+        rep.setAccountServiceUrl(AccountFormService.accountServiceBaseUrl(uriInfo).build(realm.getName()).toString());
         rep.setPublicKeyPem(PemUtils.encodeKey(session.keys().getActiveRsaKey(realm).getPublicKey()));
         rep.setNotBefore(realm.getNotBefore());
         return rep;

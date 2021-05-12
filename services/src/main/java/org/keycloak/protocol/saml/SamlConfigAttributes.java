@@ -29,7 +29,9 @@ public interface SamlConfigAttributes {
     String SAML_SIGNATURE_ALGORITHM = "saml.signature.algorithm";
     String SAML_NAME_ID_FORMAT_ATTRIBUTE = "saml_name_id_format";
     String SAML_AUTHNSTATEMENT = "saml.authnstatement";
+    String SAML_ONETIMEUSE_CONDITION = "saml.onetimeuse.condition";
     String SAML_FORCE_NAME_ID_FORMAT_ATTRIBUTE = "saml_force_name_id_format";
+    String SAML_ARTIFACT_BINDING = "saml.artifact.binding";
     String SAML_SERVER_SIGNATURE = "saml.server.signature";
     String SAML_SERVER_SIGNATURE_KEYINFO_EXT = "saml.server.signature.keyinfo.ext";
     String SAML_SERVER_SIGNATURE_KEYINFO_KEY_NAME_TRANSFORMER = "saml.server.signature.keyinfo.xmlSigKeyInfoKeyNameTransformer";
@@ -40,4 +42,5 @@ public interface SamlConfigAttributes {
     String SAML_SIGNING_CERTIFICATE_ATTRIBUTE = "saml.signing." + CertificateInfoHelper.X509CERTIFICATE;
     String SAML_ENCRYPTION_CERTIFICATE_ATTRIBUTE = "saml.encryption." + CertificateInfoHelper.X509CERTIFICATE;
     String SAML_ENCRYPTION_PRIVATE_KEY_ATTRIBUTE = "saml.encryption." + CertificateInfoHelper.PRIVATE_KEY;
+    String SAML_ASSERTION_LIFESPAN = "saml.assertion.lifespan";
 }

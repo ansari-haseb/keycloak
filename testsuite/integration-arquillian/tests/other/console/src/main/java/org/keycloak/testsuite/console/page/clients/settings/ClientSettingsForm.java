@@ -1,17 +1,18 @@
 package org.keycloak.testsuite.console.page.clients.settings;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+
 import org.keycloak.representations.idm.ClientRepresentation;
 import org.keycloak.testsuite.console.page.clients.CreateClientForm;
 import org.keycloak.testsuite.console.page.fragment.OnOffSwitch;
 import org.keycloak.testsuite.page.Form;
 import org.keycloak.testsuite.util.Timer;
+import org.keycloak.testsuite.util.UIUtils;
 import org.openqa.selenium.WebElement;
 import org.openqa.selenium.support.FindBy;
 import org.openqa.selenium.support.ui.Select;
-
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
 
 import static org.keycloak.testsuite.util.WaitUtils.pause;
 import static org.keycloak.testsuite.util.WaitUtils.waitUntilElement;
@@ -32,6 +33,9 @@ public class ClientSettingsForm extends CreateClientForm {
     @FindBy(xpath = ".//div[@class='onoffswitch' and ./input[@id='enabled']]")
     private OnOffSwitch enabledSwitch;
 
+    @FindBy(xpath = ".//div[@class='onoffswitch' and ./input[@id='alwaysDisplayInConsole']]")
+    private OnOffSwitch alwaysDisplayInConsole;
+    
     @FindBy(xpath = ".//div[@class='onoffswitch' and ./input[@id='consentRequired']]")
     private OnOffSwitch consentRequiredSwitch;
 
@@ -67,11 +71,15 @@ public class ClientSettingsForm extends CreateClientForm {
     @FindBy(xpath = ".//button[contains(@data-ng-click, 'deleteWebOrigin')]")
     private List<WebElement> deleteWebOriginIcons;
 
+    @FindBy(xpath = ".//div[@class='onoffswitch' and ./input[@id='authorizationServicesEnabled']]")
+    private OnOffSwitch authorizationSettingsEnabledSwitch;
+
+    @FindBy(xpath = ACTIVE_DIV_XPATH + "/button[text()='Disable Authorization Settings']")
+    private WebElement confirmDisableAuthorizationSettingsButton;
+
     public enum OidcAccessType {
-        BEARER_ONLY("bearer-only"),
-        PUBLIC("public"),
-        CONFIDENTIAL("confidential");
-        
+        BEARER_ONLY("bearer-only"), PUBLIC("public"), CONFIDENTIAL("confidential");
+
         private final String name;
 
         private OidcAccessType(String name) {
@@ -82,21 +90,21 @@ public class ClientSettingsForm extends CreateClientForm {
             return name;
         }
     }
-        
+
     public void setBaseUrl(String baseUrl) {
-        setInputValue(baseUrlInput, baseUrl);
+        UIUtils.setTextInputValue(baseUrlInput, baseUrl);
     }
 
     public String getBaseUrl() {
-        return getInputValue(baseUrlInput);
+        return UIUtils.getTextInputValue(baseUrlInput);
     }
 
     public void setAdminUrl(String adminUrl) {
-        setInputValue(adminUrlInput, adminUrl);
+        UIUtils.setTextInputValue(adminUrlInput, adminUrl);
     }
 
     public String getAdminUrl() {
-        return getInputValue(adminUrlInput);
+        return UIUtils.getTextInputValue(adminUrlInput);
     }
 
     public void addWebOrigin(String redirectUri) {
@@ -107,7 +115,7 @@ public class ClientSettingsForm extends CreateClientForm {
     public List<String> getWebOrigins() {
         List<String> values = new ArrayList<>();
         for (WebElement input : webOriginInputs) {
-            values.add(getInputValue(input));
+            values.add(UIUtils.getTextInputValue(input));
         }
         return values;
     }
@@ -126,11 +134,11 @@ public class ClientSettingsForm extends CreateClientForm {
     }
 
     public String getName() {
-        return getInputValue(nameInput);
+        return UIUtils.getTextInputValue(nameInput);
     }
 
     public void setName(String name) {
-        setInputValue(nameInput, name);
+        UIUtils.setTextInputValue(nameInput, name);
     }
 
     public boolean isEnabled() {
@@ -139,6 +147,18 @@ public class ClientSettingsForm extends CreateClientForm {
 
     public void setEnabled(boolean enabled) {
         enabledSwitch.setOn(enabled);
+    }
+
+    public boolean isAlwaysDisplayInConsole() {
+        return alwaysDisplayInConsole.isOn();
+    }
+
+    public void setAlwaysDisplayInConsole(boolean enabled) {
+        alwaysDisplayInConsole.setOn(enabled);
+    }
+
+    public boolean isAlwaysDisplayInConsoleVisible() {
+        return alwaysDisplayInConsole.isVisible();
     }
 
     public boolean isConsentRequired() {
@@ -161,7 +181,7 @@ public class ClientSettingsForm extends CreateClientForm {
     public List<String> getRedirectUris() {
         List<String> values = new ArrayList<>();
         for (WebElement input : redirectUriInputs) {
-            values.add(getInputValue(input));
+            values.add(UIUtils.getTextInputValue(input));
         }
         return values;
     }
@@ -213,28 +233,43 @@ public class ClientSettingsForm extends CreateClientForm {
     public void setServiceAccountsEnabled(boolean serviceAccountsEnabled) {
         serviceAccountsEnabledSwitch.setOn(serviceAccountsEnabled);
     }
-    
+
+    public void setAuthorizationSettingsEnabled(boolean enabled) {
+        authorizationSettingsEnabledSwitch.setOn(enabled);
+    }
+
+    public boolean isAuthorizationSettingsEnabled() {
+        return authorizationSettingsEnabledSwitch.isOn();
+    }
+
+    public void confirmDisableAuthorizationSettings() {
+        confirmDisableAuthorizationSettingsButton.click();
+    }
+
     public class SAMLClientSettingsForm extends Form {
 
         public static final String SAML_ASSERTION_SIGNATURE = "saml.assertion.signature";
         public static final String SAML_AUTHNSTATEMENT = "saml.authnstatement";
-	public static final String SAML_CLIENT_SIGNATURE = "saml.client.signature";
-	public static final String SAML_ENCRYPT = "saml.encrypt";
-	public static final String SAML_FORCE_POST_BINDING = "saml.force.post.binding";
-	public static final String SAML_MULTIVALUED_ROLES = "saml.multivalued.roles";
-	public static final String SAML_SERVER_SIGNATURE = "saml.server.signature";
-	public static final String SAML_SERVER_SIGNATURE_KEYINFO_EXT = "saml.server.signature.keyinfo.ext";
-	public static final String SAML_SIGNATURE_ALGORITHM = "saml.signature.algorithm";
-	public static final String SAML_ASSERTION_CONSUMER_URL_POST = "saml_assertion_consumer_url_post";
-	public static final String SAML_ASSERTION_CONSUMER_URL_REDIRECT = "saml_assertion_consumer_url_redirect";
-	public static final String SAML_FORCE_NAME_ID_FORMAT = "saml_force_name_id_format";
-	public static final String SAML_NAME_ID_FORMAT = "saml_name_id_format";
-	public static final String SAML_SIGNATURE_CANONICALIZATION_METHOD = "saml_signature_canonicalization_method";
-	public static final String SAML_SINGLE_LOGOUT_SERVICE_URL_POST = "saml_single_logout_service_url_post";
-	public static final String SAML_SINGLE_LOGOUT_SERVICE_URL_REDIRECT = "saml_single_logout_service_url_redirect";
-        
+        public static final String SAML_ONETIMEUSE_CONDITION = "saml.onetimeuse.condition";
+        public static final String SAML_CLIENT_SIGNATURE = "saml.client.signature";
+        public static final String SAML_ENCRYPT = "saml.encrypt";
+        public static final String SAML_FORCE_POST_BINDING = "saml.force.post.binding";
+        public static final String SAML_MULTIVALUED_ROLES = "saml.multivalued.roles";
+        public static final String SAML_SERVER_SIGNATURE = "saml.server.signature";
+        public static final String SAML_SERVER_SIGNATURE_KEYINFO_EXT = "saml.server.signature.keyinfo.ext";
+        public static final String SAML_SIGNATURE_ALGORITHM = "saml.signature.algorithm";
+        public static final String SAML_ASSERTION_CONSUMER_URL_POST = "saml_assertion_consumer_url_post";
+        public static final String SAML_ASSERTION_CONSUMER_URL_REDIRECT = "saml_assertion_consumer_url_redirect";
+        public static final String SAML_FORCE_NAME_ID_FORMAT = "saml_force_name_id_format";
+        public static final String SAML_NAME_ID_FORMAT = "saml_name_id_format";
+        public static final String SAML_SIGNATURE_CANONICALIZATION_METHOD = "saml_signature_canonicalization_method";
+        public static final String SAML_SINGLE_LOGOUT_SERVICE_URL_POST = "saml_single_logout_service_url_post";
+        public static final String SAML_SINGLE_LOGOUT_SERVICE_URL_REDIRECT = "saml_single_logout_service_url_redirect";
+
         @FindBy(xpath = ".//div[@class='onoffswitch' and ./input[@id='samlAuthnStatement']]")
         private OnOffSwitch samlAuthnStatement;
+        @FindBy(xpath = ".//div[@class='onoffswitch' and ./input[@id='samlOneTimeUseCondition']]")
+        private OnOffSwitch samlOneTimeUseCondition;
         @FindBy(xpath = ".//div[@class='onoffswitch' and ./input[@id='samlServerSignature']]")
         private OnOffSwitch samlServerSignature;
         @FindBy(xpath = ".//div[@class='onoffswitch' and ./input[@id='samlServerSignatureEnableKeyInfoExtension']]")
@@ -257,10 +292,10 @@ public class ClientSettingsForm extends CreateClientForm {
         private OnOffSwitch samlForceNameIdFormat;
         @FindBy(id = "samlNameIdFormat")
         private Select samlNameIdFormat;
-        
+
         @FindBy(xpath = "//fieldset[contains(@data-ng-show, 'saml')]//i")
         private WebElement fineGrainCollapsor;
-        
+
         @FindBy(id = "consumerServicePost")
         private WebElement consumerServicePostInput;
         @FindBy(id = "consumerServiceRedirect")
@@ -269,12 +304,13 @@ public class ClientSettingsForm extends CreateClientForm {
         private WebElement logoutPostBindingInput;
         @FindBy(id = "logoutRedirectBinding")
         private WebElement logoutRedirectBindingInput;
-        
+
         public void setValues(ClientRepresentation client) {
             waitUntilElement(fineGrainCollapsor).is().visible();
-            
+
             Map<String, String> attributes = client.getAttributes();
             samlAuthnStatement.setOn("true".equals(attributes.get(SAML_AUTHNSTATEMENT)));
+            samlOneTimeUseCondition.setOn("true".equals(attributes.get(SAML_ONETIMEUSE_CONDITION)));
             samlServerSignature.setOn("true".equals(attributes.get(SAML_SERVER_SIGNATURE)));
             samlAssertionSignature.setOn("true".equals(attributes.get(SAML_ASSERTION_SIGNATURE)));
             if (samlServerSignature.isOn() || samlAssertionSignature.isOn()) {
@@ -288,14 +324,14 @@ public class ClientSettingsForm extends CreateClientForm {
             frontchannelLogout.setOn(client.isFrontchannelLogout());
             samlForceNameIdFormat.setOn("true".equals(attributes.get(SAML_FORCE_NAME_ID_FORMAT)));
             samlNameIdFormat.selectByVisibleText(attributes.get(SAML_NAME_ID_FORMAT));
-            
+
             fineGrainCollapsor.click();
             waitUntilElement(consumerServicePostInput).is().present();
-            
-            setInputValue(consumerServicePostInput, attributes.get(SAML_ASSERTION_CONSUMER_URL_POST));
-            setInputValue(consumerServiceRedirectInput, attributes.get(SAML_ASSERTION_CONSUMER_URL_REDIRECT));
-            setInputValue(logoutPostBindingInput, attributes.get(SAML_SINGLE_LOGOUT_SERVICE_URL_POST));
-            setInputValue(logoutRedirectBindingInput, attributes.get(SAML_SINGLE_LOGOUT_SERVICE_URL_REDIRECT));
+
+            UIUtils.setTextInputValue(consumerServicePostInput, attributes.get(SAML_ASSERTION_CONSUMER_URL_POST));
+            UIUtils.setTextInputValue(consumerServiceRedirectInput, attributes.get(SAML_ASSERTION_CONSUMER_URL_REDIRECT));
+            UIUtils.setTextInputValue(logoutPostBindingInput, attributes.get(SAML_SINGLE_LOGOUT_SERVICE_URL_POST));
+            UIUtils.setTextInputValue(logoutRedirectBindingInput, attributes.get(SAML_SINGLE_LOGOUT_SERVICE_URL_REDIRECT));
         }
     }
 

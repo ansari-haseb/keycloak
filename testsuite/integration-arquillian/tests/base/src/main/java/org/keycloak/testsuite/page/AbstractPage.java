@@ -18,7 +18,9 @@
 package org.keycloak.testsuite.page;
 
 import org.jboss.arquillian.drone.api.annotation.Drone;
+import org.jboss.arquillian.test.api.ArquillianResource;
 import org.jboss.logging.Logger;
+import org.keycloak.testsuite.util.DroneUtils;
 import org.keycloak.testsuite.util.URLUtils;
 import org.openqa.selenium.WebDriver;
 
@@ -26,6 +28,7 @@ import javax.ws.rs.core.UriBuilder;
 import java.net.URI;
 import java.util.HashMap;
 import java.util.Map;
+import org.junit.Assert;
 
 /**
  *
@@ -44,6 +47,10 @@ public abstract class AbstractPage {
 
     public WebDriver getDriver() {
         return driver;
+    }
+
+    public void setDriver(WebDriver driver) {
+        this.driver = driver;
     }
 
     public abstract UriBuilder createUriBuilder();
@@ -91,15 +98,16 @@ public abstract class AbstractPage {
     }
 
     public void navigateTo() {
-        navigateTo(true);
-    }
-
-    public void navigateTo(boolean waitForMatch) {
-        URLUtils.navigateToUri(driver, buildUri().toASCIIString(), waitForMatch);
+        URLUtils.navigateToUri(buildUri().toASCIIString());
     }
 
     public boolean isCurrent() {
-        return URLUtils.currentUrlEqual(driver, toString());
+        return URLUtils.currentUrlEquals(toString());
     }
 
+    public void assertCurrent() {
+        String name = getClass().getSimpleName();
+        Assert.assertTrue("Expected " + name + " but was " + DroneUtils.getCurrentDriver().getTitle() + " (" + DroneUtils.getCurrentDriver().getCurrentUrl() + ")",
+                isCurrent());
+    }
 }

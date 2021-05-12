@@ -141,7 +141,7 @@ public enum ResourceType {
     /**
      *
      */
-    , CLIENT_TEMPLATE
+    , CLIENT_SCOPE
 
     /**
      *
@@ -151,10 +151,40 @@ public enum ResourceType {
     /**
      *
      */
+    , CLIENT_SCOPE_CLIENT_MAPPING
+
+    /**
+     *
+     */
     , CLUSTER_NODE
 
     /**
      *
      */
-    , COMPONENT;
+    , COMPONENT
+
+    /**
+     *
+     */
+    , AUTHORIZATION_RESOURCE_SERVER
+
+    /**
+     *
+     */
+    , AUTHORIZATION_RESOURCE
+
+    /**
+     *
+     */
+    , AUTHORIZATION_SCOPE
+
+    /**
+     *
+     */
+    , AUTHORIZATION_POLICY
+
+    /**
+     *
+     */
+    , CUSTOM;
 }

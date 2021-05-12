@@ -24,8 +24,7 @@ import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.RoleModel;
 import org.keycloak.models.utils.KeycloakModelUtils;
-
-import java.util.List;
+import org.keycloak.representations.idm.RealmRepresentation;
 
 /**
  * @author <a href="mailto:bill@burkecentral.com">Bill Burke</a>
@@ -42,15 +41,16 @@ public class MigrateTo1_2_0 implements Migration {
     public void setupBrokerService(RealmModel realm) {
         ClientModel client = realm.getClientByClientId(Constants.BROKER_SERVICE_CLIENT_ID);
         if (client == null) {
-            client = KeycloakModelUtils.createClient(realm, Constants.BROKER_SERVICE_CLIENT_ID);
+            client = KeycloakModelUtils.createManagementClient(realm, Constants.BROKER_SERVICE_CLIENT_ID);
             client.setEnabled(true);
             client.setName("${client_" + Constants.BROKER_SERVICE_CLIENT_ID + "}");
             client.setFullScopeAllowed(false);
 
             for (String role : Constants.BROKER_SERVICE_ROLES) {
-                RoleModel roleModel = client.addRole(role);
+                RoleModel roleModel = client.getRole(role);
+                if (roleModel != null) continue;
+                roleModel = client.addRole(role);
                 roleModel.setDescription("${role_" + role.toLowerCase().replaceAll("_", "-") + "}");
-                roleModel.setScopeParamRequired(false);
             }
         }
     }
@@ -66,11 +66,15 @@ public class MigrateTo1_2_0 implements Migration {
     }
 
     public void migrate(KeycloakSession session) {
-        List<RealmModel> realms = session.realms().getRealms();
-        for (RealmModel realm : realms) {
+        session.realms().getRealmsStream().forEach(realm -> {
             setupBrokerService(realm);
             setupClientNames(realm);
-        }
+        });
+    }
 
+    @Override
+    public void migrateImport(KeycloakSession session, RealmModel realm, RealmRepresentation rep, boolean skipUserDependent) {
+        setupBrokerService(realm);
+        setupClientNames(realm);
     }
 }

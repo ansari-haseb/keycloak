@@ -20,9 +20,12 @@ package org.keycloak.admin.client.resource;
 import org.jboss.resteasy.annotations.cache.NoCache;
 import org.keycloak.representations.adapters.action.GlobalRequestResult;
 import org.keycloak.representations.idm.ClientRepresentation;
+import org.keycloak.representations.idm.ClientScopeRepresentation;
 import org.keycloak.representations.idm.CredentialRepresentation;
 import org.keycloak.representations.idm.UserRepresentation;
 import org.keycloak.representations.idm.UserSessionRepresentation;
+import org.keycloak.representations.idm.ManagementPermissionReference;
+import org.keycloak.representations.idm.ManagementPermissionRepresentation;
 
 import javax.ws.rs.Consumes;
 import javax.ws.rs.DELETE;
@@ -42,29 +45,53 @@ import java.util.Map;
  */
 public interface ClientResource {
 
+    /**
+     * Enables or disables the fine grain permissions feature.
+     * Returns the updated status of the server in the
+     * {@link ManagementPermissionReference}.
+     *
+     * @param status status request to apply
+     * @return permission reference indicating the updated status
+     */
+    @PUT
+    @Path("/management/permissions")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.APPLICATION_JSON)
+    ManagementPermissionReference setPermissions(ManagementPermissionRepresentation status);
+
+    /**
+     * Returns indicator if the fine grain permissions are enabled or not.
+     *
+     * @return current representation of the permissions feature
+     */
+    @GET
+    @Path("/management/permissions")
+    @Produces(MediaType.APPLICATION_JSON)
+    ManagementPermissionReference getPermissions();
+
     @Path("protocol-mappers")
-    public ProtocolMappersResource getProtocolMappers();
+    ProtocolMappersResource getProtocolMappers();
 
     @GET
     @Produces(MediaType.APPLICATION_JSON)
-    public ClientRepresentation toRepresentation();
+    ClientRepresentation toRepresentation();
 
     @PUT
     @Consumes(MediaType.APPLICATION_JSON)
-    public void update(ClientRepresentation clientRepresentation);
+    void update(ClientRepresentation clientRepresentation);
 
     @DELETE
-    public void remove();
+    void remove();
 
     @POST
     @Path("client-secret")
     @Produces(MediaType.APPLICATION_JSON)
-    public CredentialRepresentation generateNewSecret();
+    CredentialRepresentation generateNewSecret();
 
     @GET
     @Path("client-secret")
     @Produces(MediaType.APPLICATION_JSON)
-    public CredentialRepresentation getSecret();
+    CredentialRepresentation getSecret();
 
     /**
      * Generate a new registration access token for the client
@@ -75,7 +102,7 @@ public interface ClientResource {
     @POST
     @Produces(MediaType.APPLICATION_JSON)
     @Consumes(MediaType.APPLICATION_JSON)
-    public ClientRepresentation regenerateRegistrationAccessToken();
+    ClientRepresentation regenerateRegistrationAccessToken();
 
     /**
      * Get representation of certificate resource
@@ -84,22 +111,22 @@ public interface ClientResource {
      * @return
      */
     @Path("certificates/{attr}")
-    public ClientAttributeCertificateResource getCertficateResource(@PathParam("attr") String attributePrefix);
+    ClientAttributeCertificateResource getCertficateResource(@PathParam("attr") String attributePrefix);
 
     @GET
     @NoCache
     @Path("installation/providers/{providerId}")
-    public String getInstallationProvider(@PathParam("providerId") String providerId);
+    String getInstallationProvider(@PathParam("providerId") String providerId);
 
     @Path("session-count")
     @GET
     @Produces(MediaType.APPLICATION_JSON)
-    public Map<String, Integer> getApplicationSessionCount();
+    Map<String, Integer> getApplicationSessionCount();
 
     @Path("user-sessions")
     @GET
     @Produces(MediaType.APPLICATION_JSON)
-    public List<UserSessionRepresentation> getUserSessions(@QueryParam("first") Integer firstResult, @QueryParam("max") Integer maxResults);
+    List<UserSessionRepresentation> getUserSessions(@QueryParam("first") Integer firstResult, @QueryParam("max") Integer maxResults);
 
     @Path("offline-session-count")
     @GET
@@ -117,10 +144,46 @@ public interface ClientResource {
     void pushRevocation();
 
     @Path("/scope-mappings")
-    public RoleMappingResource getScopeMappings();
+    RoleMappingResource getScopeMappings();
 
     @Path("/roles")
-    public RolesResource roles();
+    RolesResource roles();
+
+    /**
+     * Get default client scopes.  Only name and ids are returned.
+     *
+     * @return default client scopes
+     */
+    @GET
+    @Produces(MediaType.APPLICATION_JSON)
+    @Path("default-client-scopes")
+    List<ClientScopeRepresentation> getDefaultClientScopes();
+
+    @PUT
+    @Path("default-client-scopes/{clientScopeId}")
+    void addDefaultClientScope(@PathParam("clientScopeId") String clientScopeId);
+
+    @DELETE
+    @Path("default-client-scopes/{clientScopeId}")
+    void removeDefaultClientScope(@PathParam("clientScopeId") String clientScopeId);
+
+    /**
+     * Get optional client scopes.  Only name and ids are returned.
+     *
+     * @return optional client scopes
+     */
+    @GET
+    @Produces(MediaType.APPLICATION_JSON)
+    @Path("optional-client-scopes")
+    List<ClientScopeRepresentation> getOptionalClientScopes();
+
+    @PUT
+    @Path("optional-client-scopes/{clientScopeId}")
+    void addOptionalClientScope(@PathParam("clientScopeId") String clientScopeId);
+
+    @DELETE
+    @Path("optional-client-scopes/{clientScopeId}")
+    void removeOptionalClientScope(@PathParam("clientScopeId") String clientScopeId);
 
     @Path("/service-account-user")
     @GET

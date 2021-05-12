@@ -33,6 +33,7 @@ import org.keycloak.representations.adapters.config.AdapterConfig;
 import java.io.IOException;
 import java.net.URI;
 import java.util.Map;
+import java.util.concurrent.Callable;
 
 /**
  * @author <a href="mailto:bill@burkecentral.com">Bill Burke</a>
@@ -206,6 +207,16 @@ public class AdapterDeploymentContext {
         public void setBearerOnly(boolean bearerOnly) {
             delegate.setBearerOnly(bearerOnly);
         }
+        
+        @Override
+        public boolean isAutodetectBearerOnly() {
+            return delegate.isAutodetectBearerOnly();
+        }
+        
+        @Override
+        public void setAutodetectBearerOnly(boolean autodetectBearerOnly) {
+            delegate.setAutodetectBearerOnly(autodetectBearerOnly);
+        }
 
         @Override
         public boolean isEnableBasicAuth() {
@@ -278,6 +289,16 @@ public class AdapterDeploymentContext {
         }
 
         @Override
+        public int getConfidentialPort() {
+            return delegate.getConfidentialPort();
+        }
+
+        @Override
+        public void setConfidentialPort(int confidentialPort) {
+            delegate.setConfidentialPort(confidentialPort);
+        }
+
+        @Override
         public TokenStore getTokenStore() {
             return delegate.getTokenStore();
         }
@@ -285,6 +306,16 @@ public class AdapterDeploymentContext {
         @Override
         public void setTokenStore(TokenStore tokenStore) {
             delegate.setTokenStore(tokenStore);
+        }
+
+        @Override
+        public String getAdapterStateCookiePath() {
+            return delegate.getAdapterStateCookiePath();
+        }
+
+        @Override
+        public void setAdapterStateCookiePath(String adapterStateCookiePath) {
+            delegate.setAdapterStateCookiePath(adapterStateCookiePath);
         }
 
         @Override
@@ -439,7 +470,7 @@ public class AdapterDeploymentContext {
         }
 
         @Override
-        public void setPolicyEnforcer(PolicyEnforcer policyEnforcer) {
+        public void setPolicyEnforcer(Callable<PolicyEnforcer> policyEnforcer) {
             delegate.setPolicyEnforcer(policyEnforcer);
         }
 
@@ -461,6 +492,16 @@ public class AdapterDeploymentContext {
         @Override
         public void setPublicKeyCacheTtl(int publicKeyCacheTtl) {
             delegate.setPublicKeyCacheTtl(publicKeyCacheTtl);
+        }
+
+        @Override
+        public boolean isVerifyTokenAudience() {
+            return delegate.isVerifyTokenAudience();
+        }
+
+        @Override
+        public void setVerifyTokenAudience(boolean verifyTokenAudience) {
+            delegate.setVerifyTokenAudience(verifyTokenAudience);
         }
     }
 

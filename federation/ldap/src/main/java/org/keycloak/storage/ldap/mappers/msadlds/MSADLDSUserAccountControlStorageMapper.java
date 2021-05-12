@@ -19,12 +19,11 @@ package org.keycloak.storage.ldap.mappers.msadlds;
 
 import org.jboss.logging.Logger;
 import org.keycloak.component.ComponentModel;
-import org.keycloak.credential.CredentialInput;
 import org.keycloak.models.LDAPConstants;
 import org.keycloak.models.ModelException;
 import org.keycloak.models.RealmModel;
+import org.keycloak.models.UserCredentialModel;
 import org.keycloak.models.UserModel;
-import org.keycloak.models.credential.PasswordUserCredentialModel;
 import org.keycloak.models.utils.UserModelDelegate;
 import org.keycloak.storage.UserStorageProvider;
 import org.keycloak.storage.ldap.LDAPStorageProvider;
@@ -35,10 +34,10 @@ import org.keycloak.storage.ldap.mappers.LDAPOperationDecorator;
 import org.keycloak.storage.ldap.mappers.PasswordUpdateCallback;
 
 import javax.naming.AuthenticationException;
-import java.util.HashSet;
-import java.util.Set;
+import java.util.Objects;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Stream;
 
 /**
  * Mapper specific to MSAD LDS. It's able to read the msDS-UserAccountDisabled, msDS-UserPasswordExpired and pwdLastSet attributes and set actions in Keycloak based on that.
@@ -73,30 +72,30 @@ public class MSADLDSUserAccountControlStorageMapper extends AbstractLDAPStorageM
     }
 
     @Override
-    public LDAPOperationDecorator beforePasswordUpdate(UserModel user, LDAPObject ldapUser, PasswordUserCredentialModel password) {
+    public LDAPOperationDecorator beforePasswordUpdate(UserModel user, LDAPObject ldapUser, UserCredentialModel password) {
         return null; // Not supported for now. Not sure if LDAP_SERVER_POLICY_HINTS_OID works in MSAD LDS
     }
 
     @Override
-    public void passwordUpdated(UserModel user, LDAPObject ldapUser, PasswordUserCredentialModel password) {
+    public void passwordUpdated(UserModel user, LDAPObject ldapUser, UserCredentialModel password) {
         logger.debugf("Going to update pwdLastSet for ldap user '%s' after successful password update", ldapUser.getDn().toString());
 
-        // Normally it's read-only
+        // Normally it's read-only and adlds do this automaticly
         ldapUser.removeReadOnlyAttributeName(LDAPConstants.PWD_LAST_SET);
-
+        // set but not commit in AD LDS (-1 set pwdLastSet time to now)
         ldapUser.setSingleAttribute(LDAPConstants.PWD_LAST_SET, "-1");
-        
+
         if (user.isEnabled()) {
             // TODO: Use removeAttribute once available
             ldapUser.setSingleAttribute(LDAPConstants.MSDS_USER_ACCOUNT_DISABLED, "FALSE");
-            logger.debugf("Removing msDS-UserPasswordExpired of user '%s'", ldapUser.getDn().toString());
+            logger.debugf("Removing %s of user '%s'",LDAPConstants.MSDS_USER_ACCOUNT_DISABLED, ldapUser.getDn().toString());
         }
 
         ldapProvider.getLdapIdentityStore().update(ldapUser);
     }
 
     @Override
-    public void passwordUpdateFailed(UserModel user, LDAPObject ldapUser, PasswordUserCredentialModel password, ModelException exception) {
+    public void passwordUpdateFailed(UserModel user, LDAPObject ldapUser, UserCredentialModel password, ModelException exception) {
         throw processFailedPasswordUpdateException(exception);
     }
 
@@ -133,7 +132,7 @@ public class MSADLDSUserAccountControlStorageMapper extends AbstractLDAPStorageM
         if (ldapProvider.getEditMode() == UserStorageProvider.EditMode.WRITABLE) {
             if (errorCode.equals("532") || errorCode.equals("773")) {
                 // User needs to change his MSAD password. Allow him to login, but add UPDATE_PASSWORD required action
-                if (!user.getRequiredActions().contains(UserModel.RequiredAction.UPDATE_PASSWORD.name())) {
+                if (user.getRequiredActionsStream().noneMatch(action -> Objects.equals(action, UserModel.RequiredAction.UPDATE_PASSWORD.name()))) {
                     user.addRequiredAction(UserModel.RequiredAction.UPDATE_PASSWORD);
                 }
                 return true;
@@ -181,7 +180,9 @@ public class MSADLDSUserAccountControlStorageMapper extends AbstractLDAPStorageM
         public boolean isEnabled() {
             boolean kcEnabled = super.isEnabled();
 
-            if (getPwdLastSet() > 0) {
+            // getPwdLastSet() == -1 when is set but not commit in AD LDS (-1 set pwdLastSet time to now)
+            if (getPwdLastSet() > 0
+                || getPwdLastSet() == -1) {
                 // Merge KC and MSAD LDS
                 return kcEnabled && !Boolean.parseBoolean(ldapUser.getAttributeAsString(LDAPConstants.MSDS_USER_ACCOUNT_DISABLED));
             } else {
@@ -258,17 +259,14 @@ public class MSADLDSUserAccountControlStorageMapper extends AbstractLDAPStorageM
         }
 
         @Override
-        public Set<String> getRequiredActions() {
-            Set<String> requiredActions = super.getRequiredActions();
+        public Stream<String> getRequiredActionsStream() {
+            Stream<String> requiredActions = super.getRequiredActionsStream();
 
             if (ldapProvider.getEditMode() == UserStorageProvider.EditMode.WRITABLE) {
                 if (getPwdLastSet() == 0 || Boolean.parseBoolean(ldapUser.getAttributeAsString(LDAPConstants.MSDS_USER_PASSWORD_EXPIRED))) {
-                    requiredActions = new HashSet<>(requiredActions);
-                    requiredActions.add(RequiredAction.UPDATE_PASSWORD.toString());
-                    return requiredActions;
+                    return Stream.concat(requiredActions, Stream.of(RequiredAction.UPDATE_PASSWORD.toString())).distinct();
                 }
             }
-
             return requiredActions;
         }
 

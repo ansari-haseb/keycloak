@@ -17,16 +17,6 @@
 
 package org.keycloak.services.resources.admin;
 
-import java.util.List;
-import java.util.stream.Collectors;
-
-import javax.ws.rs.GET;
-import javax.ws.rs.Path;
-import javax.ws.rs.Produces;
-import javax.ws.rs.core.Context;
-import javax.ws.rs.core.MediaType;
-import javax.ws.rs.core.UriInfo;
-
 import org.jboss.resteasy.annotations.cache.NoCache;
 import org.keycloak.events.admin.ResourceType;
 import org.keycloak.models.KeycloakSession;
@@ -37,6 +27,15 @@ import org.keycloak.provider.ProviderFactory;
 import org.keycloak.representations.idm.ComponentTypeRepresentation;
 import org.keycloak.services.clientregistration.policy.ClientRegistrationPolicy;
 import org.keycloak.services.clientregistration.policy.ClientRegistrationPolicyFactory;
+import org.keycloak.services.resources.admin.permissions.AdminPermissionEvaluator;
+
+import javax.ws.rs.GET;
+import javax.ws.rs.Path;
+import javax.ws.rs.Produces;
+import javax.ws.rs.core.Context;
+import javax.ws.rs.core.MediaType;
+import java.util.List;
+import java.util.stream.Stream;
 
 /**
  * @resource Client Registration Policy
@@ -44,22 +43,18 @@ import org.keycloak.services.clientregistration.policy.ClientRegistrationPolicyF
  */
 public class ClientRegistrationPolicyResource {
 
-    private final RealmAuth auth;
+    private final AdminPermissionEvaluator auth;
     private final RealmModel realm;
     private final AdminEventBuilder adminEvent;
 
     @Context
     protected KeycloakSession session;
 
-    @Context
-    protected UriInfo uriInfo;
-
-    public ClientRegistrationPolicyResource(RealmModel realm, RealmAuth auth, AdminEventBuilder adminEvent) {
+    public ClientRegistrationPolicyResource(RealmModel realm, AdminPermissionEvaluator auth, AdminEventBuilder adminEvent) {
         this.auth = auth;
         this.realm = realm;
         this.adminEvent = adminEvent.resource(ResourceType.CLIENT_INITIAL_ACCESS_MODEL);
 
-        auth.init(RealmAuth.Resource.CLIENT);
     }
 
 
@@ -72,23 +67,17 @@ public class ClientRegistrationPolicyResource {
     @GET
     @NoCache
     @Produces(MediaType.APPLICATION_JSON)
-    public List<ComponentTypeRepresentation> getProviders() {
-        List<ProviderFactory> providerFactories = session.getKeycloakSessionFactory().getProviderFactories(ClientRegistrationPolicy.class);
+    public Stream<ComponentTypeRepresentation> getProviders() {
+        return session.getKeycloakSessionFactory().getProviderFactoriesStream(ClientRegistrationPolicy.class)
+                .map((ProviderFactory factory) -> {
+                    ClientRegistrationPolicyFactory clientRegFactory = (ClientRegistrationPolicyFactory) factory;
+                    List<ProviderConfigProperty> configProps = clientRegFactory.getConfigProperties(session);
 
-        return providerFactories.stream().map((ProviderFactory factory) -> {
-
-            ClientRegistrationPolicyFactory clientRegFactory = (ClientRegistrationPolicyFactory) factory;
-            List<ProviderConfigProperty> configProps = clientRegFactory.getConfigProperties(session);
-
-            ComponentTypeRepresentation rep = new ComponentTypeRepresentation();
-            rep.setId(clientRegFactory.getId());
-            rep.setHelpText(clientRegFactory.getHelpText());
-            rep.setProperties(ModelToRepresentation.toRepresentation(configProps));
-            return rep;
-
-        }).collect(Collectors.toList());
+                    ComponentTypeRepresentation rep = new ComponentTypeRepresentation();
+                    rep.setId(clientRegFactory.getId());
+                    rep.setHelpText(clientRegFactory.getHelpText());
+                    rep.setProperties(ModelToRepresentation.toRepresentation(configProps));
+                    return rep;
+                });
     }
-
-
-
 }

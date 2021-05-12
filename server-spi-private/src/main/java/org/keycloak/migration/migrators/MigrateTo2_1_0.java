@@ -26,6 +26,7 @@ import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.RequiredActionProviderModel;
 import org.keycloak.models.UserModel;
+import org.keycloak.representations.idm.RealmRepresentation;
 import org.keycloak.util.JsonSerialization;
 
 import java.util.HashMap;
@@ -46,12 +47,19 @@ public class MigrateTo2_1_0 implements Migration {
     }
 
     public void migrate(KeycloakSession session) {
-        for (RealmModel realm : session.realms().getRealms()) {
+        session.realms().getRealmsStream().forEach(realm -> {
             migrateDefaultRequiredAction(realm);
             migrateRolePolicies(realm, session);
-        }
+        });
     }
-    
+
+    @Override
+    public void migrateImport(KeycloakSession session, RealmModel realm, RealmRepresentation rep, boolean skipUserDependent) {
+        migrateDefaultRequiredAction(realm);
+        migrateRolePolicies(realm, session);
+
+    }
+
     // KEYCLOAK-3244: Required Action "Configure Totp" should be "Configure OTP"
     private void migrateDefaultRequiredAction(RealmModel realm) {
         RequiredActionProviderModel otpAction = realm.getRequiredActionProviderByAlias(UserModel.RequiredAction.CONFIGURE_TOTP.name());
@@ -66,12 +74,12 @@ public class MigrateTo2_1_0 implements Migration {
         AuthorizationProvider authorizationProvider = session.getProvider(AuthorizationProvider.class);
         StoreFactory storeFactory = authorizationProvider.getStoreFactory();
         PolicyStore policyStore = storeFactory.getPolicyStore();
-        realm.getClients().forEach(clientModel -> {
-            ResourceServer resourceServer = storeFactory.getResourceServerStore().findByClient(clientModel.getId());
+        realm.getClientsStream().forEach(clientModel -> {
+            ResourceServer resourceServer = storeFactory.getResourceServerStore().findById(clientModel.getId());
 
             if (resourceServer != null) {
                 policyStore.findByType("role", resourceServer.getId()).forEach(policy -> {
-                    Map<String, String> config = policy.getConfig();
+                    Map<String, String> config = new HashMap(policy.getConfig());
                     String roles = config.get("roles");
                     List roleConfig;
 

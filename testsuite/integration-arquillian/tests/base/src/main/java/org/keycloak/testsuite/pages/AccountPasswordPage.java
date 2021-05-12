@@ -16,7 +16,7 @@
  */
 package org.keycloak.testsuite.pages;
 
-import org.keycloak.services.resources.AccountService;
+import org.keycloak.services.resources.account.AccountFormService;
 import org.openqa.selenium.WebElement;
 import org.openqa.selenium.support.FindBy;
 
@@ -38,6 +38,9 @@ public class AccountPasswordPage extends AbstractAccountPage {
 
     @FindBy(className = "btn-primary")
     private WebElement submitButton;
+
+    @FindBy(className = "alert-error")
+    private WebElement errorMessage;
 
     private String realmName = "test";
 
@@ -69,6 +72,10 @@ public class AccountPasswordPage extends AbstractAccountPage {
     }
 
     public String getPath() {
-        return AccountService.passwordUrl(UriBuilder.fromUri(getAuthServerRoot())).build(this.realmName).toString();
+        return AccountFormService.passwordUrl(UriBuilder.fromUri(getAuthServerRoot())).build(this.realmName).toString();
+    }
+
+    public String getError() {
+        return errorMessage.getText();
     }
 }

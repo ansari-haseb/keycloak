@@ -17,22 +17,20 @@
 
 package org.keycloak.protocol.oidc.mappers;
 
-import org.keycloak.models.ClientSessionModel;
 import org.keycloak.models.GroupModel;
-import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.ProtocolMapperModel;
 import org.keycloak.models.UserSessionModel;
 import org.keycloak.models.utils.ModelToRepresentation;
 import org.keycloak.protocol.oidc.OIDCLoginProtocol;
 import org.keycloak.provider.ProviderConfigProperty;
-import org.keycloak.representations.AccessToken;
 import org.keycloak.representations.IDToken;
 
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
  * Maps user group membership
@@ -96,16 +94,10 @@ public class GroupMembershipMapper extends AbstractOIDCProtocolMapper implements
      * @param userSession
      */
     protected void setClaim(IDToken token, ProtocolMapperModel mappingModel, UserSessionModel userSession) {
+        Function<GroupModel, String> toGroupRepresentation = useFullPath(mappingModel) ?
+                ModelToRepresentation::buildGroupPath : GroupModel::getName;
+        List<String> membership = userSession.getUser().getGroupsStream().map(toGroupRepresentation).collect(Collectors.toList());
 
-        List<String> membership = new LinkedList<>();
-        boolean fullPath = useFullPath(mappingModel);
-        for (GroupModel group : userSession.getUser().getGroups()) {
-            if (fullPath) {
-                membership.add(ModelToRepresentation.buildGroupPath(group));
-            } else {
-                membership.add(group.getName());
-            }
-        }
         String protocolClaim = mappingModel.getConfig().get(OIDCAttributeMapperHelper.TOKEN_CLAIM_NAME);
 
         token.getOtherClaims().put(protocolClaim, membership);
@@ -119,8 +111,6 @@ public class GroupMembershipMapper extends AbstractOIDCProtocolMapper implements
         mapper.setName(name);
         mapper.setProtocolMapper(PROVIDER_ID);
         mapper.setProtocol(OIDCLoginProtocol.LOGIN_PROTOCOL);
-        mapper.setConsentRequired(consentRequired);
-        mapper.setConsentText(consentText);
         Map<String, String> config = new HashMap<String, String>();
         config.put(OIDCAttributeMapperHelper.TOKEN_CLAIM_NAME, tokenClaimName);
         if (accessToken) config.put(OIDCAttributeMapperHelper.INCLUDE_IN_ACCESS_TOKEN, "true");

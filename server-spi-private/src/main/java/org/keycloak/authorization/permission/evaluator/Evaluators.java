@@ -18,12 +18,13 @@
 
 package org.keycloak.authorization.permission.evaluator;
 
-import java.util.List;
-import java.util.concurrent.Executor;
-
+import org.keycloak.authorization.AuthorizationProvider;
+import org.keycloak.authorization.model.ResourceServer;
 import org.keycloak.authorization.permission.ResourcePermission;
-import org.keycloak.authorization.policy.evaluation.DefaultPolicyEvaluator;
 import org.keycloak.authorization.policy.evaluation.EvaluationContext;
+import org.keycloak.representations.idm.authorization.AuthorizationRequest;
+
+import java.util.Collection;
 
 /**
  * A factory for the different {@link PermissionEvaluator} implementations.
@@ -32,19 +33,17 @@ import org.keycloak.authorization.policy.evaluation.EvaluationContext;
  */
 public final class Evaluators {
 
-    private final DefaultPolicyEvaluator policyEvaluator;
-    private final Executor scheduler;
+    private final AuthorizationProvider authorizationProvider;
 
-    public Evaluators(DefaultPolicyEvaluator policyEvaluator, Executor scheduler) {
-        this.policyEvaluator = policyEvaluator;
-        this.scheduler = scheduler;
+    public Evaluators(AuthorizationProvider authorizationProvider) {
+        this.authorizationProvider = authorizationProvider;
     }
 
-    public PermissionEvaluator from(List<ResourcePermission> permissions, EvaluationContext evaluationContext) {
-        return schedule(permissions, evaluationContext);
+    public PermissionEvaluator from(Collection<ResourcePermission> permissions, EvaluationContext evaluationContext) {
+        return new IterablePermissionEvaluator(permissions.iterator(), evaluationContext, authorizationProvider);
     }
 
-    public PermissionEvaluator schedule(List<ResourcePermission> permissions, EvaluationContext evaluationContext) {
-        return new ScheduledPermissionEvaluator(new IterablePermissionEvaluator(permissions.iterator(), evaluationContext, this.policyEvaluator), this.scheduler);
+    public PermissionEvaluator from(EvaluationContext evaluationContext, ResourceServer resourceServer, AuthorizationRequest request) {
+        return new UnboundedPermissionEvaluator(evaluationContext, authorizationProvider, resourceServer, request);
     }
 }

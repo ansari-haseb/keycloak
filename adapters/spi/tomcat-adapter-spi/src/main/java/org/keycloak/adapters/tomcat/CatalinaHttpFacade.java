@@ -26,6 +26,8 @@ import org.keycloak.common.util.UriUtils;
 
 import javax.security.cert.X509Certificate;
 import javax.servlet.http.HttpServletResponse;
+
+import java.io.BufferedInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -69,6 +71,9 @@ public class CatalinaHttpFacade implements HttpFacade {
     }
 
     protected class RequestFacade implements Request {
+
+        private InputStream inputStream;
+
         @Override
         public String getURI() {
             StringBuffer buf = request.getRequestURL();
@@ -136,6 +141,23 @@ public class CatalinaHttpFacade implements HttpFacade {
 
         @Override
         public InputStream getInputStream() {
+            return getInputStream(false);
+        }
+
+        @Override
+        public InputStream getInputStream(boolean buffered) {
+            if (inputStream != null) {
+                return inputStream;
+            }
+
+            if (buffered) {
+                try {
+                    return inputStream = new BufferedInputStream(request.getInputStream());
+                } catch (IOException e) {
+                    throw new RuntimeException(e);
+                }
+            }
+
             try {
                 return request.getInputStream();
             } catch (IOException e) {
@@ -197,7 +219,7 @@ public class CatalinaHttpFacade implements HttpFacade {
         @Override
         public void setCookie(String name, String value, String path, String domain, int maxAge, boolean secure, boolean httpOnly) {
             StringBuffer cookieBuf = new StringBuffer();
-            ServerCookie.appendCookieValue(cookieBuf, 1, name, value, path, domain, null, maxAge, secure, httpOnly);
+            ServerCookie.appendCookieValue(cookieBuf, 1, name, value, path, domain, null, maxAge, secure, httpOnly, null);
             String cookie = cookieBuf.toString();
             response.addHeader("Set-Cookie", cookie);
         }

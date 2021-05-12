@@ -23,7 +23,7 @@ import org.keycloak.adapters.AdapterUtils;
 import org.keycloak.adapters.KeycloakDeployment;
 import org.keycloak.adapters.KeycloakDeploymentBuilder;
 import org.keycloak.adapters.RefreshableKeycloakSecurityContext;
-import org.keycloak.adapters.rotation.AdapterRSATokenVerifier;
+import org.keycloak.adapters.rotation.AdapterTokenVerifier;
 import org.keycloak.common.VerificationException;
 import org.keycloak.common.util.FindFile;
 import org.keycloak.common.util.reflections.Reflections;
@@ -37,8 +37,12 @@ import javax.security.auth.callback.PasswordCallback;
 import javax.security.auth.callback.UnsupportedCallbackException;
 import javax.security.auth.login.LoginException;
 import javax.security.auth.spi.LoginModule;
+
+import java.io.IOException;
 import java.io.InputStream;
 import java.lang.reflect.Constructor;
+import java.net.MalformedURLException;
+import java.net.URL;
 import java.security.Principal;
 import java.util.HashSet;
 import java.util.Map;
@@ -53,7 +57,7 @@ public abstract class AbstractKeycloakLoginModule implements LoginModule {
 
     public static final String KEYCLOAK_CONFIG_FILE_OPTION = "keycloak-config-file";
     public static final String ROLE_PRINCIPAL_CLASS_OPTION = "role-principal-class";
-
+    public static final String PROFILE_RESOURCE = "profile:";
     protected Subject subject;
     protected CallbackHandler callbackHandler;
     protected Auth auth;
@@ -61,7 +65,7 @@ public abstract class AbstractKeycloakLoginModule implements LoginModule {
     protected String rolePrincipalClass;
 
     // This is to avoid parsing keycloak.json file in each request. Key is file location, Value is parsed keycloak deployment
-    private static ConcurrentMap<String, KeycloakDeployment> deployments = new ConcurrentHashMap<String, KeycloakDeployment>();
+    private static ConcurrentMap<String, KeycloakDeployment> deployments = new ConcurrentHashMap<>();
 
     @Override
     public void initialize(Subject subject, CallbackHandler callbackHandler, Map<String, ?> sharedState, Map<String, ?> options) {
@@ -84,14 +88,27 @@ public abstract class AbstractKeycloakLoginModule implements LoginModule {
 
     protected KeycloakDeployment resolveDeployment(String keycloakConfigFile) {
         try {
-            InputStream is = FindFile.findFile(keycloakConfigFile);
+            InputStream is = null;
+            if (keycloakConfigFile.startsWith(PROFILE_RESOURCE)) {
+                try {
+                    is = new URL(keycloakConfigFile).openStream();
+                } catch (MalformedURLException mfue) {
+                    throw new RuntimeException(mfue);
+                } catch (IOException ioe) {
+                    throw new RuntimeException(ioe);
+                }
+            } else {
+                is = FindFile.findFile(keycloakConfigFile);
+            }
             KeycloakDeployment kd = KeycloakDeploymentBuilder.build(is);
             return kd;
+
         } catch (RuntimeException e) {
             getLogger().debug("Unable to find or parse file " + keycloakConfigFile + " due to " + e.getMessage(), e);
             throw e;
         }
     }
+    
 
     @Override
     public boolean login() throws LoginException {
@@ -185,8 +202,16 @@ public abstract class AbstractKeycloakLoginModule implements LoginModule {
 
 
     protected Auth bearerAuth(String tokenString) throws VerificationException {
-        AccessToken token = AdapterRSATokenVerifier.verifyToken(tokenString, deployment);
+        AccessToken token = AdapterTokenVerifier.verifyToken(tokenString, deployment);
+        return postTokenVerification(tokenString, token);
+    }
 
+
+    /**
+     * Called after accessToken was verified (including signature, expiration etc)
+     *
+     */
+    protected Auth postTokenVerification(String tokenString, AccessToken token) {
         boolean verifyCaller;
         if (deployment.isUseResourceRoleMappings()) {
             verifyCaller = token.isVerifyCaller(deployment.getResourceName());

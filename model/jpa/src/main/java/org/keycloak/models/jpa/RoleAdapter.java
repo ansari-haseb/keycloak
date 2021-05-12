@@ -21,13 +21,20 @@ import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.RoleContainerModel;
 import org.keycloak.models.RoleModel;
+import org.keycloak.models.jpa.entities.RoleAttributeEntity;
 import org.keycloak.models.jpa.entities.RoleEntity;
 import org.keycloak.models.utils.KeycloakModelUtils;
 
 import javax.persistence.EntityManager;
+import javax.persistence.Query;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Iterator;
-import java.util.Set;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.stream.Stream;
 
 /**
  * @author <a href="mailto:bill@burkecentral.com">Bill Burke</a>
@@ -46,6 +53,7 @@ public class RoleAdapter implements RoleModel, JpaModel<RoleEntity> {
         this.session = session;
     }
 
+    @Override
     public RoleEntity getEntity() {
         return role;
     }
@@ -70,16 +78,6 @@ public class RoleAdapter implements RoleModel, JpaModel<RoleEntity> {
     }
 
     @Override
-    public boolean isScopeParamRequired() {
-        return role.isScopeParamRequired();
-    }
-
-    @Override
-    public void setScopeParamRequired(boolean scopeParamRequired) {
-        role.setScopeParamRequired(scopeParamRequired);
-    }
-
-    @Override
     public String getId() {
         return role.getId();
     }
@@ -91,44 +89,86 @@ public class RoleAdapter implements RoleModel, JpaModel<RoleEntity> {
 
     @Override
     public boolean isComposite() {
-        return getComposites().size() > 0;
+        return getCompositesStream().count() > 0;
     }
 
     @Override
     public void addCompositeRole(RoleModel role) {
-        RoleEntity entity = RoleAdapter.toRoleEntity(role, em);
+        RoleEntity entity = toRoleEntity(role);
         for (RoleEntity composite : getEntity().getCompositeRoles()) {
             if (composite.equals(entity)) return;
         }
         getEntity().getCompositeRoles().add(entity);
-        em.flush();
     }
 
     @Override
     public void removeCompositeRole(RoleModel role) {
-        RoleEntity entity = RoleAdapter.toRoleEntity(role, em);
-        Iterator<RoleEntity> it = getEntity().getCompositeRoles().iterator();
-        while (it.hasNext()) {
-            if (it.next().equals(entity)) it.remove();
-        }
+        RoleEntity entity = toRoleEntity(role);
+        getEntity().getCompositeRoles().remove(entity);
     }
 
     @Override
-    public Set<RoleModel> getComposites() {
-        Set<RoleModel> set = new HashSet<RoleModel>();
-
-        for (RoleEntity composite : getEntity().getCompositeRoles()) {
-            set.add(new RoleAdapter(session, realm, em, composite));
-
-            // todo I want to do this, but can't as you get stack overflow
-            // set.add(session.realms().getRoleById(composite.getId(), realm));
-        }
-        return set;
+    public Stream<RoleModel> getCompositesStream() {
+        Stream<RoleModel> composites = getEntity().getCompositeRoles().stream().map(c -> new RoleAdapter(session, realm, em, c));
+        return composites.filter(Objects::nonNull);
     }
 
     @Override
     public boolean hasRole(RoleModel role) {
         return this.equals(role) || KeycloakModelUtils.searchFor(role, this, new HashSet<>());
+    }
+
+    private void persistAttributeValue(String name, String value) {
+        RoleAttributeEntity attr = new RoleAttributeEntity();
+        attr.setId(KeycloakModelUtils.generateId());
+        attr.setName(name);
+        attr.setValue(value);
+        attr.setRole(role);
+        em.persist(attr);
+        role.getAttributes().add(attr);
+    }
+
+    @Override
+    public void setSingleAttribute(String name, String value) {
+        setAttribute(name, Collections.singletonList(value));
+    }
+
+    @Override
+    public void setAttribute(String name, List<String> values) {
+        removeAttribute(name);
+
+        for (String value : values) {
+            persistAttributeValue(name, value);
+        }
+    }
+
+    @Override
+    public void removeAttribute(String name) {
+        List<RoleAttributeEntity> attributes = role.getAttributes();
+
+        Query query = em.createNamedQuery("deleteRoleAttributesByNameAndUser");
+        query.setParameter("name", name);
+        query.setParameter("roleId", role.getId());
+        query.executeUpdate();
+
+        attributes.removeIf(attribute -> attribute.getName().equals(name));
+    }
+
+    @Override
+    public Stream<String> getAttributeStream(String name) {
+        return role.getAttributes().stream()
+                .filter(a -> Objects.equals(a.getName(), name))
+                .map(RoleAttributeEntity::getValue);
+    }
+
+    @Override
+    public Map<String, List<String>> getAttributes() {
+        Map<String, List<String>> map = new HashMap<>();
+        for (RoleAttributeEntity attribute : role.getAttributes()) {
+            map.computeIfAbsent(attribute.getName(), name -> new ArrayList<>()).add(attribute.getValue());
+        }
+
+        return map;
     }
 
     @Override
@@ -138,19 +178,13 @@ public class RoleAdapter implements RoleModel, JpaModel<RoleEntity> {
 
     @Override
     public String getContainerId() {
-        if (isClientRole()) return role.getClient().getId();
-        else return realm.getId();
+        return isClientRole() ? role.getClientId() : role.getRealmId();
     }
 
 
     @Override
     public RoleContainerModel getContainer() {
-        if (role.isClientRole()) {
-            return realm.getClientById(role.getClient().getId());
-
-        } else {
-            return realm;
-        }
+        return isClientRole() ? realm.getClientById(role.getClientId()) : realm;
     }
 
     @Override
@@ -167,9 +201,9 @@ public class RoleAdapter implements RoleModel, JpaModel<RoleEntity> {
         return getId().hashCode();
     }
 
-    public static RoleEntity toRoleEntity(RoleModel model, EntityManager em) {
+    private RoleEntity toRoleEntity(RoleModel model) {
         if (model instanceof RoleAdapter) {
-            return ((RoleAdapter)model).getEntity();
+            return ((RoleAdapter) model).getEntity();
         }
         return em.getReference(RoleEntity.class, model.getId());
     }

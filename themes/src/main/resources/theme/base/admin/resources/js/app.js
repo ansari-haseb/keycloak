@@ -1,10 +1,5 @@
 'use strict';
 
-var consoleBaseUrl = window.location.href;
-consoleBaseUrl = consoleBaseUrl.substring(0, consoleBaseUrl.indexOf("/console"));
-consoleBaseUrl = consoleBaseUrl + "/console";
-var configUrl = consoleBaseUrl + "/config";
-
 var auth = {};
 var resourceBundle;
 var locale = 'en';
@@ -12,13 +7,15 @@ var locale = 'en';
 var module = angular.module('keycloak', [ 'keycloak.services', 'keycloak.loaders', 'ui.bootstrap', 'ui.select2', 'angularFileUpload', 'angularTreeview', 'pascalprecht.translate', 'ngCookies', 'ngSanitize', 'ui.ace']);
 var resourceRequests = 0;
 var loadingTimer = -1;
+var translateProvider = null;
+var currentRealm = null;
 
 angular.element(document).ready(function () {
-    var keycloakAuth = new Keycloak(configUrl);
+    var keycloakAuth = new Keycloak(consoleBaseUrl + 'config');
 
     function whoAmI(success, error) {
         var req = new XMLHttpRequest();
-        req.open('GET', consoleBaseUrl + "/whoami", true);
+        req.open('GET', consoleBaseUrl + 'whoami', true);
         req.setRequestHeader('Accept', 'application/json');
         req.setRequestHeader('Authorization', 'bearer ' + keycloakAuth.token);
 
@@ -38,7 +35,7 @@ angular.element(document).ready(function () {
 
     function loadResourceBundle(success, error) {
         var req = new XMLHttpRequest();
-        req.open('GET', consoleBaseUrl + '/messages.json?lang=' + locale, true);
+        req.open('GET', consoleBaseUrl + 'messages.json?lang=' + locale, true);
         req.setRequestHeader('Accept', 'application/json');
 
         req.onreadystatechange = function () {
@@ -55,6 +52,28 @@ angular.element(document).ready(function () {
         req.send();
     }
 
+    function loadSelect2Localization() {
+        // 'en' is the built-in default and does not have to be loaded.
+        var supportedLocales = ['ar', 'az', 'bg', 'ca', 'cs', 'da', 'de', 'el', 'es', 'et', 'eu', 'fa', 'fi', 'fr',
+            'gl', 'he', 'hr', 'hu', 'id', 'is', 'it', 'ja', 'ka', 'ko', 'lt', 'lv', 'mk', 'ms', 'nl', 'no', 'pl',
+            'pt-BR', 'pt-PT', 'ro', 'rs', 'ru', 'sk', 'sv', 'th', 'tr', 'ug-CN', 'uk', 'vi', 'zh-CN', 'zh-TW'];
+        if (supportedLocales.indexOf(locale) == -1) return;
+        var select2JsUrl;
+        var allScriptElements = document.getElementsByTagName('script');
+        for (var i = 0, n = allScriptElements.length; i < n; i++) {
+            var src = allScriptElements[i].getAttribute('src');
+            if (src && src.match(/\/select2\/select2\.js$/)) {
+                select2JsUrl = src;
+                break;
+            }
+        }
+        if (!select2JsUrl) return;
+        var scriptElement = document.createElement('script');
+        scriptElement.src = select2JsUrl.replace(/\/select2\/select2\.js$/, '/select2/select2_locale_'+locale+'.js');
+        scriptElement.type = 'text/javascript';
+        document.getElementsByTagName('head')[0].appendChild(scriptElement);
+    }
+
     function hasAnyAccess(user) {
         return user && user['realm_access'];
     }
@@ -63,32 +82,34 @@ angular.element(document).ready(function () {
         location.reload();
     }
 
-    keycloakAuth.init({ onLoad: 'login-required' }).success(function () {
+    auth.refreshPermissions = function(success, error) {
+        whoAmI(function(data) {
+            auth.user = data;
+            auth.loggedIn = true;
+            auth.hasAnyAccess = hasAnyAccess(data);
+
+            success();
+        }, function() {
+            error();
+        });
+    };
+
+    module.factory('Auth', function () {
+        return auth;
+    });
+
+    keycloakAuth.init({ onLoad: 'login-required', pkceMethod: 'S256' }).then(function () {
         auth.authz = keycloakAuth;
 
-        if (auth.authz.idTokenParsed.locale) {
-            locale = auth.authz.idTokenParsed.locale;
-        }
+        whoAmI(function(data) {
+            auth.user = data;
+            auth.loggedIn = true;
+            auth.hasAnyAccess = hasAnyAccess(data);
+            locale = auth.user.locale || locale;
 
-        auth.refreshPermissions = function(success, error) {
-            whoAmI(function(data) {
-                auth.user = data;
-                auth.loggedIn = true;
-                auth.hasAnyAccess = hasAnyAccess(data);
+            loadResourceBundle(function(data) {
+                resourceBundle = data;
 
-                success();
-            }, function() {
-                error();
-            });
-        };
-
-        loadResourceBundle(function(data) {
-            resourceBundle = data;
-
-            auth.refreshPermissions(function () {
-                module.factory('Auth', function () {
-                    return auth;
-                });
                 var injector = angular.bootstrap(document, ["keycloak"]);
 
                 injector.get('$translate')('consoleTitle').then(function (consoleTitle) {
@@ -96,7 +117,9 @@ angular.element(document).ready(function () {
                 });
             });
         });
-    }).error(function () {
+
+        loadSelect2Localization();
+    }).catch(function () {
         window.location.reload();
     });
 });
@@ -107,12 +130,12 @@ module.factory('authInterceptor', function($q, Auth) {
             if (!config.url.match(/.html$/)) {
                 var deferred = $q.defer();
                 if (Auth.authz.token) {
-                    Auth.authz.updateToken(5).success(function () {
+                    Auth.authz.updateToken(5).then(function () {
                         config.headers = config.headers || {};
                         config.headers.Authorization = 'Bearer ' + Auth.authz.token;
 
                         deferred.resolve(config);
-                    }).error(function () {
+                    }).catch(function () {
                         location.reload();
                     });
                 }
@@ -125,9 +148,16 @@ module.factory('authInterceptor', function($q, Auth) {
 });
 
 module.config(['$translateProvider', function($translateProvider) {
+    translateProvider = $translateProvider;
     $translateProvider.useSanitizeValueStrategy('sanitizeParameters');
     $translateProvider.preferredLanguage(locale);
     $translateProvider.translations(locale, resourceBundle);
+}]);
+
+// Change for upgrade to AngularJS 1.6
+// See https://github.com/angular/angular.js/commit/aa077e81129c740041438688dff2e8d20c3d7b52
+module.config(['$locationProvider', function($locationProvider) {
+  $locationProvider.hashPrefix('');
 }]);
 
 module.config([ '$routeProvider', function($routeProvider) {
@@ -150,6 +180,33 @@ module.config([ '$routeProvider', function($routeProvider) {
                 }
             },
             controller : 'RealmDetailCtrl'
+        })
+        .when('/realms/:realm/localization', {
+            templateUrl : resourceUrl + '/partials/realm-localization.html',
+            resolve : {
+                realm : function(RealmLoader) {
+                    return RealmLoader();
+                },
+                serverInfo : function(ServerInfoLoader) {
+                    return ServerInfoLoader();
+                },
+                realmSpecificLocales : function(RealmSpecificLocalesLoader) {
+                    return RealmSpecificLocalesLoader();
+                }
+            },
+            controller : 'RealmLocalizationCtrl'
+        })
+        .when('/realms/:realm/localization/upload', {
+            templateUrl : resourceUrl + '/partials/realm-localization-upload.html',
+            resolve : {
+                realm : function(RealmLoader) {
+                    return RealmLoader();
+                },
+                serverInfo : function(ServerInfoLoader) {
+                    return ServerInfoLoader();
+                }
+            },
+            controller : 'RealmLocalizationUploadCtrl'
         })
         .when('/realms/:realm/login-settings', {
             templateUrl : resourceUrl + '/partials/realm-login-settings.html',
@@ -194,6 +251,9 @@ module.config([ '$routeProvider', function($routeProvider) {
         .when('/realms/:realm/token-settings', {
             templateUrl : resourceUrl + '/partials/realm-tokens.html',
             resolve : {
+                serverInfo : function(ServerInfoLoader) {
+                    return ServerInfoLoader();
+                },
                 realm : function(RealmLoader) {
                     return RealmLoader();
                 }
@@ -285,8 +345,8 @@ module.config([ '$routeProvider', function($routeProvider) {
             },
             controller : 'RealmKeysCtrl'
         })
-        .when('/realms/:realm/keys/list', {
-            templateUrl : resourceUrl + '/partials/realm-keys-list.html',
+        .when('/realms/:realm/keys/passive', {
+            templateUrl : resourceUrl + '/partials/realm-keys-passive.html',
             resolve : {
                 realm : function(RealmLoader) {
                     return RealmLoader();
@@ -300,6 +360,21 @@ module.config([ '$routeProvider', function($routeProvider) {
             },
             controller : 'RealmKeysCtrl'
         })
+        .when('/realms/:realm/keys/disabled', {
+                    templateUrl : resourceUrl + '/partials/realm-keys-disabled.html',
+                    resolve : {
+                        realm : function(RealmLoader) {
+                            return RealmLoader();
+                        },
+                        serverInfo : function(ServerInfoLoader) {
+                            return ServerInfoLoader();
+                        },
+                        keys: function(RealmKeysLoader) {
+                            return RealmKeysLoader();
+                        }
+                    },
+                    controller : 'RealmKeysCtrl'
+                })
         .when('/realms/:realm/keys/providers', {
             templateUrl : resourceUrl + '/partials/realm-keys-providers.html',
             resolve : {
@@ -488,9 +563,6 @@ module.config([ '$routeProvider', function($routeProvider) {
                 realm : function(RealmLoader) {
                     return RealmLoader();
                 },
-                clients : function(ClientListLoader) {
-                    return ClientListLoader();
-                },
                 roles : function(RoleListLoader) {
                     return RoleListLoader();
                 }
@@ -554,6 +626,15 @@ module.config([ '$routeProvider', function($routeProvider) {
                 }
             },
             controller : 'RealmImportCtrl'
+        })
+        .when('/realms/:realm/partial-export', {
+            templateUrl : resourceUrl + '/partials/partial-export.html',
+            resolve : {
+                realm : function(RealmLoader) {
+                    return RealmLoader();
+                }
+            },
+            controller : 'RealmExportCtrl'
         })
         .when('/create/user/:realm', {
             templateUrl : resourceUrl + '/partials/user-detail.html',
@@ -629,9 +710,6 @@ module.config([ '$routeProvider', function($routeProvider) {
                 },
                 user : function(UserLoader) {
                     return UserLoader();
-                },
-                groups : function(GroupListLoader) {
-                    return GroupListLoader();
                 }
             },
             controller : 'UserGroupMembershipCtrl'
@@ -760,14 +838,41 @@ module.config([ '$routeProvider', function($routeProvider) {
             },
             controller : 'RoleDetailCtrl'
         })
+        .when('/realms/:realm/roles/:role/role-attributes', {
+            templateUrl : resourceUrl + '/partials/role-attributes.html',
+            resolve : {
+                realm : function(RealmLoader) {
+                    return RealmLoader();
+                },
+                role : function(RoleLoader) {
+                    return RoleLoader();
+                },
+                roles : function(RoleListLoader) {
+                    return RoleListLoader();
+                },
+                clients : function(ClientListLoader) {
+                    return ClientListLoader();
+                }
+            },
+            controller : 'RoleDetailCtrl'
+        })
+        .when('/realms/:realm/roles/:role/users', {
+        	templateUrl : resourceUrl + '/partials/realm-role-users.html',
+        	resolve : {
+        		realm : function(RealmLoader) {
+        			return RealmLoader();
+        		},
+        		role : function(RoleLoader) {
+        			return RoleLoader();
+        		}
+        	},
+        	controller : 'RoleMembersCtrl'
+        })
         .when('/realms/:realm/roles', {
             templateUrl : resourceUrl + '/partials/role-list.html',
             resolve : {
                 realm : function(RealmLoader) {
                     return RealmLoader();
-                },
-                roles : function(RoleListLoader) {
-                    return RoleListLoader();
                 }
             },
             controller : 'RoleListCtrl'
@@ -777,9 +882,6 @@ module.config([ '$routeProvider', function($routeProvider) {
             resolve : {
                 realm : function(RealmLoader) {
                     return RealmLoader();
-                },
-                groups : function(GroupListLoader) {
-                    return GroupListLoader();
                 }
             },
             controller : 'GroupListCtrl'
@@ -855,9 +957,6 @@ module.config([ '$routeProvider', function($routeProvider) {
             resolve : {
                 realm : function(RealmLoader) {
                     return RealmLoader();
-                },
-                groups : function(GroupListLoader) {
-                    return GroupListLoader();
                 }
             },
             controller : 'DefaultGroupsCtrl'
@@ -906,6 +1005,42 @@ module.config([ '$routeProvider', function($routeProvider) {
             },
             controller : 'ClientRoleDetailCtrl'
         })
+        .when('/realms/:realm/clients/:client/roles/:role/role-attributes', {
+            templateUrl : resourceUrl + '/partials/client-role-attributes.html',
+            resolve : {
+                realm : function(RealmLoader) {
+                    return RealmLoader();
+                },
+                client : function(ClientLoader) {
+                    return ClientLoader();
+                },
+                role : function(ClientRoleLoader) {
+                    return ClientRoleLoader();
+                },
+                roles : function(RoleListLoader) {
+                    return RoleListLoader();
+                },
+                clients : function(ClientListLoader) {
+                    return ClientListLoader();
+                }
+            },
+            controller : 'ClientRoleDetailCtrl'
+        })
+        .when('/realms/:realm/clients/:client/roles/:role/users', {
+            templateUrl : resourceUrl + '/partials/client-role-users.html',
+            resolve : {
+                realm : function(RealmLoader) {
+                    return RealmLoader();
+                },
+                client : function(ClientLoader) {
+                    return ClientLoader();
+                },
+                role : function(ClientRoleLoader) {
+                    return ClientRoleLoader();
+                }
+            },
+            controller : 'ClientRoleMembersCtrl'
+        })
         .when('/realms/:realm/clients/:client/mappers', {
             templateUrl : resourceUrl + '/partials/client-mappers.html',
             resolve : {
@@ -914,9 +1049,6 @@ module.config([ '$routeProvider', function($routeProvider) {
                 },
                 client : function(ClientLoader) {
                     return ClientLoader();
-                },
-                templates : function(ClientTemplateListLoader) {
-                    return ClientTemplateListLoader();
                 },
                 serverInfo : function(ServerInfoLoader) {
                     return ServerInfoLoader();
@@ -979,60 +1111,111 @@ module.config([ '$routeProvider', function($routeProvider) {
             },
             controller : 'ClientProtocolMapperCreateCtrl'
         })
-        .when('/realms/:realm/client-templates/:template/mappers', {
-            templateUrl : resourceUrl + '/partials/client-template-mappers.html',
+        .when('/realms/:realm/clients/:client/client-scopes/setup-scopes', {
+            templateUrl : resourceUrl + '/partials/client-scopes-setup.html',
             resolve : {
                 realm : function(RealmLoader) {
                     return RealmLoader();
                 },
-                template : function(ClientTemplateLoader) {
-                    return ClientTemplateLoader();
+                client : function(ClientLoader) {
+                    return ClientLoader();
+                },
+                clientScopes : function(ClientScopeListLoader) {
+                    return ClientScopeListLoader();
+                },
+                serverInfo : function(ServerInfoLoader) {
+                    return ServerInfoLoader();
+                },
+                clientDefaultClientScopes : function(ClientDefaultClientScopesLoader) {
+                    return ClientDefaultClientScopesLoader();
+                },
+                clientOptionalClientScopes : function(ClientOptionalClientScopesLoader) {
+                    return ClientOptionalClientScopesLoader();
+                }
+            },
+            controller : 'ClientClientScopesSetupCtrl'
+        })
+        .when('/realms/:realm/clients/:client/client-scopes/evaluate-scopes', {
+            templateUrl : resourceUrl + '/partials/client-scopes-evaluate.html',
+            resolve : {
+                realm : function(RealmLoader) {
+                    return RealmLoader();
+                },
+                client : function(ClientLoader) {
+                    return ClientLoader();
+                },
+                clients : function(ClientListLoader) {
+                    return ClientListLoader();
+                },
+                clientScopes : function(ClientScopeListLoader) {
+                    return ClientScopeListLoader();
+                },
+                clientDefaultClientScopes : function(ClientDefaultClientScopesLoader) {
+                    return ClientDefaultClientScopesLoader();
+                },
+                clientOptionalClientScopes : function(ClientOptionalClientScopesLoader) {
+                    return ClientOptionalClientScopesLoader();
                 },
                 serverInfo : function(ServerInfoLoader) {
                     return ServerInfoLoader();
                 }
             },
-            controller : 'ClientTemplateProtocolMapperListCtrl'
+            controller : 'ClientClientScopesEvaluateCtrl'
         })
-        .when('/realms/:realm/client-templates/:template/add-mappers', {
-            templateUrl : resourceUrl + '/partials/client-template-mappers-add.html',
+        .when('/realms/:realm/client-scopes/:clientScope/mappers', {
+            templateUrl : resourceUrl + '/partials/client-scope-mappers.html',
             resolve : {
                 realm : function(RealmLoader) {
                     return RealmLoader();
                 },
-                template : function(ClientTemplateLoader) {
-                    return ClientTemplateLoader();
+                clientScope : function(ClientScopeLoader) {
+                    return ClientScopeLoader();
                 },
                 serverInfo : function(ServerInfoLoader) {
                     return ServerInfoLoader();
                 }
             },
-            controller : 'ClientTemplateAddBuiltinProtocolMapperCtrl'
+            controller : 'ClientScopeProtocolMapperListCtrl'
         })
-        .when('/realms/:realm/client-templates/:template/mappers/:id', {
-            templateUrl : resourceUrl + '/partials/client-template-protocol-mapper-detail.html',
+        .when('/realms/:realm/client-scopes/:clientScope/add-mappers', {
+            templateUrl : resourceUrl + '/partials/client-scope-mappers-add.html',
             resolve : {
                 realm : function(RealmLoader) {
                     return RealmLoader();
                 },
-                template : function(ClientTemplateLoader) {
-                    return ClientTemplateLoader();
+                clientScope : function(ClientScopeLoader) {
+                    return ClientScopeLoader();
+                },
+                serverInfo : function(ServerInfoLoader) {
+                    return ServerInfoLoader();
+                }
+            },
+            controller : 'ClientScopeAddBuiltinProtocolMapperCtrl'
+        })
+        .when('/realms/:realm/client-scopes/:clientScope/mappers/:id', {
+            templateUrl : resourceUrl + '/partials/client-scope-protocol-mapper-detail.html',
+            resolve : {
+                realm : function(RealmLoader) {
+                    return RealmLoader();
+                },
+                clientScope : function(ClientScopeLoader) {
+                    return ClientScopeLoader();
                 },
                 serverInfo : function(ServerInfoLoader) {
                     return ServerInfoLoader();
                 },
-                mapper : function(ClientTemplateProtocolMapperLoader) {
-                    return ClientTemplateProtocolMapperLoader();
+                mapper : function(ClientScopeProtocolMapperLoader) {
+                    return ClientScopeProtocolMapperLoader();
                 },
                 clients : function(ClientListLoader) {
                     return ClientListLoader();
                 }
 
             },
-            controller : 'ClientTemplateProtocolMapperCtrl'
+            controller : 'ClientScopeProtocolMapperCtrl'
         })
-        .when('/create/client-template/:realm/:template/mappers', {
-            templateUrl : resourceUrl + '/partials/client-template-protocol-mapper-detail.html',
+        .when('/create/client-scope/:realm/:clientScope/mappers', {
+            templateUrl : resourceUrl + '/partials/client-scope-protocol-mapper-detail.html',
             resolve : {
                 realm : function(RealmLoader) {
                     return RealmLoader();
@@ -1040,14 +1223,14 @@ module.config([ '$routeProvider', function($routeProvider) {
                 serverInfo : function(ServerInfoLoader) {
                     return ServerInfoLoader();
                 },
-                template : function(ClientTemplateLoader) {
-                    return ClientTemplateLoader();
+                clientScope : function(ClientScopeLoader) {
+                    return ClientScopeLoader();
                 },
                 clients : function(ClientListLoader) {
                     return ClientListLoader();
                 }
             },
-            controller : 'ClientTemplateProtocolMapperCreateCtrl'
+            controller : 'ClientScopeProtocolMapperCreateCtrl'
         })
         .when('/realms/:realm/clients/:client/sessions', {
             templateUrl : resourceUrl + '/partials/client-sessions.html',
@@ -1225,9 +1408,6 @@ module.config([ '$routeProvider', function($routeProvider) {
                 },
                 client : function(ClientLoader) {
                     return ClientLoader();
-                },
-                roles : function(ClientRoleListLoader) {
-                    return ClientRoleListLoader();
                 }
             },
             controller : 'ClientRoleListCtrl'
@@ -1252,9 +1432,6 @@ module.config([ '$routeProvider', function($routeProvider) {
                 },
                 client : function(ClientLoader) {
                     return ClientLoader();
-                },
-                templates : function(ClientTemplateListLoader) {
-                    return ClientTemplateListLoader();
                 },
                 clients : function(ClientListLoader) {
                     return ClientListLoader();
@@ -1301,14 +1478,14 @@ module.config([ '$routeProvider', function($routeProvider) {
                 realm : function(RealmLoader) {
                     return RealmLoader();
                 },
-                templates : function(ClientTemplateListLoader) {
-                    return ClientTemplateListLoader();
-                },
                 clients : function(ClientListLoader) {
                     return ClientListLoader();
                 },
                 client : function() {
                     return {};
+                },
+                flows : function(AuthenticationFlowsLoader) {
+                     return AuthenticationFlowsLoader();
                 },
                 serverInfo : function(ServerInfoLoader) {
                     return ServerInfoLoader();
@@ -1322,14 +1499,14 @@ module.config([ '$routeProvider', function($routeProvider) {
                 realm : function(RealmLoader) {
                     return RealmLoader();
                 },
-                templates : function(ClientTemplateListLoader) {
-                    return ClientTemplateListLoader();
-                },
                 clients : function(ClientListLoader) {
                     return ClientListLoader();
                 },
                 client : function(ClientLoader) {
                     return ClientLoader();
+                },
+                flows : function(AuthenticationFlowsLoader) {
+                    return AuthenticationFlowsLoader();
                 },
                 serverInfo : function(ServerInfoLoader) {
                     return ServerInfoLoader();
@@ -1337,65 +1514,56 @@ module.config([ '$routeProvider', function($routeProvider) {
             },
             controller : 'ClientDetailCtrl'
         })
-        .when('/create/client-template/:realm', {
-            templateUrl : resourceUrl + '/partials/client-template-detail.html',
+        .when('/create/client-scope/:realm', {
+            templateUrl : resourceUrl + '/partials/client-scope-detail.html',
             resolve : {
                 realm : function(RealmLoader) {
                     return RealmLoader();
                 },
-                templates : function(ClientTemplateListLoader) {
-                    return ClientTemplateListLoader();
-                },
-                template : function() {
+                clientScope : function() {
                     return {};
                 },
                 serverInfo : function(ServerInfoLoader) {
                     return ServerInfoLoader();
                 }
             },
-            controller : 'ClientTemplateDetailCtrl'
+            controller : 'ClientScopeDetailCtrl'
         })
-        .when('/realms/:realm/client-templates/:template', {
-            templateUrl : resourceUrl + '/partials/client-template-detail.html',
+        .when('/realms/:realm/client-scopes/:clientScope', {
+            templateUrl : resourceUrl + '/partials/client-scope-detail.html',
             resolve : {
                 realm : function(RealmLoader) {
                     return RealmLoader();
                 },
-                templates : function(ClientTemplateListLoader) {
-                    return ClientTemplateListLoader();
-                },
-                template : function(ClientTemplateLoader) {
-                    return ClientTemplateLoader();
+                clientScope : function(ClientScopeLoader) {
+                    return ClientScopeLoader();
                 },
                 serverInfo : function(ServerInfoLoader) {
                     return ServerInfoLoader();
                 }
             },
-            controller : 'ClientTemplateDetailCtrl'
+            controller : 'ClientScopeDetailCtrl'
         })
-        .when('/realms/:realm/client-templates/:template/scope-mappings', {
-            templateUrl : resourceUrl + '/partials/client-template-scope-mappings.html',
+        .when('/realms/:realm/client-scopes/:clientScope/scope-mappings', {
+            templateUrl : resourceUrl + '/partials/client-scope-scope-mappings.html',
             resolve : {
                 realm : function(RealmLoader) {
                     return RealmLoader();
                 },
-                template : function(ClientTemplateLoader) {
-                    return ClientTemplateLoader();
+                clientScope : function(ClientScopeLoader) {
+                    return ClientScopeLoader();
                 },
                 clients : function(ClientListLoader) {
                     return ClientListLoader();
                 }
             },
-            controller : 'ClientTemplateScopeMappingCtrl'
+            controller : 'ClientScopeScopeMappingCtrl'
         })
         .when('/realms/:realm/clients', {
             templateUrl : resourceUrl + '/partials/client-list.html',
             resolve : {
                 realm : function(RealmLoader) {
                     return RealmLoader();
-                },
-                clients : function(ClientListLoader) {
-                    return ClientListLoader();
                 },
                 serverInfo : function(ServerInfoLoader) {
                     return ServerInfoLoader();
@@ -1404,21 +1572,42 @@ module.config([ '$routeProvider', function($routeProvider) {
             },
             controller : 'ClientListCtrl'
         })
-        .when('/realms/:realm/client-templates', {
-            templateUrl : resourceUrl + '/partials/client-template-list.html',
+        .when('/realms/:realm/client-scopes', {
+            templateUrl : resourceUrl + '/partials/client-scope-list.html',
             resolve : {
                 realm : function(RealmLoader) {
                     return RealmLoader();
                 },
-                templates : function(ClientTemplateListLoader) {
-                    return ClientTemplateListLoader();
+                clientScopes : function(ClientScopeListLoader) {
+                    return ClientScopeListLoader();
                 },
                 serverInfo : function(ServerInfoLoader) {
                     return ServerInfoLoader();
                 }
 
             },
-            controller : 'ClientTemplateListCtrl'
+            controller : 'ClientScopeListCtrl'
+        })
+        .when('/realms/:realm/default-client-scopes', {
+            templateUrl : resourceUrl + '/partials/client-scopes-realm-default.html',
+            resolve : {
+                realm : function(RealmLoader) {
+                    return RealmLoader();
+                },
+                clientScopes : function(ClientScopeListLoader) {
+                    return ClientScopeListLoader();
+                },
+                serverInfo : function(ServerInfoLoader) {
+                    return ServerInfoLoader();
+                },
+                realmDefaultClientScopes : function(RealmDefaultClientScopesLoader) {
+                    return RealmDefaultClientScopesLoader();
+                },
+                realmOptionalClientScopes : function(RealmOptionalClientScopesLoader) {
+                    return RealmOptionalClientScopesLoader();
+                }
+            },
+            controller : 'ClientScopesRealmDefaultCtrl'
         })
         .when('/import/client/:realm', {
             templateUrl : resourceUrl + '/partials/client-import.html',
@@ -1432,7 +1621,57 @@ module.config([ '$routeProvider', function($routeProvider) {
             },
             controller : 'ClientImportCtrl'
         })
-        .when('/', {
+       .when('/realms/:realm/client-stores', {
+            templateUrl : resourceUrl + '/partials/client-storage-list.html',
+            resolve : {
+                realm : function(RealmLoader) {
+                    return RealmLoader();
+                },
+                serverInfo : function(ServerInfoLoader) {
+                    return ServerInfoLoader();
+                }
+            },
+            controller : 'ClientStoresCtrl'
+        })
+        .when('/realms/:realm/client-storage/providers/:provider/:componentId', {
+            templateUrl : resourceUrl + '/partials/client-storage-generic.html',
+            resolve : {
+                realm : function(RealmLoader) {
+                    return RealmLoader();
+                },
+                instance : function(ComponentLoader) {
+                    return ComponentLoader();
+                },
+                providerId : function($route) {
+                    return $route.current.params.provider;
+                },
+                serverInfo : function(ServerInfoLoader) {
+                    return ServerInfoLoader();
+                }
+            },
+            controller : 'GenericClientStorageCtrl'
+        })
+        .when('/create/client-storage/:realm/providers/:provider', {
+             templateUrl : resourceUrl + '/partials/client-storage-generic.html',
+             resolve : {
+                 realm : function(RealmLoader) {
+                     return RealmLoader();
+                 },
+                 instance : function() {
+                     return {
+
+                     };
+                 },
+                 providerId : function($route) {
+                     return $route.current.params.provider;
+                 },
+                 serverInfo : function(ServerInfoLoader) {
+                     return ServerInfoLoader();
+                 }
+             },
+             controller : 'GenericClientStorageCtrl'
+         })
+       .when('/', {
             templateUrl : resourceUrl + '/partials/home.html',
             controller : 'HomeCtrl'
         })
@@ -1708,8 +1947,8 @@ module.config([ '$routeProvider', function($routeProvider) {
                 flows : function(AuthenticationFlowsLoader) {
                     return AuthenticationFlowsLoader();
                 },
-                serverInfo : function(ServerInfo) {
-                    return ServerInfo.delay;
+                serverInfo : function(ServerInfoLoader) {
+                    return ServerInfoLoader();
                 }
             },
             controller : 'RealmFlowBindingCtrl'
@@ -1810,11 +2049,47 @@ module.config([ '$routeProvider', function($routeProvider) {
                 realm : function(RealmLoader) {
                     return RealmLoader();
                 },
-                serverInfo : function(ServerInfo) {
-                    return ServerInfo.delay;
+                serverInfo : function(ServerInfoLoader) {
+                    return ServerInfoLoader();
                 }
             },
             controller : 'RealmOtpPolicyCtrl'
+        })
+        .when('/realms/:realm/authentication/webauthn-policy', {
+            templateUrl : resourceUrl + '/partials/webauthn-policy.html',
+            resolve : {
+                realm : function(RealmLoader) {
+                    return RealmLoader();
+                },
+                serverInfo : function(ServerInfoLoader) {
+                    return ServerInfoLoader();
+                }
+            },
+            controller : 'RealmWebAuthnPolicyCtrl'
+        })
+        .when('/realms/:realm/authentication/webauthn-policy-passwordless', {
+            templateUrl : resourceUrl + '/partials/webauthn-policy-passwordless.html',
+            resolve : {
+                realm : function(RealmLoader) {
+                    return RealmLoader();
+                },
+                serverInfo : function(ServerInfoLoader) {
+                    return ServerInfoLoader();
+                }
+            },
+            controller : 'RealmWebAuthnPasswordlessPolicyCtrl'
+        })
+        .when('/realms/:realm/authentication/ciba-policy', {
+            templateUrl : resourceUrl + '/partials/ciba-policy.html',
+            resolve : {
+                realm : function(RealmLoader) {
+                    return RealmLoader();
+                },
+                serverInfo : function(ServerInfoLoader) {
+                    return ServerInfoLoader();
+                }
+            },
+            controller : 'RealmCibaPolicyCtrl'
         })
         .when('/realms/:realm/authentication/flows/:flow/config/:provider/:config', {
             templateUrl : resourceUrl + '/partials/authenticator-config.html',
@@ -1851,6 +2126,42 @@ module.config([ '$routeProvider', function($routeProvider) {
                 }
             },
             controller : 'AuthenticationConfigCreateCtrl'
+        })
+        .when('/create/localization/:realm/:locale', {
+            templateUrl : resourceUrl + '/partials/realm-localization-detail.html',
+            resolve : {
+                realm : function(RealmLoader) {
+                    return RealmLoader();
+                },
+                locale: function($route) {
+                    return $route.current.params.locale;
+                },
+                key: function() {
+                    return null
+                },
+                localizationText : function() {
+                    return null;
+                }
+            },
+            controller : 'RealmLocalizationDetailCtrl'
+        })
+        .when('/realms/:realm/localization/:locale/:key', {
+            templateUrl : resourceUrl + '/partials/realm-localization-detail.html',
+            resolve : {
+                realm : function(RealmLoader) {
+                    return RealmLoader();
+                },
+                locale: function($route) {
+                    return $route.current.params.locale;
+                },
+                key: function($route) {
+                    return $route.current.params.key;
+                },
+                localizationText : function(RealmSpecificlocalizationTextLoader) {
+                    return RealmSpecificlocalizationTextLoader();
+                }
+            },
+            controller : 'RealmLocalizationDetailCtrl'
         })
         .when('/server-info', {
             templateUrl : resourceUrl + '/partials/server-info.html',
@@ -1917,7 +2228,7 @@ module.factory('spinnerInterceptor', function($q, $window, $rootScope, $location
                 $('#loading').hide();
             }
             return response;
-        }, 
+        },
         responseError: function(response) {
             resourceRequests--;
             if (resourceRequests == 0) {
@@ -1937,7 +2248,7 @@ module.factory('errorInterceptor', function($q, $window, $rootScope, $location, 
     return {
         response: function(response) {
             return response;
-        }, 
+        },
         responseError: function(response) {
             if (response.status == 401) {
                 Auth.authz.logout();
@@ -1948,9 +2259,13 @@ module.factory('errorInterceptor', function($q, $window, $rootScope, $location, 
             } else if (response.status) {
                 if (response.data && response.data.errorMessage) {
                     Notifications.error(response.data.errorMessage);
+                } else if (response.data && response.data.error_description) {
+                    Notifications.error(response.data.error_description);
                 } else {
                     Notifications.error("An unexpected server error has occurred");
                 }
+            } else {
+                Notifications.error("No response from server.");
             }
             return $q.reject(response);
         }
@@ -2173,15 +2488,46 @@ module.directive('kcEnter', function() {
     };
 });
 
-module.directive('kcSave', function ($compile, Notifications) {
+// Don't allow URI reserved characters
+module.directive('kcNoReservedChars', function (Notifications, $translate) {
+    return function($scope, element) {
+        element.bind("keypress", function(event) {
+            var keyPressed = String.fromCharCode(event.which || event.keyCode || 0);
+            
+            // ] and ' can not be used inside a character set on POSIX and GNU
+            if (keyPressed.match('[:/?#[@!$&()*+,;=]') || keyPressed === ']' || keyPressed === '\'') {
+                event.preventDefault();
+                $scope.$apply(function() {
+                    Notifications.warn($translate.instant('key-not-allowed-here', {character: keyPressed}));
+                });
+            }
+        });
+    };
+});
+
+module.directive('kcSave', function ($compile, $timeout, Notifications) {
+    var clickDelay = 500; // 500 ms
+
     return {
         restrict: 'A',
         link: function ($scope, elem, attr, ctrl) {
             elem.addClass("btn btn-primary");
             elem.attr("type","submit");
-            elem.bind('click', function() {
+
+            var disabled = false;
+            elem.on('click', function(evt) {
                 if ($scope.hasOwnProperty("changed") && !$scope.changed) return;
-                
+
+                // KEYCLOAK-4121: Prevent double form submission
+                if (disabled) {
+                    evt.preventDefault();
+                    evt.stopImmediatePropagation();
+                    return;
+                } else {
+                    disabled = true;
+                    $timeout(function () { disabled = false; }, clickDelay, false);
+                }
+
                 $scope.$apply(function() {
                     var form = elem.closest('form');
                     if (form && form.attr('name')) {
@@ -2336,12 +2682,48 @@ module.directive('kcTabsAuthentication', function () {
     }
 });
 
+module.directive('kcTabsRole', function () {
+    return {
+        scope: true,
+        restrict: 'E',
+        replace: true,
+        templateUrl: resourceUrl + '/templates/kc-tabs-role.html'
+    }
+});
+
+module.directive('kcTabsClientRole', function () {
+    return {
+        scope: true,
+        restrict: 'E',
+        replace: true,
+        templateUrl: resourceUrl + '/templates/kc-tabs-client-role.html'
+    }
+});
+
 module.directive('kcTabsUser', function () {
     return {
         scope: true,
         restrict: 'E',
         replace: true,
         templateUrl: resourceUrl + '/templates/kc-tabs-user.html'
+    }
+});
+
+module.directive('kcTabsUsers', function () {
+    return {
+        scope: true,
+        restrict: 'E',
+        replace: true,
+        templateUrl: resourceUrl + '/templates/kc-tabs-users.html'
+    }
+});
+
+module.directive('kcTabsClients', function () {
+    return {
+        scope: true,
+        restrict: 'E',
+        replace: true,
+        templateUrl: resourceUrl + '/templates/kc-tabs-clients.html'
     }
 });
 
@@ -2372,12 +2754,12 @@ module.directive('kcTabsClient', function () {
     }
 });
 
-module.directive('kcTabsClientTemplate', function () {
+module.directive('kcTabsClientScope', function () {
     return {
         scope: true,
         restrict: 'E',
         replace: true,
-        templateUrl: resourceUrl + '/templates/kc-tabs-client-template.html'
+        templateUrl: resourceUrl + '/templates/kc-tabs-client-scope.html'
     }
 });
 
@@ -2434,7 +2816,7 @@ module.controller('RoleSelectorModalCtrl', function($scope, realm, config, confi
     }
 
     $scope.selectClientRole = function() {
-        config[configName] = $scope.client.selected.clientId + "." + $scope.selectedClientRole.role.name;
+        config[configName] = $scope.selectedClient.clientId + "." + $scope.selectedClientRole.role.name;
         $modalInstance.close();
     }
 
@@ -2442,9 +2824,18 @@ module.controller('RoleSelectorModalCtrl', function($scope, realm, config, confi
         $modalInstance.dismiss();
     }
 
-    $scope.changeClient = function() {
-        if ($scope.client.selected) {
-            ClientRole.query({realm: realm.realm, client: $scope.client.selected.id}, function (data) {
+    clientSelectControl($scope, realm.realm, Client);
+    
+    $scope.selectedClient = null;
+
+    $scope.changeClient = function(client) {
+        $scope.selectedClient = client;
+        if (!client || !client.id) {
+            $scope.selectedClient = null;
+            return;
+        }
+        if ($scope.selectedClient) {
+            ClientRole.query({realm: realm.realm, client: $scope.selectedClient.id}, function (data) {
                 $scope.clientRoles = data;
              });
         } else {
@@ -2452,26 +2843,38 @@ module.controller('RoleSelectorModalCtrl', function($scope, realm, config, confi
             $scope.clientRoles = null;
         }
 
+        $scope.selectedClient = client;
     }
+
     RealmRoles.query({realm: realm.realm}, function(data) {
         $scope.realmRoles = data;
     })
-    Client.query({realm: realm.realm}, function(data) {
-        $scope.clients = data;
-        if (data.length > 0) {
-            $scope.client.selected = data[0];
-            $scope.changeClient();
-        }
-    })
 });
 
-module.controller('ProviderConfigCtrl', function ($modal, $scope, ComponentUtils) {
+module.controller('ProviderConfigCtrl', function ($modal, $scope, $route, ComponentUtils, Client) {
+    clientSelectControl($scope, $route.current.params.realm, Client);
     $scope.fileNames = {};
+    $scope.newMapEntries = {};
+    var cachedMaps = {};
+    var cachedParsedMaps = {};
+    var focusMapValueId = null;
 
     // KEYCLOAK-4463
     $scope.initEditor = function(editor){
         editor.$blockScrolling = Infinity; // suppress warning message
     };
+
+    $scope.initSelectedClient = function(configName, config) {
+        if(config[configName]) {
+            $scope.selectedClient = null;
+            Client.query({realm: $route.current.params.realm, search: false, clientId: config[configName], max: 1}, function(data) {
+                if(data.length > 0) {
+                    $scope.selectedClient = angular.copy(data[0]);
+                    $scope.selectedClient.text = $scope.selectedClient.clientId;
+                }
+            });
+        }   
+    }
 
     $scope.openRoleSelector = function (configName, config) {
         $modal.open({
@@ -2490,6 +2893,22 @@ module.controller('ProviderConfigCtrl', function ($modal, $scope, ComponentUtils
             }
         })
     }
+
+    $scope.changeClient = function(configName, config, client, multivalued) {
+        if (!client || !client.id) {
+            config[configName] = null;
+            $scope.selectedClient = null;
+            return;
+        }
+        $scope.selectedClient = client;
+        if (multivalued) {
+            config[configName][0] = client.clientId;
+        } else {
+            config[configName] = client.clientId;
+        }
+    };
+
+    ComponentUtils.convertAllMultivaluedStringValuesToList($scope.properties, $scope.config);
 
     ComponentUtils.addLastEmptyValueToMultivaluedLists($scope.properties, $scope.config);
 
@@ -2517,6 +2936,70 @@ module.controller('ProviderConfigCtrl', function ($modal, $scope, ComponentUtils
         };
         reader.readAsText($files[0]);
         $scope.fileNames[optionName] = $files[0].name;
+    }
+
+    $scope.addMapEntry = function(optionName) {
+        $scope.removeMapEntry(optionName, $scope.newMapEntries[optionName].key)
+
+        var parsedMap = JSON.parse($scope.config[optionName]);
+        parsedMap.push($scope.newMapEntries[optionName]);
+        $scope.config[optionName] = JSON.stringify(parsedMap);
+
+        delete $scope.newMapEntries[optionName];
+    }
+
+    $scope.removeMapEntry = function(optionName, key) {
+        var parsedMap = JSON.parse($scope.config[optionName]);
+
+        for(var i = parsedMap.length - 1; i >= 0; i--) {
+            if(parsedMap[i]['key'] === key) {
+                parsedMap.splice(i, 1);
+            }
+        }
+
+        $scope.config[optionName] = JSON.stringify(parsedMap);
+    }
+
+    $scope.updateMapEntry = function(optionName, key, value) {
+        var parsedMap = JSON.parse($scope.config[optionName]);
+
+        for(var i = parsedMap.length - 1; i >= 0; i--) {
+            if(parsedMap[i]['key'] === key) {
+                parsedMap[i]['value'] = value;
+            }
+        }
+        $scope.config[optionName] = JSON.stringify(parsedMap);
+
+        focusMapValueId = "mapValue-" + optionName + "-" + key;
+    }
+
+    $scope.jsonParseMap = function(optionName) {
+
+        if(cachedParsedMaps[optionName] === undefined) {
+            cachedMaps[optionName] = "[]";
+            cachedParsedMaps[optionName] = [];
+
+            if(!$scope.config.hasOwnProperty(optionName)){
+                $scope.config[optionName]=cachedMaps[optionName];
+            } else {
+                cachedMaps[optionName] = $scope.config[optionName];
+                cachedParsedMaps[optionName] = JSON.parse(cachedMaps[optionName]);
+            }
+        }
+
+        var mapChanged = $scope.config[optionName] !== cachedMaps[optionName];
+
+        if(mapChanged){
+            cachedMaps[optionName] = $scope.config[optionName];
+            cachedParsedMaps[optionName] = JSON.parse(cachedMaps[optionName]);
+        }
+
+        if(!mapChanged && focusMapValueId !== null){
+            document.getElementById(focusMapValueId).focus();
+            focusMapValueId = null;
+        }
+
+        return cachedParsedMaps[optionName];
     }
 });
 
@@ -2584,7 +3067,31 @@ module.controller('ComponentRoleSelectorModalCtrl', function($scope, realm, conf
     })
 });
 
-module.controller('ComponentConfigCtrl', function ($modal, $scope) {
+module.controller('ComponentConfigCtrl', function ($modal, $scope, $route, Client) {
+
+    $scope.initSelectedClient = function(configName, config) {
+        if(config[configName]) {
+            $scope.selectedClient = null;
+            Client.query({realm: $route.current.params.realm, search: false, clientId: config[configName], max: 1}, function(data) {
+                if(data.length > 0) {
+                    $scope.selectedClient = angular.copy(data[0]);
+                    $scope.selectedClient.text = $scope.selectedClient.clientId;
+                }
+            });
+        }   
+    }
+
+    $scope.changeClient = function(configName, config, client) {
+        if (!client || !client.id) {
+            config[configName] = null;
+            $scope.selectedClient = null;
+            return;
+        }
+        $scope.selectedClient = client;
+        config[configName] = client.clientId;
+    };
+
+
     $scope.openRoleSelector = function (configName, config) {
         $modal.open({
             templateUrl: resourceUrl + '/partials/modal/component-role-selector.html',
@@ -2817,38 +3324,50 @@ module.directive('kcOnReadFile', function ($parse) {
 
 module.controller('PagingCtrl', function ($scope) {
     $scope.currentPageInput = 1;
-    
+
     $scope.firstPage = function() {
         if (!$scope.hasPrevious()) return;
         $scope.currentPage = 1;
         $scope.currentPageInput = 1;
     };
-    
+
     $scope.lastPage = function() {
         if (!$scope.hasNext()) return;
         $scope.currentPage = $scope.numberOfPages;
         $scope.currentPageInput = $scope.numberOfPages;
     };
-    
+
     $scope.previousPage = function() {
         if (!$scope.hasPrevious()) return;
         $scope.currentPage--;
         $scope.currentPageInput = $scope.currentPage;
     };
-    
+
     $scope.nextPage = function() {
         if (!$scope.hasNext()) return;
         $scope.currentPage++;
         $scope.currentPageInput = $scope.currentPage;
     };
-    
+
     $scope.hasNext = function() {
         return $scope.currentPage < $scope.numberOfPages;
     };
-    
+
     $scope.hasPrevious = function() {
         return $scope.currentPage > 1;
     };
+});
+
+// Provides a component for injection with utility methods for manipulating strings
+module.factory('KcStrings', function () {
+    var instance = {};
+    
+    // some IE versions do not support string.endsWith method, this method should be used as an alternative for cross-browser compatibility
+    instance.endsWith = function(source, suffix) {
+        return source.indexOf(suffix, source.length - suffix.length) !== -1;
+    };
+    
+    return instance;
 });
 
 module.directive('kcPaging', function () {
@@ -2875,11 +3394,26 @@ module.directive('kcValidPage', function() {
                if (viewValue >= 1 && viewValue <= scope.numberOfPages) {
                    scope.currentPage = viewValue;
                }
-               
+
                return true;
            }
        }
-   } 
+   }
+});
+
+// Directive to parse/format strings into numbers
+module.directive('stringToNumber', function() {
+    return {
+        require: 'ngModel',
+        link: function(scope, element, attrs, ngModel) {
+            ngModel.$parsers.push(function(value) {
+                return (typeof value === 'undefined' || value === null)? '' : '' + value;
+            });
+            ngModel.$formatters.push(function(value) {
+                return parseFloat(value);
+            });
+        }
+    };
 });
 
 // filter used for paged tables
@@ -2890,5 +3424,72 @@ module.filter('startFrom', function () {
             return input.slice(start);
         }
         return [];
+    };
+});
+
+
+module.directive('kcPassword', function ($compile, Notifications) {
+    return {
+        restrict: 'A',
+        link: function ($scope, elem, attr, ctrl) {
+            function toggleMask(evt) {
+                if(elem.hasClass('password-conceal')) {
+                    view();
+                } else {
+                    conceal();
+                }
+            }
+
+            function view() {
+                elem.removeClass('password-conceal');
+
+                var t = elem.next().children().first();
+                t.addClass('fa-eye-slash');
+                t.removeClass('fa-eye');
+            }
+
+            function conceal() {
+                elem.addClass('password-conceal');
+
+                var t = elem.next().children().first();
+                t.removeClass('fa-eye-slash');
+                t.addClass('fa-eye');
+            }
+
+            elem.addClass("password-conceal");
+            elem.attr("type","text");
+            elem.attr("autocomplete", "off");
+
+            var p = elem.parent();
+
+            var inputGroup = $('<div class="input-group"></div>');
+            var eye = $('<span class="input-group-addon btn btn-default"><span class="fa fa-eye"></span></span>')
+                        .on('click', toggleMask);
+
+            $scope.$watch(attr.ngModel, function(v) {
+                if (v && v == '**********') {
+                    elem.next().addClass('disabled')
+                } else if (v && v.indexOf('${v') == 0) {
+                    elem.next().addClass('disabled')
+                    view();
+                } else {
+                    elem.next().removeClass('disabled')
+                }
+            })
+
+            elem.detach().appendTo(inputGroup);
+            inputGroup.append(eye);
+            p.append(inputGroup);
+        }
+    }
+});
+
+
+module.filter('resolveClientRootUrl', function() {
+    return function(input) {
+        if (!input) {
+            return;
+        }
+        return input.replace("${authBaseUrl}", authServerUrl).replace("${authAdminUrl}", authUrl);
     };
 });

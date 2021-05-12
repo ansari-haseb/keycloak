@@ -18,29 +18,29 @@
 package org.keycloak.models.jpa;
 
 import org.keycloak.models.ClientModel;
-import org.keycloak.models.ClientTemplateModel;
+import org.keycloak.models.ClientScopeModel;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.ModelDuplicateException;
 import org.keycloak.models.ProtocolMapperModel;
 import org.keycloak.models.RealmModel;
-import org.keycloak.models.RoleContainerModel;
 import org.keycloak.models.RoleModel;
+import org.keycloak.models.jpa.entities.ClientAttributeEntity;
 import org.keycloak.models.jpa.entities.ClientEntity;
-import org.keycloak.models.jpa.entities.ClientTemplateEntity;
 import org.keycloak.models.jpa.entities.ProtocolMapperEntity;
-import org.keycloak.models.jpa.entities.RoleEntity;
-import org.keycloak.models.jpa.entities.ScopeMappingEntity;
 import org.keycloak.models.utils.KeycloakModelUtils;
+import org.keycloak.models.utils.RoleUtils;
 
 import javax.persistence.EntityManager;
-import javax.persistence.TypedQuery;
-import java.util.ArrayList;
-import java.util.Collection;
+
+import java.security.MessageDigest;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.List;
+import java.util.Iterator;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
+import java.util.stream.Stream;
 
 /**
  * @author <a href="mailto:bill@burkecentral.com">Bill Burke</a>
@@ -60,6 +60,7 @@ public class ClientAdapter implements ClientModel, JpaModel<ClientEntity> {
         this.entity = entity;
     }
 
+    @Override
     public ClientEntity getEntity() {
         return entity;
     }
@@ -101,6 +102,16 @@ public class ClientAdapter implements ClientModel, JpaModel<ClientEntity> {
     }
 
     @Override
+    public boolean isAlwaysDisplayInConsole() {
+        return entity.isAlwaysDisplayInConsole();
+    }
+
+    @Override
+    public void setAlwaysDisplayInConsole(boolean alwaysDisplayInConsole) {
+        entity.setAlwaysDisplayInConsole(alwaysDisplayInConsole);
+    }
+
+    @Override
     public boolean isPublicClient() {
         return entity.isPublicClient();
     }
@@ -132,7 +143,7 @@ public class ClientAdapter implements ClientModel, JpaModel<ClientEntity> {
 
     @Override
     public Set<String> getWebOrigins() {
-        Set<String> result = new HashSet<String>();
+        Set<String> result = new HashSet<>();
         result.addAll(entity.getWebOrigins());
         return result;
     }
@@ -156,7 +167,7 @@ public class ClientAdapter implements ClientModel, JpaModel<ClientEntity> {
 
     @Override
     public Set<String> getRedirectUris() {
-        Set<String> result = new HashSet<String>();
+        Set<String> result = new HashSet<>();
         result.addAll(entity.getRedirectUris());
         return result;
     }
@@ -208,7 +219,7 @@ public class ClientAdapter implements ClientModel, JpaModel<ClientEntity> {
 
     @Override
     public boolean validateSecret(String secret) {
-        return secret.equals(entity.getSecret());
+        return MessageDigest.isEqual(secret.getBytes(), entity.getSecret().getBytes());
     }
 
     @Override
@@ -222,65 +233,25 @@ public class ClientAdapter implements ClientModel, JpaModel<ClientEntity> {
     }
 
     @Override
-         public Set<RoleModel> getRealmScopeMappings() {
-        Set<RoleModel> roleMappings = getScopeMappings();
-
-        Set<RoleModel> appRoles = new HashSet<>();
-        for (RoleModel role : roleMappings) {
-            RoleContainerModel container = role.getContainer();
-            if (container instanceof RealmModel) {
-                if (((RealmModel) container).getId().equals(realm.getId())) {
-                    appRoles.add(role);
-                }
-            }
-        }
-
-        return appRoles;
+    public Stream<RoleModel> getRealmScopeMappingsStream() {
+        return getScopeMappingsStream().filter(r -> RoleUtils.isRealmRole(r, realm));
     }
 
     @Override
-    public Set<RoleModel> getScopeMappings() {
-        TypedQuery<String> query = em.createNamedQuery("clientScopeMappingIds", String.class);
-        query.setParameter("client", getEntity());
-        List<String> ids = query.getResultList();
-        Set<RoleModel> roles = new HashSet<RoleModel>();
-        for (String roleId : ids) {
-            RoleModel role = realm.getRoleById(roleId);
-            if (role == null) continue;
-            roles.add(role);
-        }
-        return roles;
+    public Stream<RoleModel> getScopeMappingsStream() {
+        return entity.getScopeMappingIds().stream()
+                .map(realm::getRoleById)
+                .filter(Objects::nonNull);
     }
 
     @Override
     public void addScopeMapping(RoleModel role) {
-        Set<RoleModel> roles = getScopeMappings();
-        if (roles.contains(role)) return;
-        ScopeMappingEntity entity = new ScopeMappingEntity();
-        entity.setClient(getEntity());
-        RoleEntity roleEntity = RoleAdapter.toRoleEntity(role, em);
-        entity.setRole(roleEntity);
-        em.persist(entity);
-        em.flush();
-        em.detach(entity);
+        entity.getScopeMappingIds().add(role.getId());
     }
 
     @Override
     public void deleteScopeMapping(RoleModel role) {
-        TypedQuery<ScopeMappingEntity> query = getRealmScopeMappingQuery(role);
-        List<ScopeMappingEntity> results = query.getResultList();
-        if (results.size() == 0) return;
-        for (ScopeMappingEntity entity : results) {
-            em.remove(entity);
-        }
-    }
-
-    protected TypedQuery<ScopeMappingEntity> getRealmScopeMappingQuery(RoleModel role) {
-        TypedQuery<ScopeMappingEntity> query = em.createNamedQuery("hasScope", ScopeMappingEntity.class);
-        query.setParameter("client", getEntity());
-        RoleEntity roleEntity = RoleAdapter.toRoleEntity(role, em);
-        query.setParameter("role", roleEntity);
-        return query;
+        entity.getScopeMappingIds().remove(role.getId());
     }
 
     @Override
@@ -291,83 +262,108 @@ public class ClientAdapter implements ClientModel, JpaModel<ClientEntity> {
     @Override
     public void setProtocol(String protocol) {
         entity.setProtocol(protocol);
+        session.getKeycloakSessionFactory().publish((ClientModel.ClientProtocolUpdatedEvent) () -> ClientAdapter.this);
+    }
+
+    @Override
+    public void setAuthenticationFlowBindingOverride(String name, String value) {
+        entity.getAuthFlowBindings().put(name, value);
 
     }
 
     @Override
-    public void setAttribute(String name, String value) {
-        entity.getAttributes().put(name, value);
-
+    public void removeAuthenticationFlowBindingOverride(String name) {
+        entity.getAuthFlowBindings().remove(name);
     }
 
     @Override
-    public void removeAttribute(String name) {
-        entity.getAttributes().remove(name);
+    public String getAuthenticationFlowBindingOverride(String name) {
+        return entity.getAuthFlowBindings().get(name);
     }
 
     @Override
-    public String getAttribute(String name) {
-        return entity.getAttributes().get(name);
-    }
-
-    @Override
-    public Map<String, String> getAttributes() {
+    public Map<String, String> getAuthenticationFlowBindingOverrides() {
         Map<String, String> copy = new HashMap<>();
-        copy.putAll(entity.getAttributes());
+        copy.putAll(entity.getAuthFlowBindings());
         return copy;
     }
 
     @Override
-    public ClientTemplateModel getClientTemplate() {
-        ClientTemplateEntity templateEntity = entity.getClientTemplate();
-        if (templateEntity == null) return null;
-        return session.realms().getClientTemplateById(templateEntity.getId(), realm);
-    }
+    public void setAttribute(String name, String value) {
+        boolean valueUndefined = value == null || "".equals(value.trim());
 
-    @Override
-    public void setClientTemplate(ClientTemplateModel template) {
-        if (template == null) {
-            entity.setClientTemplate(null);
-
-        } else {
-            ClientTemplateEntity templateEntity = em.getReference(ClientTemplateEntity.class, template.getId());
-            entity.setClientTemplate(templateEntity);
+        for (ClientAttributeEntity attr : entity.getAttributes()) {
+            if (attr.getName().equals(name)) {
+                // clean up, so that attributes previously set with either a empty or null value are removed
+                // we should remove this in future versions so that new clients never store empty/null attributes
+                if (valueUndefined) {
+                    removeAttribute(name);
+                } else {
+                    attr.setValue(value);
+                }
+                return;
+            }
         }
 
+        // do not create attributes if empty or null
+        if (valueUndefined) {
+            return;
+        }
+
+        ClientAttributeEntity attr = new ClientAttributeEntity();
+        attr.setName(name);
+        attr.setValue(value);
+        attr.setClient(entity);
+        em.persist(attr);
+        entity.getAttributes().add(attr);
     }
 
     @Override
-    public boolean useTemplateScope() {
-        return entity.isUseTemplateScope();
+    public void removeAttribute(String name) {
+        Iterator<ClientAttributeEntity> it = entity.getAttributes().iterator();
+        while (it.hasNext()) {
+            ClientAttributeEntity attr = it.next();
+            if (attr.getName().equals(name)) {
+                it.remove();
+                em.remove(attr);
+            }
+        }
     }
 
     @Override
-    public void setUseTemplateScope(boolean flag) {
-        entity.setUseTemplateScope(flag);
-
+    public String getAttribute(String name) {
+        return getAttributes().get(name);
     }
 
     @Override
-    public boolean useTemplateMappers() {
-        return entity.isUseTemplateMappers();
+    public Map<String, String> getAttributes() {
+        Map<String, String> attrs = new HashMap<>();
+        for (ClientAttributeEntity attr : entity.getAttributes()) {
+            attrs.put(attr.getName(), attr.getValue());
+        }
+        return attrs;
     }
 
     @Override
-    public void setUseTemplateMappers(boolean flag) {
-        entity.setUseTemplateMappers(flag);
-
+    public void addClientScope(ClientScopeModel clientScope, boolean defaultScope) {
+        addClientScopes(Collections.singleton(clientScope), defaultScope);
     }
 
     @Override
-    public boolean useTemplateConfig() {
-        return entity.isUseTemplateConfig();
+    public void addClientScopes(Set<ClientScopeModel> clientScopes, boolean defaultScope) {
+        session.clients().addClientScopes(getRealm(), this, clientScopes, defaultScope);
     }
 
     @Override
-    public void setUseTemplateConfig(boolean flag) {
-        entity.setUseTemplateConfig(flag);
-
+    public void removeClientScope(ClientScopeModel clientScope) {
+        session.clients().removeClientScope(getRealm(), this, clientScope);
     }
+
+    @Override
+    public Map<String, ClientScopeModel> getClientScopes(boolean defaultScope) {
+        return session.clients().getClientScopes(getRealm(), this, defaultScope);
+    }
+
 
     public static boolean contains(String str, String[] array) {
         for (String s : array) {
@@ -377,24 +373,22 @@ public class ClientAdapter implements ClientModel, JpaModel<ClientEntity> {
     }
 
     @Override
-    public Set<ProtocolMapperModel> getProtocolMappers() {
-        Set<ProtocolMapperModel> mappings = new HashSet<ProtocolMapperModel>();
-        for (ProtocolMapperEntity entity : this.entity.getProtocolMappers()) {
-            ProtocolMapperModel mapping = new ProtocolMapperModel();
-            mapping.setId(entity.getId());
-            mapping.setName(entity.getName());
-            mapping.setProtocol(entity.getProtocol());
-            mapping.setProtocolMapper(entity.getProtocolMapper());
-            mapping.setConsentRequired(entity.isConsentRequired());
-            mapping.setConsentText(entity.getConsentText());
-            Map<String, String> config = new HashMap<String, String>();
-            if (entity.getConfig() != null) {
-                config.putAll(entity.getConfig());
-            }
-            mapping.setConfig(config);
-            mappings.add(mapping);
-        }
-        return mappings;
+    public Stream<ProtocolMapperModel> getProtocolMappersStream() {
+        return this.entity.getProtocolMappers().stream()
+                .map(entity -> {
+                    ProtocolMapperModel mapping = new ProtocolMapperModel();
+                    mapping.setId(entity.getId());
+                    mapping.setName(entity.getName());
+                    mapping.setProtocol(entity.getProtocol());
+                    mapping.setProtocolMapper(entity.getProtocolMapper());
+                    Map<String, String> config = new HashMap<>();
+                    if (entity.getConfig() != null) {
+                        config.putAll(entity.getConfig());
+                    }
+                    mapping.setConfig(config);
+                    return mapping;
+                })
+                .distinct();
     }
 
     @Override
@@ -410,8 +404,6 @@ public class ClientAdapter implements ClientModel, JpaModel<ClientEntity> {
         entity.setProtocolMapper(model.getProtocolMapper());
         entity.setClient(this.entity);
         entity.setConfig(model.getConfig());
-        entity.setConsentRequired(model.isConsentRequired());
-        entity.setConsentText(model.getConsentText());
 
         em.persist(entity);
         this.entity.getProtocolMappers().add(entity);
@@ -454,8 +446,6 @@ public class ClientAdapter implements ClientModel, JpaModel<ClientEntity> {
     public void updateProtocolMapper(ProtocolMapperModel mapping) {
         ProtocolMapperEntity entity = getProtocolMapperEntity(mapping.getId());
         entity.setProtocolMapper(mapping.getProtocolMapper());
-        entity.setConsentRequired(mapping.isConsentRequired());
-        entity.setConsentText(mapping.getConsentText());
         if (entity.getConfig() == null) {
             entity.setConfig(mapping.getConfig());
         } else {
@@ -486,8 +476,6 @@ public class ClientAdapter implements ClientModel, JpaModel<ClientEntity> {
         mapping.setName(entity.getName());
         mapping.setProtocol(entity.getProtocol());
         mapping.setProtocolMapper(entity.getProtocolMapper());
-        mapping.setConsentRequired(entity.isConsentRequired());
-        mapping.setConsentText(entity.getConsentText());
         Map<String, String> config = new HashMap<String, String>();
         if (entity.getConfig() != null) config.putAll(entity.getConfig());
         mapping.setConfig(config);
@@ -496,8 +484,7 @@ public class ClientAdapter implements ClientModel, JpaModel<ClientEntity> {
 
     @Override
     public void updateClient() {
-        em.flush();
-        session.getKeycloakSessionFactory().publish(new RealmModel.ClientUpdatedEvent() {
+        session.getKeycloakSessionFactory().publish(new ClientModel.ClientUpdatedEvent() {
 
             @Override
             public ClientModel getUpdatedClient() {
@@ -623,116 +610,80 @@ public class ClientAdapter implements ClientModel, JpaModel<ClientEntity> {
 
     @Override
     public RoleModel getRole(String name) {
-        return session.realms().getClientRole(realm, this, name);
+        return session.roles().getClientRole(this, name);
     }
 
     @Override
     public RoleModel addRole(String name) {
-        return session.realms().addClientRole(realm, this, name);
+        return session.roles().addClientRole(this, name);
     }
 
     @Override
     public RoleModel addRole(String id, String name) {
-        return session.realms().addClientRole(realm, this, id, name);
+        return session.roles().addClientRole(this, id, name);
     }
 
     @Override
     public boolean removeRole(RoleModel roleModel) {
-        return session.realms().removeRole(realm, roleModel);
+        return session.roles().removeRole(roleModel);
     }
 
     @Override
-    public Set<RoleModel> getRoles() {
-        return session.realms().getClientRoles(realm, this);
+    public Stream<RoleModel> getRolesStream() {
+        return session.roles().getClientRolesStream(this, null, null);
+    }
+
+    @Override
+    public Stream<RoleModel> getRolesStream(Integer first, Integer max) {
+        return session.roles().getClientRolesStream(this, first, max);
+    }
+
+    @Override
+    public Stream<RoleModel> searchForRolesStream(String search, Integer first, Integer max) {
+        return session.roles().searchForClientRolesStream(this, search, first, max);
     }
 
     @Override
     public boolean hasScope(RoleModel role) {
         if (isFullScopeAllowed()) return true;
-        Set<RoleModel> roles = getScopeMappings();
-        if (roles.contains(role)) return true;
 
-        for (RoleModel mapping : roles) {
-            if (mapping.hasRole(role)) return true;
-        }
-        roles = getRoles();
-        if (roles.contains(role)) return true;
+        if (RoleUtils.hasRole(getScopeMappingsStream(), role))
+            return true;
 
-        for (RoleModel mapping : roles) {
-            if (mapping.hasRole(role)) return true;
-        }
-        return false;
+        return RoleUtils.hasRole(getRolesStream(), role);
     }
 
     @Override
-    public List<String> getDefaultRoles() {
-        Collection<RoleEntity> entities = entity.getDefaultRoles();
-        List<String> roles = new ArrayList<String>();
-        if (entities == null) return roles;
-        for (RoleEntity entity : entities) {
-            roles.add(entity.getName());
-        }
-        return roles;
+    @Deprecated
+    public Stream<String> getDefaultRolesStream() {
+        return realm.getDefaultRole().getCompositesStream().filter(this::isClientRole).map(RoleModel::getName);
+    }
+
+    private boolean isClientRole(RoleModel role) {
+        return role.isClientRole() && Objects.equals(role.getContainerId(), this.getId());
     }
 
     @Override
+    @Deprecated
     public void addDefaultRole(String name) {
+        realm.getDefaultRole().addCompositeRole(getOrAddRoleId(name));
+    }
+
+    private RoleModel getOrAddRoleId(String name) {
         RoleModel role = getRole(name);
         if (role == null) {
             role = addRole(name);
         }
-        Collection<RoleEntity> entities = entity.getDefaultRoles();
-        for (RoleEntity entity : entities) {
-            if (entity.getId().equals(role.getId())) {
-                return;
-            }
-        }
-        RoleEntity roleEntity = RoleAdapter.toRoleEntity(role, em);
-        entities.add(roleEntity);
-        em.flush();
+        return role;
     }
 
     @Override
-    public void updateDefaultRoles(String... defaultRoles) {
-        Collection<RoleEntity> entities = entity.getDefaultRoles();
-        Set<String> already = new HashSet<String>();
-        List<RoleEntity> remove = new ArrayList<>();
-        for (RoleEntity rel : entities) {
-            if (!contains(rel.getName(), defaultRoles)) {
-                remove.add(rel);
-            } else {
-                already.add(rel.getName());
-            }
-        }
-        for (RoleEntity entity : remove) {
-            entities.remove(entity);
-        }
-        em.flush();
-        for (String roleName : defaultRoles) {
-            if (!already.contains(roleName)) {
-                addDefaultRole(roleName);
-            }
-        }
-        em.flush();
-    }
-
-    @Override
+    @Deprecated
     public void removeDefaultRoles(String... defaultRoles) {
-        Collection<RoleEntity> entities = entity.getDefaultRoles();
-        List<RoleEntity> remove = new ArrayList<RoleEntity>();
-        for (RoleEntity rel : entities) {
-            if (contains(rel.getName(), defaultRoles)) {
-                remove.add(rel);
-            }
+        for (String defaultRole : defaultRoles) {
+            realm.getDefaultRole().removeCompositeRole(getRole(defaultRole));
         }
-        for (RoleEntity entity : remove) {
-            entities.remove(entity);
-        }
-        em.flush();
     }
-
-
-
 
     @Override
     public int getNodeReRegistrationTimeout() {
@@ -777,8 +728,9 @@ public class ClientAdapter implements ClientModel, JpaModel<ClientEntity> {
         return getId().hashCode();
     }
 
+    @Override
     public String toString() {
-        return getClientId();
+        return String.format("%s@%08x", getClientId(), System.identityHashCode(this));
     }
 
 }

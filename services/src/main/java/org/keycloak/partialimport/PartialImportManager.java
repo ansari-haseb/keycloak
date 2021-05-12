@@ -59,44 +59,40 @@ public class PartialImportManager {
     }
 
     public Response saveResources() {
+        try {
 
-        PartialImportResults results = new PartialImportResults();
+            PartialImportResults results = new PartialImportResults();
 
-        for (PartialImport partialImport : partialImports) {
-            try {
+            for (PartialImport partialImport : partialImports) {
                 partialImport.prepare(rep, realm, session);
-            } catch (ErrorResponseException error) {
-                if (session.getTransactionManager().isActive()) session.getTransactionManager().setRollbackOnly();
-                return error.getResponse();
             }
-        }
 
-        for (PartialImport partialImport : partialImports) {
-            try {
+            for (PartialImport partialImport : partialImports) {
                 partialImport.removeOverwrites(realm, session);
                 results.addAllResults(partialImport.doImport(rep, realm, session));
-            } catch (ErrorResponseException error) {
-                if (session.getTransactionManager().isActive()) session.getTransactionManager().setRollbackOnly();
-                return error.getResponse();
             }
-        }
 
-        for (PartialImportResult result : results.getResults()) {
-            switch (result.getAction()) {
-                case ADDED : fireCreatedEvent(result); break;
-                case OVERWRITTEN: fireUpdateEvent(result); break;
+            for (PartialImportResult result : results.getResults()) {
+                switch (result.getAction()) {
+                    case ADDED : fireCreatedEvent(result); break;
+                    case OVERWRITTEN: fireUpdateEvent(result); break;
+                }
             }
-        }
 
-        if (session.getTransactionManager().isActive()) {
-            try {
+            if (session.getTransactionManager().isActive()) {
                 session.getTransactionManager().commit();
-            } catch (ModelException e) {
-                return ErrorResponse.exists(e.getLocalizedMessage());
             }
-        }
 
-        return Response.ok(results).build();
+            return Response.ok(results).build();
+        } catch (ModelDuplicateException e) {
+            return ErrorResponse.exists(e.getLocalizedMessage());
+        } catch (ErrorResponseException error) {
+            if (session.getTransactionManager().isActive()) session.getTransactionManager().setRollbackOnly();
+            return error.getResponse();
+        } catch (Exception e) {
+            if (session.getTransactionManager().isActive()) session.getTransactionManager().setRollbackOnly();
+            return ErrorResponse.error(e.getMessage(), Response.Status.INTERNAL_SERVER_ERROR);
+        }
     }
 
     private void fireCreatedEvent(PartialImportResult result) {

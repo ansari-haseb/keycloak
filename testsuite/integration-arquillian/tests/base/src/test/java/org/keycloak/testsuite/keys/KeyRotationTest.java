@@ -22,18 +22,23 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.jboss.arquillian.graphene.page.Page;
 import org.junit.Rule;
 import org.junit.Test;
-import org.keycloak.RSATokenVerifier;
-import org.keycloak.common.VerificationException;
+import org.keycloak.client.registration.Auth;
+import org.keycloak.client.registration.ClientRegistration;
+import org.keycloak.client.registration.ClientRegistrationException;
 import org.keycloak.common.util.KeyUtils;
 import org.keycloak.common.util.MultivaluedHashMap;
 import org.keycloak.common.util.PemUtils;
+import org.keycloak.crypto.Algorithm;
+import org.keycloak.jose.jws.JWSInput;
+import org.keycloak.jose.jws.JWSInputException;
 import org.keycloak.keys.Attributes;
 import org.keycloak.keys.GeneratedHmacKeyProviderFactory;
 import org.keycloak.keys.KeyProvider;
 import org.keycloak.keys.ImportedRsaKeyProviderFactory;
+import org.keycloak.representations.idm.ClientInitialAccessCreatePresentation;
+import org.keycloak.representations.idm.ClientInitialAccessPresentation;
 import org.keycloak.representations.idm.ClientRepresentation;
 import org.keycloak.representations.idm.ComponentRepresentation;
-import org.keycloak.representations.idm.KeysMetadataRepresentation;
 import org.keycloak.representations.idm.RealmRepresentation;
 import org.keycloak.testsuite.AbstractKeycloakTest;
 import org.keycloak.testsuite.AssertEvents;
@@ -41,17 +46,18 @@ import org.keycloak.testsuite.admin.ApiUtil;
 import org.keycloak.testsuite.pages.AppPage;
 import org.keycloak.testsuite.pages.AppPage.RequestType;
 import org.keycloak.testsuite.pages.LoginPage;
+import org.keycloak.testsuite.util.AdminClientUtil;
+import org.keycloak.testsuite.util.ClientBuilder;
 import org.keycloak.testsuite.util.KeycloakModelUtils;
 import org.keycloak.testsuite.util.OAuthClient;
 import org.keycloak.testsuite.util.UserInfoClientUtil;
 
-import javax.ws.rs.client.ClientBuilder;
 import javax.ws.rs.core.Response;
 import java.io.IOException;
 import java.security.KeyPair;
 import java.security.PublicKey;
-import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.Assert.*;
 import static org.keycloak.testsuite.admin.AbstractAdminTest.loadJson;
@@ -118,14 +124,25 @@ public class KeyRotationTest extends AbstractKeycloakTest {
     @Test
     public void testTokens() throws Exception {
         // Create keys #1
-        PublicKey key1 = createKeys1();
+        Map<String, String> keys1 = createKeys1();
 
         // Get token with keys #1
         oauth.doLogin("test-user@localhost", "password");
         OAuthClient.AccessTokenResponse response = oauth.doAccessTokenRequest(oauth.getCurrentQuery().get("code"), "password");
         assertEquals(200, response.getStatusCode());
-        assertTokenSignature(key1, response.getAccessToken());
-        assertTokenSignature(key1, response.getRefreshToken());
+        assertTokenKid(keys1.get(Algorithm.RS256), response.getAccessToken());
+        assertTokenKid(keys1.get(Algorithm.HS256), response.getRefreshToken());
+
+        // Create client with keys #1
+        ClientInitialAccessCreatePresentation initialToken = new ClientInitialAccessCreatePresentation();
+        initialToken.setCount(100);
+        initialToken.setExpiration(0);
+        ClientInitialAccessPresentation accessRep = adminClient.realm("test").clientInitialAccess().create(initialToken);
+        String initialAccessToken = accessRep.getToken();
+
+        ClientRegistration reg = ClientRegistration.create().url(suiteContext.getAuthServerInfo().getContextRoot() + "/auth", "test").build();
+        reg.auth(Auth.token(initialAccessToken));
+        ClientRepresentation clientRep = reg.create(ClientBuilder.create().clientId("test").build());
 
         // Userinfo with keys #1
         assertUserInfo(response.getAccessToken(), 200);
@@ -133,14 +150,21 @@ public class KeyRotationTest extends AbstractKeycloakTest {
         // Token introspection with keys #1
         assertTokenIntrospection(response.getAccessToken(), true);
 
-        // Create keys #2
-        PublicKey key2 = createKeys2();
+        // Get client with keys #1 - registration access token should not have changed
+        ClientRepresentation clientRep2 = reg.auth(Auth.token(clientRep.getRegistrationAccessToken())).get("test");
+        assertEquals(clientRep.getRegistrationAccessToken(), clientRep2.getRegistrationAccessToken());
 
-        // Refresh token with keys #2
+        // Create keys #2
+        Map<String, String> keys2 = createKeys2();
+
+        assertNotEquals(keys1.get(Algorithm.RS256), keys2.get(Algorithm.RS256));
+        assertNotEquals(keys1.get(Algorithm.HS256), keys2.get(Algorithm.HS512));
+
+                // Refresh token with keys #2
         response = oauth.doRefreshTokenRequest(response.getRefreshToken(), "password");
         assertEquals(200, response.getStatusCode());
-        assertTokenSignature(key2, response.getAccessToken());
-        assertTokenSignature(key2, response.getRefreshToken());
+        assertTokenKid(keys2.get(Algorithm.RS256), response.getAccessToken());
+        assertTokenKid(keys2.get(Algorithm.HS256), response.getRefreshToken());
 
         // Userinfo with keys #2
         assertUserInfo(response.getAccessToken(), 200);
@@ -148,19 +172,35 @@ public class KeyRotationTest extends AbstractKeycloakTest {
         // Token introspection with keys #2
         assertTokenIntrospection(response.getAccessToken(), true);
 
+        // Get client with keys #2 - registration access token should be changed
+        ClientRepresentation clientRep3 = reg.auth(Auth.token(clientRep.getRegistrationAccessToken())).get("test");
+        assertNotEquals(clientRep.getRegistrationAccessToken(), clientRep3.getRegistrationAccessToken());
+
         // Drop key #1
         dropKeys1();
 
         // Refresh token with keys #1 dropped - should pass as refresh token should be signed with key #2
         response = oauth.doRefreshTokenRequest(response.getRefreshToken(), "password");
-        assertTokenSignature(key2, response.getAccessToken());
-        assertTokenSignature(key2, response.getRefreshToken());
+
+        assertTokenKid(keys2.get(Algorithm.RS256), response.getAccessToken());
+        assertTokenKid(keys2.get(Algorithm.HS256), response.getRefreshToken());
 
         // Userinfo with keys #1 dropped
         assertUserInfo(response.getAccessToken(), 200);
 
         // Token introspection with keys #1 dropped
         assertTokenIntrospection(response.getAccessToken(), true);
+
+        // Get client with keys #1 - should fail
+        try {
+            reg.auth(Auth.token(clientRep.getRegistrationAccessToken())).get("test");
+            fail("Expected to fail");
+        } catch (ClientRegistrationException e) {
+        }
+
+        // Get client with keys #2 - should succeed
+        ClientRepresentation clientRep4 = reg.auth(Auth.token(clientRep3.getRegistrationAccessToken())).get("test");
+        assertNotEquals(clientRep2.getRegistrationAccessToken(), clientRep4.getRegistrationAccessToken());
 
         // Drop key #2
         dropKeys2();
@@ -179,11 +219,11 @@ public class KeyRotationTest extends AbstractKeycloakTest {
 
     @Test
     public void providerOrder() throws Exception {
-        PublicKey keys1 = createKeys1();
-        PublicKey keys2 = createKeys2();
+        Map<String, String> keys1 = createKeys1();
+        Map<String, String> keys2 = createKeys2();
 
-        KeysMetadataRepresentation keyMetadata = adminClient.realm("test").keys().getKeyMetadata();
-        assertEquals(PemUtils.encodeKey(keys2), keyMetadata.getKeys().get(0).getPublicKey());
+        assertNotEquals(keys1.get(Algorithm.RS256), keys2.get(Algorithm.RS256));
+        assertNotEquals(keys1.get(Algorithm.HS256), keys2.get(Algorithm.HS512));
 
         dropKeys1();
         dropKeys2();
@@ -192,7 +232,7 @@ public class KeyRotationTest extends AbstractKeycloakTest {
     @Test
     public void rotateKeys() throws InterruptedException {
         for (int i = 0; i < 10; i++) {
-            String activeKid = adminClient.realm("test").keys().getKeyMetadata().getActive().get("RSA");
+            String activeKid = adminClient.realm("test").keys().getKeyMetadata().getActive().get(Algorithm.RS256);
 
             // Rotate public keys on the parent broker
             String realmId = adminClient.realm("test").toRepresentation().getId();
@@ -209,33 +249,25 @@ public class KeyRotationTest extends AbstractKeycloakTest {
             getCleanup().addComponentId(newId);
             response.close();
 
-            String updatedActiveKid = adminClient.realm("test").keys().getKeyMetadata().getActive().get("RSA");
+            String updatedActiveKid = adminClient.realm("test").keys().getKeyMetadata().getActive().get(Algorithm.RS256);
             assertNotEquals(activeKid, updatedActiveKid);
         }
     }
 
 
-    static void assertTokenSignature(PublicKey expectedKey, String token) {
-        String kid = null;
-        try {
-            RSATokenVerifier verifier = RSATokenVerifier.create(token).checkTokenType(false).checkRealmUrl(false).checkActive(false).publicKey(expectedKey);
-            kid = verifier.getHeader().getKeyId();
-            verifier.verify();
-        } catch (VerificationException e) {
-            fail("Token not signed by expected keys, kid was " + kid);
-        }
+    private void assertTokenKid(String expectedKid, String token) throws JWSInputException {
+        assertEquals(expectedKid, new JWSInput(token).getHeader().getKeyId());
     }
 
-
-    private PublicKey createKeys1() throws Exception {
+    private Map<String, String> createKeys1() throws Exception {
         return createKeys("1000");
     }
 
-    private PublicKey createKeys2() throws Exception {
+    private Map<String, String> createKeys2() throws Exception {
         return createKeys("2000");
     }
 
-    private PublicKey createKeys(String priority) throws Exception {
+    private Map<String, String> createKeys(String priority) throws Exception {
         KeyPair keyPair = KeyUtils.generateRsaKeyPair(1024);
         String privateKeyPem = PemUtils.encodeKey(keyPair.getPrivate());
         PublicKey publicKey = keyPair.getPublic();
@@ -267,7 +299,7 @@ public class KeyRotationTest extends AbstractKeycloakTest {
         response = adminClient.realm("test").components().add(rep);
         response.close();
 
-        return publicKey;
+        return realmsResouce().realm("test").keys().getKeyMetadata().getActive();
     }
 
     private void dropKeys1() {
@@ -292,9 +324,9 @@ public class KeyRotationTest extends AbstractKeycloakTest {
     }
 
     private void assertUserInfo(String token, int expectedStatus) {
-        Response userInfoResponse = UserInfoClientUtil.executeUserInfoRequest_getMethod(ClientBuilder.newClient(), token);
-        assertEquals(expectedStatus, userInfoResponse.getStatus());
-        userInfoResponse.close();
+        try (Response userInfoResponse = UserInfoClientUtil.executeUserInfoRequest_getMethod(AdminClientUtil.createResteasyClient(), token)) {
+            assertEquals(expectedStatus, userInfoResponse.getStatus());
+        }
     }
 
     private void assertTokenIntrospection(String token, boolean expectActive) {
@@ -306,6 +338,13 @@ public class KeyRotationTest extends AbstractKeycloakTest {
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
+
+    }
+
+    private class ActiveKeys {
+
+        private String rsaKid;
+        private String hsKid;
 
     }
 

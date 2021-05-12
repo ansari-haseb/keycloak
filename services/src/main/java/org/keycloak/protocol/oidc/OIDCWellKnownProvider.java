@@ -17,41 +17,55 @@
 
 package org.keycloak.protocol.oidc;
 
+import com.google.common.collect.Streams;
 import org.keycloak.OAuth2Constants;
 import org.keycloak.authentication.ClientAuthenticator;
 import org.keycloak.authentication.ClientAuthenticatorFactory;
+import org.keycloak.crypto.CekManagementProvider;
+import org.keycloak.crypto.ClientSignatureVerifierProvider;
+import org.keycloak.crypto.ContentEncryptionProvider;
+import org.keycloak.crypto.SignatureProvider;
 import org.keycloak.jose.jws.Algorithm;
+import org.keycloak.models.CibaConfig;
+import org.keycloak.models.ClientScopeModel;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
+import org.keycloak.protocol.oidc.endpoints.AuthorizationEndpoint;
 import org.keycloak.protocol.oidc.endpoints.TokenEndpoint;
+import org.keycloak.protocol.oidc.grants.ciba.CibaGrantType;
+import org.keycloak.protocol.oidc.grants.device.endpoints.DeviceEndpoint;
 import org.keycloak.protocol.oidc.representations.OIDCConfigurationRepresentation;
 import org.keycloak.protocol.oidc.utils.OIDCResponseType;
+import org.keycloak.provider.Provider;
 import org.keycloak.provider.ProviderFactory;
 import org.keycloak.representations.IDToken;
 import org.keycloak.services.Urls;
 import org.keycloak.services.clientregistration.ClientRegistrationService;
 import org.keycloak.services.clientregistration.oidc.OIDCClientRegistrationProviderFactory;
 import org.keycloak.services.resources.RealmsResource;
+import org.keycloak.urls.UrlType;
 import org.keycloak.wellknown.WellKnownProvider;
 
 import javax.ws.rs.core.UriBuilder;
 import javax.ws.rs.core.UriInfo;
-import java.util.ArrayList;
-import java.util.LinkedList;
+
+import java.net.URI;
+import java.util.Arrays;
+import java.util.Collection;
 import java.util.List;
+import java.util.Objects;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * @author <a href="mailto:sthorger@redhat.com">Stian Thorgersen</a>
  */
 public class OIDCWellKnownProvider implements WellKnownProvider {
 
-    public static final List<String> DEFAULT_ID_TOKEN_SIGNING_ALG_VALUES_SUPPORTED = list(Algorithm.RS256.toString());
-
-    public static final List<String> DEFAULT_USER_INFO_SIGNING_ALG_VALUES_SUPPORTED  = list(Algorithm.RS256.toString());
-
-    public static final List<String> DEFAULT_REQUEST_OBJECT_SIGNING_ALG_VALUES_SUPPORTED  = list(Algorithm.none.toString(), Algorithm.RS256.toString());
-
-    public static final List<String> DEFAULT_GRANT_TYPES_SUPPORTED = list(OAuth2Constants.AUTHORIZATION_CODE, OAuth2Constants.IMPLICIT, OAuth2Constants.REFRESH_TOKEN, OAuth2Constants.PASSWORD, OAuth2Constants.CLIENT_CREDENTIALS);
+    public static final List<String> DEFAULT_GRANT_TYPES_SUPPORTED = list(OAuth2Constants.AUTHORIZATION_CODE,
+        OAuth2Constants.IMPLICIT, OAuth2Constants.REFRESH_TOKEN, OAuth2Constants.PASSWORD, OAuth2Constants.CLIENT_CREDENTIALS,
+        OAuth2Constants.DEVICE_CODE_GRANT_TYPE,
+        OAuth2Constants.CIBA_GRANT_TYPE);
 
     public static final List<String> DEFAULT_RESPONSE_TYPES_SUPPORTED = list(OAuth2Constants.CODE, OIDCResponseType.NONE, OIDCResponseType.ID_TOKEN, OIDCResponseType.TOKEN, "id_token token", "code id_token", "code token", "code id_token token");
 
@@ -62,12 +76,14 @@ public class OIDCWellKnownProvider implements WellKnownProvider {
     public static final List<String> DEFAULT_CLIENT_AUTH_SIGNING_ALG_VALUES_SUPPORTED = list(Algorithm.RS256.toString());
 
     // The exact list depends on protocolMappers
-    public static final List<String> DEFAULT_CLAIMS_SUPPORTED= list("sub", "iss", IDToken.AUTH_TIME, IDToken.NAME, IDToken.GIVEN_NAME, IDToken.FAMILY_NAME, IDToken.PREFERRED_USERNAME, IDToken.EMAIL);
+    public static final List<String> DEFAULT_CLAIMS_SUPPORTED= list("aud", "sub", "iss", IDToken.AUTH_TIME, IDToken.NAME, IDToken.GIVEN_NAME, IDToken.FAMILY_NAME, IDToken.PREFERRED_USERNAME, IDToken.EMAIL, IDToken.ACR);
 
     public static final List<String> DEFAULT_CLAIM_TYPES_SUPPORTED= list("normal");
 
-    // TODO: Add more of OIDC scopes
-    public static final List<String> SCOPES_SUPPORTED= list(OAuth2Constants.SCOPE_OPENID, OAuth2Constants.OFFLINE_ACCESS);
+    // KEYCLOAK-7451 OAuth Authorization Server Metadata for Proof Key for Code Exchange
+    public static final List<String> DEFAULT_CODE_CHALLENGE_METHODS_SUPPORTED = list(OAuth2Constants.PKCE_METHOD_PLAIN, OAuth2Constants.PKCE_METHOD_S256);
+
+    public static final List<String> DEFAULT_BACKCHANNEL_TOKEN_DELIVERY_MODES_SUPPORTED= list(CibaConfig.DEFAULT_CIBA_POLICY_TOKEN_DELIVERY_MODE);
 
     private KeycloakSession session;
 
@@ -77,41 +93,87 @@ public class OIDCWellKnownProvider implements WellKnownProvider {
 
     @Override
     public Object getConfig() {
-        UriInfo uriInfo = session.getContext().getUri();
+        UriInfo frontendUriInfo = session.getContext().getUri(UrlType.FRONTEND);
+        UriInfo backendUriInfo = session.getContext().getUri(UrlType.BACKEND);
+
         RealmModel realm = session.getContext().getRealm();
 
-        UriBuilder uriBuilder = RealmsResource.protocolUrl(uriInfo);
+        UriBuilder frontendUriBuilder = RealmsResource.protocolUrl(frontendUriInfo);
+        UriBuilder backendUriBuilder = RealmsResource.protocolUrl(backendUriInfo);
 
         OIDCConfigurationRepresentation config = new OIDCConfigurationRepresentation();
-        config.setIssuer(Urls.realmIssuer(uriInfo.getBaseUri(), realm.getName()));
-        config.setAuthorizationEndpoint(uriBuilder.clone().path(OIDCLoginProtocolService.class, "auth").build(realm.getName(), OIDCLoginProtocol.LOGIN_PROTOCOL).toString());
-        config.setTokenEndpoint(uriBuilder.clone().path(OIDCLoginProtocolService.class, "token").build(realm.getName(), OIDCLoginProtocol.LOGIN_PROTOCOL).toString());
-        config.setTokenIntrospectionEndpoint(uriBuilder.clone().path(OIDCLoginProtocolService.class, "token").path(TokenEndpoint.class, "introspect").build(realm.getName(), OIDCLoginProtocol.LOGIN_PROTOCOL).toString());
-        config.setUserinfoEndpoint(uriBuilder.clone().path(OIDCLoginProtocolService.class, "issueUserInfo").build(realm.getName(), OIDCLoginProtocol.LOGIN_PROTOCOL).toString());
-        config.setLogoutEndpoint(uriBuilder.clone().path(OIDCLoginProtocolService.class, "logout").build(realm.getName(), OIDCLoginProtocol.LOGIN_PROTOCOL).toString());
-        config.setJwksUri(uriBuilder.clone().path(OIDCLoginProtocolService.class, "certs").build(realm.getName(), OIDCLoginProtocol.LOGIN_PROTOCOL).toString());
-        config.setCheckSessionIframe(uriBuilder.clone().path(OIDCLoginProtocolService.class, "getLoginStatusIframe").build(realm.getName(), OIDCLoginProtocol.LOGIN_PROTOCOL).toString());
-        config.setRegistrationEndpoint(RealmsResource.clientRegistrationUrl(uriInfo).path(ClientRegistrationService.class, "provider").build(realm.getName(), OIDCClientRegistrationProviderFactory.ID).toString());
+        config.setIssuer(Urls.realmIssuer(frontendUriInfo.getBaseUri(), realm.getName()));
+        config.setAuthorizationEndpoint(frontendUriBuilder.clone().path(OIDCLoginProtocolService.class, "auth").build(realm.getName(), OIDCLoginProtocol.LOGIN_PROTOCOL).toString());
+        config.setTokenEndpoint(backendUriBuilder.clone().path(OIDCLoginProtocolService.class, "token").build(realm.getName(), OIDCLoginProtocol.LOGIN_PROTOCOL).toString());
+        config.setIntrospectionEndpoint(backendUriBuilder.clone().path(OIDCLoginProtocolService.class, "token").path(TokenEndpoint.class, "introspect").build(realm.getName(), OIDCLoginProtocol.LOGIN_PROTOCOL).toString());
+        config.setUserinfoEndpoint(backendUriBuilder.clone().path(OIDCLoginProtocolService.class, "issueUserInfo").build(realm.getName(), OIDCLoginProtocol.LOGIN_PROTOCOL).toString());
+        config.setLogoutEndpoint(frontendUriBuilder.clone().path(OIDCLoginProtocolService.class, "logout").build(realm.getName(), OIDCLoginProtocol.LOGIN_PROTOCOL).toString());
+        config.setDeviceAuthorizationEndpoint(frontendUriBuilder.clone().path(OIDCLoginProtocolService.class, "auth")
+            .path(AuthorizationEndpoint.class, "authorizeDevice").path(DeviceEndpoint.class, "handleDeviceRequest")
+            .build(realm.getName(), OIDCLoginProtocol.LOGIN_PROTOCOL).toString());
+        URI jwksUri = backendUriBuilder.clone().path(OIDCLoginProtocolService.class, "certs").build(realm.getName(),
+            OIDCLoginProtocol.LOGIN_PROTOCOL);
 
-        config.setIdTokenSigningAlgValuesSupported(DEFAULT_ID_TOKEN_SIGNING_ALG_VALUES_SUPPORTED);
-        config.setUserInfoSigningAlgValuesSupported(DEFAULT_USER_INFO_SIGNING_ALG_VALUES_SUPPORTED);
-        config.setRequestObjectSigningAlgValuesSupported(DEFAULT_REQUEST_OBJECT_SIGNING_ALG_VALUES_SUPPORTED);
+        // NOTE: Don't hardcode HTTPS checks here. JWKS URI is exposed just in the development/testing environment. For the production environment, the OIDCWellKnownProvider
+        // is not exposed over "http" at all.
+        //if (isHttps(jwksUri)) {
+        config.setJwksUri(jwksUri.toString());
+
+        config.setCheckSessionIframe(frontendUriBuilder.clone().path(OIDCLoginProtocolService.class, "getLoginStatusIframe").build(realm.getName(), OIDCLoginProtocol.LOGIN_PROTOCOL).toString());
+        config.setRegistrationEndpoint(RealmsResource.clientRegistrationUrl(backendUriInfo).path(ClientRegistrationService.class, "provider").build(realm.getName(), OIDCClientRegistrationProviderFactory.ID).toString());
+
+        config.setIdTokenSigningAlgValuesSupported(getSupportedSigningAlgorithms(false));
+        config.setIdTokenEncryptionAlgValuesSupported(getSupportedIdTokenEncryptionAlg(false));
+        config.setIdTokenEncryptionEncValuesSupported(getSupportedIdTokenEncryptionEnc(false));
+        config.setUserInfoSigningAlgValuesSupported(getSupportedSigningAlgorithms(true));
+        config.setRequestObjectSigningAlgValuesSupported(getSupportedClientSigningAlgorithms(true));
         config.setResponseTypesSupported(DEFAULT_RESPONSE_TYPES_SUPPORTED);
         config.setSubjectTypesSupported(DEFAULT_SUBJECT_TYPES_SUPPORTED);
         config.setResponseModesSupported(DEFAULT_RESPONSE_MODES_SUPPORTED);
         config.setGrantTypesSupported(DEFAULT_GRANT_TYPES_SUPPORTED);
 
         config.setTokenEndpointAuthMethodsSupported(getClientAuthMethodsSupported());
-        config.setTokenEndpointAuthSigningAlgValuesSupported(DEFAULT_CLIENT_AUTH_SIGNING_ALG_VALUES_SUPPORTED);
+        config.setTokenEndpointAuthSigningAlgValuesSupported(getSupportedClientSigningAlgorithms(false));
+        config.setIntrospectionEndpointAuthMethodsSupported(getClientAuthMethodsSupported());
+        config.setIntrospectionEndpointAuthSigningAlgValuesSupported(getSupportedClientSigningAlgorithms(false));
 
         config.setClaimsSupported(DEFAULT_CLAIMS_SUPPORTED);
         config.setClaimTypesSupported(DEFAULT_CLAIM_TYPES_SUPPORTED);
-        config.setClaimsParameterSupported(false);
+        config.setClaimsParameterSupported(true);
 
-        config.setScopesSupported(SCOPES_SUPPORTED);
+        List<String> scopeNames = realm.getClientScopesStream()
+                .filter(clientScope -> Objects.equals(OIDCLoginProtocol.LOGIN_PROTOCOL, clientScope.getProtocol()))
+                .map(ClientScopeModel::getName)
+                .collect(Collectors.toList());
+        scopeNames.add(0, OAuth2Constants.SCOPE_OPENID);
+        config.setScopesSupported(scopeNames);
 
         config.setRequestParameterSupported(true);
         config.setRequestUriParameterSupported(true);
+        config.setRequireRequestUriRegistration(true);
+
+        // KEYCLOAK-7451 OAuth Authorization Server Metadata for Proof Key for Code Exchange
+        config.setCodeChallengeMethodsSupported(DEFAULT_CODE_CHALLENGE_METHODS_SUPPORTED);
+
+        // KEYCLOAK-6771 Certificate Bound Token
+        // https://tools.ietf.org/html/draft-ietf-oauth-mtls-08#section-6.2
+        config.setTlsClientCertificateBoundAccessTokens(true);
+
+        URI revocationEndpoint = frontendUriBuilder.clone().path(OIDCLoginProtocolService.class, "revoke")
+            .build(realm.getName(), OIDCLoginProtocol.LOGIN_PROTOCOL);
+
+        // NOTE: Don't hardcode HTTPS checks here. JWKS URI is exposed just in the development/testing environment. For the production environment, the OIDCWellKnownProvider
+        // is not exposed over "http" at all.
+        //if (isHttps(jwksUri)) {
+        config.setRevocationEndpoint(revocationEndpoint.toString());
+        config.setRevocationEndpointAuthMethodsSupported(getClientAuthMethodsSupported());
+        config.setRevocationEndpointAuthSigningAlgValuesSupported(getSupportedClientSigningAlgorithms(false));
+
+        config.setBackchannelLogoutSupported(true);
+        config.setBackchannelLogoutSessionSupported(true);
+
+        config.setBackchannelTokenDeliveryModesSupported(DEFAULT_BACKCHANNEL_TOKEN_DELIVERY_MODES_SUPPORTED);
+        config.setBackchannelAuthenticationEndpoint(CibaGrantType.authorizationUrl(backendUriInfo.getBaseUriBuilder()).build(realm.getName()).toString());
 
         return config;
     }
@@ -121,23 +183,40 @@ public class OIDCWellKnownProvider implements WellKnownProvider {
     }
 
     private static List<String> list(String... values) {
-        List<String> s = new LinkedList<>();
-        for (String v : values) {
-            s.add(v);
-        }
-        return s;
+        return Arrays.asList(values);
     }
 
     private List<String> getClientAuthMethodsSupported() {
-        List<String> result = new ArrayList<>();
-
-        List<ProviderFactory> providerFactories = session.getKeycloakSessionFactory().getProviderFactories(ClientAuthenticator.class);
-        for (ProviderFactory factory : providerFactories) {
-            ClientAuthenticatorFactory clientAuthFactory = (ClientAuthenticatorFactory) factory;
-            result.addAll(clientAuthFactory.getProtocolAuthenticatorMethods(OIDCLoginProtocol.LOGIN_PROTOCOL));
-        }
-
-        return result;
+        return session.getKeycloakSessionFactory().getProviderFactoriesStream(ClientAuthenticator.class)
+                .map(ClientAuthenticatorFactory.class::cast)
+                .map(caf -> caf.getProtocolAuthenticatorMethods(OIDCLoginProtocol.LOGIN_PROTOCOL))
+                .flatMap(Collection::stream)
+                .collect(Collectors.toList());
     }
 
+    private List<String> getSupportedAlgorithms(Class<? extends Provider> clazz, boolean includeNone) {
+        Stream<String> supportedAlgorithms = session.getKeycloakSessionFactory().getProviderFactoriesStream(clazz)
+                .map(ProviderFactory::getId);
+
+        if (includeNone) {
+            supportedAlgorithms = Streams.concat(supportedAlgorithms, Stream.of("none"));
+        }
+        return supportedAlgorithms.collect(Collectors.toList());
+    }
+
+    private List<String> getSupportedSigningAlgorithms(boolean includeNone) {
+        return getSupportedAlgorithms(SignatureProvider.class, includeNone);
+    }
+
+    private List<String> getSupportedClientSigningAlgorithms(boolean includeNone) {
+        return getSupportedAlgorithms(ClientSignatureVerifierProvider.class, includeNone);
+    }
+
+    private List<String> getSupportedIdTokenEncryptionAlg(boolean includeNone) {
+        return getSupportedAlgorithms(CekManagementProvider.class, includeNone);
+    }
+
+    private List<String> getSupportedIdTokenEncryptionEnc(boolean includeNone) {
+        return getSupportedAlgorithms(ContentEncryptionProvider.class, includeNone);
+    }
 }

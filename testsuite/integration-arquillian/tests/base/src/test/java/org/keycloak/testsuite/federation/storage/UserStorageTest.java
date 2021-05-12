@@ -1,57 +1,90 @@
 package org.keycloak.testsuite.federation.storage;
 
+import org.apache.commons.io.FileUtils;
+import org.jboss.arquillian.graphene.page.Page;
+import org.junit.After;
+import org.junit.Assert;
+import org.junit.Before;
+import org.junit.Ignore;
+import org.junit.Rule;
+import org.junit.Test;
+import org.keycloak.admin.client.resource.RealmResource;
+import org.keycloak.admin.client.resource.UserResource;
+import org.keycloak.common.Profile;
+import org.keycloak.common.util.MultivaluedHashMap;
+import org.keycloak.common.util.ObjectUtil;
+import org.keycloak.credential.CredentialAuthentication;
+import org.keycloak.credential.CredentialModel;
+import org.keycloak.credential.UserCredentialStoreManager;
+import org.keycloak.models.KeycloakSession;
+import org.keycloak.models.RealmModel;
+import org.keycloak.models.UserModel;
+import org.keycloak.models.cache.CachedUserModel;
+import org.keycloak.models.credential.OTPCredentialModel;
+import org.keycloak.models.credential.PasswordCredentialModel;
+import org.keycloak.models.utils.KeycloakModelUtils;
+import org.keycloak.representations.idm.ComponentRepresentation;
+import org.keycloak.representations.idm.CredentialRepresentation;
+import org.keycloak.representations.idm.GroupRepresentation;
+import org.keycloak.representations.idm.RealmRepresentation;
+import org.keycloak.representations.idm.RoleRepresentation;
+import org.keycloak.representations.idm.UserRepresentation;
+import org.keycloak.storage.CacheableStorageProviderModel.CachePolicy;
+import org.keycloak.storage.StorageId;
+import org.keycloak.storage.UserStorageProvider;
+import org.keycloak.testsuite.AbstractAuthTest;
+import org.keycloak.testsuite.admin.ApiUtil;
+import org.keycloak.testsuite.arquillian.annotation.AuthServerContainerExclude;
+import org.keycloak.testsuite.arquillian.annotation.DisableFeature;
+import org.keycloak.testsuite.arquillian.annotation.ModelTest;
+import org.keycloak.testsuite.federation.UserMapStorage;
+import org.keycloak.testsuite.federation.UserMapStorageFactory;
+import org.keycloak.testsuite.federation.UserPropertyFileStorageFactory;
+import org.keycloak.testsuite.pages.LoginPage;
+import org.keycloak.testsuite.pages.RegisterPage;
+import org.keycloak.testsuite.pages.VerifyEmailPage;
+import org.keycloak.testsuite.updaters.RealmAttributeUpdater;
+import org.keycloak.testsuite.util.GreenMailRule;
+import org.keycloak.testsuite.util.TestCleanup;
+
+import javax.mail.internet.MimeMessage;
+import javax.ws.rs.NotFoundException;
+import javax.ws.rs.core.Response;
 import java.io.File;
 import java.io.IOException;
 import java.net.URISyntaxException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Calendar;
-import static java.util.Calendar.DAY_OF_WEEK;
-import static java.util.Calendar.HOUR_OF_DAY;
-import static java.util.Calendar.MINUTE;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
-import javax.ws.rs.NotFoundException;
-import javax.ws.rs.core.Response;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
-import org.apache.commons.io.FileUtils;
-import org.jboss.arquillian.container.test.api.Deployment;
-import org.jboss.shrinkwrap.api.spec.WebArchive;
-import org.junit.After;
-import org.junit.Assert;
+import static java.util.Calendar.DAY_OF_WEEK;
+import static java.util.Calendar.HOUR_OF_DAY;
+import static java.util.Calendar.MINUTE;
+import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.hasSize;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertThat;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
-import org.junit.Before;
-import org.junit.Ignore;
-import org.junit.Test;
-import org.keycloak.admin.client.resource.UserResource;
-import org.keycloak.common.util.MultivaluedHashMap;
-import org.keycloak.models.RealmModel;
-import org.keycloak.models.UserModel;
 import static org.keycloak.models.UserModel.RequiredAction.UPDATE_PROFILE;
-import org.keycloak.models.cache.CachedUserModel;
-import org.keycloak.representations.idm.ComponentRepresentation;
-import org.keycloak.representations.idm.GroupRepresentation;
-import org.keycloak.representations.idm.RealmRepresentation;
-import org.keycloak.representations.idm.RoleRepresentation;
-import org.keycloak.representations.idm.UserRepresentation;
-import org.keycloak.storage.UserStorageProvider;
 import static org.keycloak.storage.UserStorageProviderModel.CACHE_POLICY;
-import org.keycloak.storage.UserStorageProviderModel.CachePolicy;
 import static org.keycloak.storage.UserStorageProviderModel.EVICTION_DAY;
 import static org.keycloak.storage.UserStorageProviderModel.EVICTION_HOUR;
 import static org.keycloak.storage.UserStorageProviderModel.EVICTION_MINUTE;
+import static org.keycloak.storage.UserStorageProviderModel.IMPORT_ENABLED;
 import static org.keycloak.storage.UserStorageProviderModel.MAX_LIFESPAN;
-import org.keycloak.testsuite.AbstractAuthTest;
-import org.keycloak.testsuite.admin.ApiUtil;
-import org.keycloak.testsuite.federation.UserMapStorage;
-import org.keycloak.testsuite.federation.UserMapStorageFactory;
-import org.keycloak.testsuite.federation.UserPropertyFileStorageFactory;
-import org.keycloak.testsuite.runonserver.RunOnServerDeployment;
+import static org.keycloak.testsuite.actions.RequiredActionEmailVerificationTest.getPasswordResetEmailLink;
+import org.keycloak.testsuite.arquillian.annotation.AuthServerContainerExclude.AuthServer;
+
 import static org.keycloak.testsuite.util.URLAssert.assertCurrentUrlDoesntStartWith;
 import static org.keycloak.testsuite.util.URLAssert.assertCurrentUrlStartsWith;
 
@@ -59,11 +92,25 @@ import static org.keycloak.testsuite.util.URLAssert.assertCurrentUrlStartsWith;
  *
  * @author tkyjovsk
  */
+@AuthServerContainerExclude(AuthServer.REMOTE)
+@DisableFeature(value = Profile.Feature.ACCOUNT2, skipRestart = true) // TODO remove this (KEYCLOAK-16228)
 public class UserStorageTest extends AbstractAuthTest {
 
     private String memProviderId;
     private String propProviderROId;
     private String propProviderRWId;
+
+    @Rule
+    public GreenMailRule greenMail = new GreenMailRule();
+
+    @Page
+    protected LoginPage loginPage;
+
+    @Page
+    protected RegisterPage registerPage;
+
+    @Page
+    protected VerifyEmailPage verifyEmailPage;
 
     private static final File CONFIG_DIR = new File(System.getProperty("auth.server.config.dir", ""));
 
@@ -75,6 +122,7 @@ public class UserStorageTest extends AbstractAuthTest {
         memProvider.setProviderType(UserStorageProvider.class.getName());
         memProvider.setConfig(new MultivaluedHashMap<>());
         memProvider.getConfig().putSingle("priority", Integer.toString(0));
+        memProvider.getConfig().putSingle(IMPORT_ENABLED, Boolean.toString(false));
 
         memProviderId = addComponent(memProvider);
 
@@ -105,18 +153,23 @@ public class UserStorageTest extends AbstractAuthTest {
     }
 
     @After
-    public void removeTestUser() throws URISyntaxException, IOException {
+    public void afterTestCleanUp() throws URISyntaxException, IOException {
         testingClient.server().run(session -> {
             RealmModel realm = session.realms().getRealmByName("test");
             if (realm == null) {
                 return;
             }
 
-            UserModel user = session.users().getUserByUsername("thor", realm);
+            UserModel user = session.users().getUserByUsername(realm, "thor");
             if (user != null) {
                 session.userLocalStorage().removeUser(realm, user);
                 session.userCache().clear();
             }
+
+            //we need to clear userPasswords and userGroups from UserMapStorageFactory
+            UserMapStorageFactory userMapStorageFactory = (UserMapStorageFactory) session.getKeycloakSessionFactory().getProviderFactory(UserStorageProvider.class, UserMapStorageFactory.PROVIDER_ID);
+            Assert.assertNotNull(userMapStorageFactory);
+            userMapStorageFactory.clear();
         });
     }
 
@@ -132,11 +185,15 @@ public class UserStorageTest extends AbstractAuthTest {
         return propProviderRW;
     }
 
-    protected String addComponent(ComponentRepresentation component) {
-        Response resp = testRealmResource().components().add(component);
+    private String addComponent(ComponentRepresentation component) {
+        return addComponent(testRealmResource(), getCleanup(), component);
+    }
+
+    static String addComponent(RealmResource realmResource, TestCleanup testCleanup, ComponentRepresentation component) {
+        Response resp = realmResource.components().add(component);
         resp.close();
         String id = ApiUtil.getCreatedId(resp);
-        getCleanup().addComponentId(id);
+        testCleanup.addComponentId(id);
         return id;
     }
 
@@ -159,6 +216,17 @@ public class UserStorageTest extends AbstractAuthTest {
         testRealmResource().components().query().forEach((c) -> {
             log.infof("%s - %s - %s", c.getId(), c.getProviderType(), c.getName());
         });
+    }
+
+    /**
+     * KEYCLOAK-4013
+     *
+     * @throws Exception
+     */
+    @Test
+    @ModelTest
+    public void testCast(KeycloakSession session) throws Exception {
+        UserCredentialStoreManager.getCredentialProviders(session, CredentialAuthentication.class).collect(Collectors.toList());
     }
 
     @Test
@@ -267,6 +335,39 @@ public class UserStorageTest extends AbstractAuthTest {
         assertFalse(foundRole);
     }
 
+    @Test
+    @AuthServerContainerExclude(AuthServer.REMOTE)
+    public void testRegisterWithRequiredEmail() throws Exception {
+        try (AutoCloseable c = new RealmAttributeUpdater(testRealmResource())
+          .updateWith(r -> {
+            Map<String, String> config = new HashMap<>();
+            config.put("from", "auto@keycloak.org");
+            config.put("host", "localhost");
+            config.put("port", "3025");
+            r.setSmtpServer(config);
+            r.setRegistrationAllowed(true);
+            r.setVerifyEmail(true);
+          })
+          .update()) {
+
+            testRealmAccountPage.navigateTo();
+            loginPage.clickRegister();
+            registerPage.register("firstName", "lastName", "email@mail.com", "verifyEmail", "password", "password");
+
+            verifyEmailPage.assertCurrent();
+
+            Assert.assertEquals(1, greenMail.getReceivedMessages().length);
+
+            MimeMessage message = greenMail.getReceivedMessages()[0];
+
+            String verificationUrl = getPasswordResetEmailLink(message);
+
+            driver.navigate().to(verificationUrl.trim());
+
+            testRealmAccountPage.assertCurrent();
+        }
+    }
+
     public UserResource user(String userId) {
         return testRealmResource().users().get(userId);
     }
@@ -324,9 +425,9 @@ public class UserStorageTest extends AbstractAuthTest {
         Assert.assertTrue(usernames.contains("danny"));
 
         // test searchForUser
-        List<UserRepresentation> users = testRealmResource().users().search("tbrady", 0, Integer.MAX_VALUE);
-        Assert.assertTrue(users.size() == 1);
-        Assert.assertTrue(users.get(0).getUsername().equals("tbrady"));
+        List<UserRepresentation> users = testRealmResource().users().search("tbrady", 0, -1);
+        assertThat(users, hasSize(1));
+        assertThat(users.get(0).getUsername(), equalTo("tbrady"));
 
         // test getGroupMembers()
         GroupRepresentation g = new GroupRepresentation();
@@ -362,45 +463,181 @@ public class UserStorageTest extends AbstractAuthTest {
         Assert.assertTrue(usernames.contains("thor"));
 
         // search by single attribute
-        // FIXME - no equivalent for model in REST
-    }
+        testingClient.server().run(session -> {
+            System.out.println("search by single attribute");
 
-    @Deployment
-    public static WebArchive deploy() {
-        return RunOnServerDeployment.create(UserResource.class)
-                .addPackages(true, "org.keycloak.testsuite");
+            RealmModel realm = session.realms().getRealmByName("test");
+            UserModel userModel = session.users().getUserByUsername(realm, "thor");
+            userModel.setSingleAttribute("weapon", "hammer");
+
+            List<UserModel> userModels = session.users().searchForUserByUserAttributeStream(realm, "weapon", "hammer")
+                    .peek(System.out::println).collect(Collectors.toList());
+            Assert.assertEquals(1, userModels.size());
+            Assert.assertEquals("thor", userModels.get(0).getUsername());
+        });
     }
 
     @Test
-    public void testDailyEviction() {
-        ApiUtil.findUserByUsername(testRealmResource(), "thor");
+    public void testQueryExactMatch() {
+        Assert.assertThat(testRealmResource().users().search("a", true), hasSize(0));
+        Assert.assertThat(testRealmResource().users().search("apollo", true), hasSize(1));
+        Assert.assertThat(testRealmResource().users().search("tbrady", true), hasSize(1));
+    }
 
-        // set eviction to 1 hour from now
-        Calendar eviction = Calendar.getInstance();
-        eviction.add(Calendar.HOUR, 1);
+    private void setDailyEvictionTime(int hour, int minutes) {
+        if (hour < 0 || hour > 23) {
+            throw new IllegalArgumentException("hour == " + hour);
+        }
+        if (minutes < 0 || minutes > 59) {
+            throw new IllegalArgumentException("minutes == " + minutes);
+        }
         ComponentRepresentation propProviderRW = testRealmResource().components().component(propProviderRWId).toRepresentation();
         propProviderRW.getConfig().putSingle(CACHE_POLICY, CachePolicy.EVICT_DAILY.name());
-        propProviderRW.getConfig().putSingle(EVICTION_HOUR, Integer.toString(eviction.get(HOUR_OF_DAY)));
-        propProviderRW.getConfig().putSingle(EVICTION_MINUTE, Integer.toString(eviction.get(MINUTE)));
+        propProviderRW.getConfig().putSingle(EVICTION_HOUR, String.valueOf(hour));
+        propProviderRW.getConfig().putSingle(EVICTION_MINUTE, String.valueOf(minutes));
         testRealmResource().components().component(propProviderRWId).update(propProviderRW);
+    }
 
-        // now
+
+    /**
+     * Test daily eviction behaviour
+     */
+    @Test
+    public void testDailyEviction() {
+
+        // We need to test both cases: eviction the same day, and eviction the next day
+        // Simplest is to take full control of the clock
+
+        // set clock to 23:30 of current day
+        setTimeOfDay(23, 30, 0);
+
+        // test same day eviction behaviour
+        // set eviction at 23:45
+        setDailyEvictionTime(23, 45);
+
+        // there are users in cache already from before-test import
+        // and they didn't use any time offset clock so they may have timestamps in the 'future'
+
+        // let's clear cache
         testingClient.server().run(session -> {
-            RealmModel realm = session.realms().getRealmByName("test");
-            UserModel user = session.users().getUserByUsername("thor", realm);
-            System.out.println("User class: " + user.getClass());
-            Assert.assertTrue(user instanceof CachedUserModel); // should still be cached
+            session.userCache().clear();
         });
 
-        setTimeOffset(2 * 60 * 60); // 2 hours in future
 
         testingClient.server().run(session -> {
             RealmModel realm = session.realms().getRealmByName("test");
-            UserModel user = session.users().getUserByUsername("thor", realm);
-            System.out.println("User class: " + user.getClass());
-            Assert.assertFalse(user instanceof CachedUserModel); // should be evicted
+            UserModel user = session.users().getUserByUsername(realm, "thor");
+            Assert.assertTrue(user instanceof CachedUserModel); // should be newly cached
         });
 
+
+        setTimeOfDay(23, 40, 0);
+
+        // lookup user again - make sure it's returned from cache
+        testingClient.server().run(session -> {
+            RealmModel realm = session.realms().getRealmByName("test");
+            UserModel user = session.users().getUserByUsername(realm, "thor");
+            Assert.assertTrue(user instanceof CachedUserModel); // should be returned from cache
+        });
+
+
+        setTimeOfDay(23, 50, 0);
+
+        testingClient.server().run(session -> {
+            RealmModel realm = session.realms().getRealmByName("test");
+            UserModel user = session.users().getUserByUsername(realm, "thor");
+            Assert.assertFalse(user instanceof CachedUserModel); // should have been invalidated
+        });
+
+
+        testingClient.server().run(session -> {
+            RealmModel realm = session.realms().getRealmByName("test");
+            UserModel user = session.users().getUserByUsername(realm, "thor");
+            Assert.assertTrue(user instanceof CachedUserModel); // should have been newly cached
+        });
+
+
+        testingClient.server().run(session -> {
+            RealmModel realm = session.realms().getRealmByName("test");
+            UserModel user = session.users().getUserByUsername(realm, "thor");
+            Assert.assertTrue(user instanceof CachedUserModel); // should be returned from cache
+        });
+
+
+        setTimeOfDay(23, 55, 0);
+
+        testingClient.server().run(session -> {
+            RealmModel realm = session.realms().getRealmByName("test");
+            UserModel user = session.users().getUserByUsername(realm, "thor");
+            Assert.assertTrue(user instanceof CachedUserModel); // should be returned from cache
+        });
+
+
+        // at 00:30
+        // it's next day now. the daily eviction time is now in the future
+        setTimeOfDay(0, 30, 0, 24 * 60 * 60);
+
+        testingClient.server().run(session -> {
+            RealmModel realm = session.realms().getRealmByName("test");
+            UserModel user = session.users().getUserByUsername(realm, "thor");
+            Assert.assertTrue(user instanceof CachedUserModel); // should be returned from cache - it's still good for almost the whole day
+        });
+
+
+        // at 23:30 next day
+        setTimeOfDay(23, 30, 0, 24 * 60 * 60);
+
+        testingClient.server().run(session -> {
+            RealmModel realm = session.realms().getRealmByName("test");
+            UserModel user = session.users().getUserByUsername(realm, "thor");
+            Assert.assertTrue(user instanceof CachedUserModel); // should be returned from cache - it's still good until 23:45
+        });
+
+        // at 23:50
+        setTimeOfDay(23, 50, 0, 24 * 60 * 60);
+
+        testingClient.server().run(session -> {
+            RealmModel realm = session.realms().getRealmByName("test");
+            UserModel user = session.users().getUserByUsername(realm, "thor");
+            Assert.assertFalse(user instanceof CachedUserModel); // should be invalidated
+        });
+
+        setTimeOfDay(23, 55, 0, 24 * 60 * 60);
+
+        testingClient.server().run(session -> {
+            RealmModel realm = session.realms().getRealmByName("test");
+            UserModel user = session.users().getUserByUsername(realm, "thor");
+            Assert.assertTrue(user instanceof CachedUserModel); // should be newly cached
+        });
+
+
+        setTimeOfDay(23, 40, 0, 2 * 24 * 60 * 60);
+
+        testingClient.server().run(session -> {
+            RealmModel realm = session.realms().getRealmByName("test");
+            UserModel user = session.users().getUserByUsername(realm, "thor");
+            Assert.assertTrue(user instanceof CachedUserModel); // should be returned from cache
+        });
+
+        setTimeOfDay(23, 50, 0, 2 * 24 * 60 * 60);
+
+        testingClient.server().run(session -> {
+            RealmModel realm = session.realms().getRealmByName("test");
+            UserModel user = session.users().getUserByUsername(realm, "thor");
+            Assert.assertFalse(user instanceof CachedUserModel); // should be invalidated
+        });
+
+        testingClient.server().run(session -> {
+            RealmModel realm = session.realms().getRealmByName("test");
+            UserModel user = session.users().getUserByUsername(realm, "thor");
+            Assert.assertTrue(user instanceof CachedUserModel); // should be newly cached
+        });
+
+        testingClient.server().run(session -> {
+            RealmModel realm = session.realms().getRealmByName("test");
+            UserModel user = session.users().getUserByUsername(realm, "thor");
+            Assert.assertTrue(user instanceof CachedUserModel); // should be returned from cache
+        });
     }
 
     @Test
@@ -420,7 +657,7 @@ public class UserStorageTest extends AbstractAuthTest {
         // now
         testingClient.server().run(session -> {
             RealmModel realm = session.realms().getRealmByName("test");
-            UserModel user = session.users().getUserByUsername("thor", realm);
+            UserModel user = session.users().getUserByUsername(realm, "thor");
             System.out.println("User class: " + user.getClass());
             Assert.assertTrue(user instanceof CachedUserModel); // should still be cached
         });
@@ -430,7 +667,7 @@ public class UserStorageTest extends AbstractAuthTest {
         // now
         testingClient.server().run(session -> {
             RealmModel realm = session.realms().getRealmByName("test");
-            UserModel user = session.users().getUserByUsername("thor", realm);
+            UserModel user = session.users().getUserByUsername(realm, "thor");
             System.out.println("User class: " + user.getClass());
             Assert.assertTrue(user instanceof CachedUserModel); // should still be cached
         });
@@ -439,7 +676,7 @@ public class UserStorageTest extends AbstractAuthTest {
 
         testingClient.server().run(session -> {
             RealmModel realm = session.realms().getRealmByName("test");
-            UserModel user = session.users().getUserByUsername("thor", realm);
+            UserModel user = session.users().getUserByUsername(realm, "thor");
             System.out.println("User class: " + user.getClass());
             Assert.assertFalse(user instanceof CachedUserModel); // should be evicted
         });
@@ -447,7 +684,6 @@ public class UserStorageTest extends AbstractAuthTest {
     }
 
     @Test
-    @Ignore
     public void testMaxLifespan() {
         ApiUtil.findUserByUsername(testRealmResource(), "thor");
 
@@ -460,7 +696,7 @@ public class UserStorageTest extends AbstractAuthTest {
         // now
         testingClient.server().run(session -> {
             RealmModel realm = session.realms().getRealmByName("test");
-            UserModel user = session.users().getUserByUsername("thor", realm);
+            UserModel user = session.users().getUserByUsername(realm, "thor");
             System.out.println("User class: " + user.getClass());
             Assert.assertTrue(user instanceof CachedUserModel); // should still be cached
         });
@@ -469,7 +705,7 @@ public class UserStorageTest extends AbstractAuthTest {
         
         testingClient.server().run(session -> {
             RealmModel realm = session.realms().getRealmByName("test");
-            UserModel user = session.users().getUserByUsername("thor", realm);
+            UserModel user = session.users().getUserByUsername(realm, "thor");
             System.out.println("User class: " + user.getClass());
             Assert.assertTrue(user instanceof CachedUserModel); // should still be cached
         });
@@ -478,7 +714,7 @@ public class UserStorageTest extends AbstractAuthTest {
 
         testingClient.server().run(session -> {
             RealmModel realm = session.realms().getRealmByName("test");
-            UserModel user = session.users().getUserByUsername("thor", realm);
+            UserModel user = session.users().getUserByUsername(realm, "thor");
             System.out.println("User class: " + user.getClass());
             Assert.assertFalse(user instanceof CachedUserModel); // should be evicted
         });
@@ -496,9 +732,29 @@ public class UserStorageTest extends AbstractAuthTest {
 
         testingClient.server().run(session -> {
             RealmModel realm = session.realms().getRealmByName("test");
-            UserModel user = session.users().getUserByUsername("thor", realm);
+            UserModel user = session.users().getUserByUsername(realm, "thor");
             System.out.println("User class: " + user.getClass());
             Assert.assertFalse(user instanceof CachedUserModel); // should be evicted
+        });
+
+
+        testingClient.server().run(session -> {
+            RealmModel realm = session.realms().getRealmByName("test");
+            UserModel thor2 = session.users().getUserByUsername(realm, "thor");
+            Assert.assertFalse(thor2 instanceof CachedUserModel);
+        });
+
+        propProviderRW = testRealmResource().components().component(propProviderRWId).toRepresentation();
+        propProviderRW.getConfig().putSingle(CACHE_POLICY, CachePolicy.DEFAULT.name());
+        propProviderRW.getConfig().remove("evictionHour");
+        propProviderRW.getConfig().remove("evictionMinute");
+        propProviderRW.getConfig().remove("evictionDay");
+        testRealmResource().components().component(propProviderRWId).update(propProviderRW);
+
+        testingClient.server().run(session -> {
+            RealmModel realm = session.realms().getRealmByName("test");
+            UserModel thor = session.users().getUserByUsername(realm, "thor");
+            System.out.println("Foo");
         });
     }
 
@@ -512,11 +768,13 @@ public class UserStorageTest extends AbstractAuthTest {
             RealmModel realm = session.realms().getRealmByName("test");
             UserModel user = session.users().addUser(realm, "memuser");
             Assert.assertNotNull(user);
-            user = session.users().getUserByUsername("nonexistent", realm);
+            user = session.users().getUserByUsername(realm, "nonexistent");
             Assert.assertNull(user);
 
             Assert.assertEquals(1, UserMapStorage.allocations.get());
             Assert.assertEquals(0, UserMapStorage.closings.get());
+
+            session.users().removeUser(realm,session.users().getUserByUsername(realm, "memuser"));
         });
 
         testingClient.server().run(session -> {
@@ -606,6 +864,182 @@ public class UserStorageTest extends AbstractAuthTest {
             Assert.assertEquals(2, UserMapStorage.roleRemovals.get()); // check if role removal hooks were called
         });
 
+    }
+
+
+    @Test
+    @ModelTest
+    public void testCredentialCRUD(KeycloakSession session) throws Exception {
+        AtomicReference<String> passwordId = new AtomicReference<>();
+        AtomicReference<String> otp1Id = new AtomicReference<>();
+        AtomicReference<String> otp2Id = new AtomicReference<>();
+
+        KeycloakModelUtils.runJobInTransaction(session.getKeycloakSessionFactory(), (KeycloakSession currentSession) -> {
+            RealmModel realm = currentSession.realms().getRealmByName("test");
+
+            UserModel user = currentSession.users().getUserByUsername(realm, "thor");
+            Assert.assertFalse(StorageId.isLocalStorage(user));
+
+            Stream<CredentialModel> credentials = currentSession.userCredentialManager().getStoredCredentialsStream(realm, user);
+            org.keycloak.testsuite.Assert.assertEquals(0, credentials.count());
+
+            // Create password
+            CredentialModel passwordCred = PasswordCredentialModel.createFromValues("my-algorithm", "theSalt".getBytes(), 22, "ABC");
+            passwordCred = currentSession.userCredentialManager().createCredential(realm, user, passwordCred);
+            passwordId.set(passwordCred.getId());
+
+            // Create Password and 2 OTP credentials (password was already created)
+            CredentialModel otp1 = OTPCredentialModel.createFromPolicy(realm, "secret1");
+            CredentialModel otp2 = OTPCredentialModel.createFromPolicy(realm, "secret2");
+            otp1 = currentSession.userCredentialManager().createCredential(realm, user, otp1);
+            otp2 = currentSession.userCredentialManager().createCredential(realm, user, otp2);
+            otp1Id.set(otp1.getId());
+            otp2Id.set(otp2.getId());
+        });
+
+
+        KeycloakModelUtils.runJobInTransaction(session.getKeycloakSessionFactory(), (KeycloakSession currentSession) -> {
+            RealmModel realm = currentSession.realms().getRealmByName("test");
+            UserModel user = currentSession.users().getUserByUsername(realm, "thor");
+
+            // Assert priorities: password, otp1, otp2
+            List<CredentialModel> list = currentSession.userCredentialManager().getStoredCredentialsStream(realm, user)
+                    .collect(Collectors.toList());
+            assertOrder(list, passwordId.get(), otp1Id.get(), otp2Id.get());
+
+            // Assert can't move password when newPreviousCredential not found
+            assertFalse(currentSession.userCredentialManager().moveCredentialTo(realm, user, passwordId.get(), "not-known"));
+
+            // Assert can't move credential when not found
+            assertFalse(currentSession.userCredentialManager().moveCredentialTo(realm, user, "not-known", otp2Id.get()));
+
+            // Move otp2 up
+            assertTrue(currentSession.userCredentialManager().moveCredentialTo(realm, user, otp2Id.get(), passwordId.get()));
+        });
+
+        KeycloakModelUtils.runJobInTransaction(session.getKeycloakSessionFactory(), (KeycloakSession currentSession) -> {
+            RealmModel realm = currentSession.realms().getRealmByName("test");
+            UserModel user = currentSession.users().getUserByUsername(realm, "thor");
+
+            // Assert priorities: password, otp2, otp1
+            List<CredentialModel> list = currentSession.userCredentialManager().getStoredCredentialsStream(realm, user)
+                    .collect(Collectors.toList());
+            assertOrder(list, passwordId.get(), otp2Id.get(), otp1Id.get());
+
+            // Move otp2 to the top
+            org.keycloak.testsuite.Assert.assertTrue(currentSession.userCredentialManager().moveCredentialTo(realm, user, otp2Id.get(), null));
+        });
+
+        KeycloakModelUtils.runJobInTransaction(session.getKeycloakSessionFactory(), (KeycloakSession currentSession) -> {
+            RealmModel realm = currentSession.realms().getRealmByName("test");
+            UserModel user = currentSession.users().getUserByUsername(realm, "thor");
+
+            // Assert priorities: otp2, password, otp1
+            List<CredentialModel> list = currentSession.userCredentialManager().getStoredCredentialsStream(realm, user)
+                    .collect(Collectors.toList());
+            assertOrder(list, otp2Id.get(), passwordId.get(), otp1Id.get());
+
+            // Move password down
+            assertTrue(currentSession.userCredentialManager().moveCredentialTo(realm, user, passwordId.get(), otp1Id.get()));
+        });
+
+        KeycloakModelUtils.runJobInTransaction(session.getKeycloakSessionFactory(), (KeycloakSession currentSession) -> {
+            RealmModel realm = currentSession.realms().getRealmByName("test");
+            UserModel user = currentSession.users().getUserByUsername(realm, "thor");
+
+            // Assert priorities: otp2, otp1, password
+            List<CredentialModel> list = currentSession.userCredentialManager().getStoredCredentialsStream(realm, user)
+                    .collect(Collectors.toList());
+            assertOrder(list, otp2Id.get(), otp1Id.get(), passwordId.get());
+
+            // Remove otp2 down two positions
+            assertTrue(currentSession.userCredentialManager().moveCredentialTo(realm, user, otp2Id.get(), passwordId.get()));
+        });
+
+        KeycloakModelUtils.runJobInTransaction(session.getKeycloakSessionFactory(), (KeycloakSession currentSession) -> {
+            RealmModel realm = currentSession.realms().getRealmByName("test");
+            UserModel user = currentSession.users().getUserByUsername(realm, "thor");
+
+            // Assert priorities: otp2, otp1, password
+            List<CredentialModel> list = currentSession.userCredentialManager().getStoredCredentialsStream(realm, user)
+                    .collect(Collectors.toList());
+            assertOrder(list, otp1Id.get(), passwordId.get(), otp2Id.get());
+
+            // Remove password
+            assertTrue(currentSession.userCredentialManager().removeStoredCredential(realm, user, passwordId.get()));
+        });
+
+        KeycloakModelUtils.runJobInTransaction(session.getKeycloakSessionFactory(), (KeycloakSession currentSession) -> {
+            RealmModel realm = currentSession.realms().getRealmByName("test");
+            UserModel user = currentSession.users().getUserByUsername(realm, "thor");
+
+            // Assert priorities: otp2, password
+            List<CredentialModel> list = currentSession.userCredentialManager().getStoredCredentialsStream(realm, user)
+                    .collect(Collectors.toList());
+            assertOrder(list, otp1Id.get(), otp2Id.get());
+        });
+    }
+
+    @Test
+    public void testCRUDCredentialsOfDifferentUser() {
+        // Create OTP credential for user1 in the federated storage
+        testingClient.server().run(session -> {
+            RealmModel realm = session.realms().getRealmByName("test");
+
+            UserModel user = session.users().getUserByUsername(realm, "thor");
+            Assert.assertFalse(StorageId.isLocalStorage(user));
+
+            CredentialModel otp1 = OTPCredentialModel.createFromPolicy(realm, "secret1");
+            session.userCredentialManager().createCredential(realm, user, otp1);
+        });
+
+        UserResource user1 = ApiUtil.findUserByUsernameId(testRealmResource(), "thor");
+        CredentialRepresentation otpCredential = user1.credentials().stream()
+                .filter(credentialRep -> OTPCredentialModel.TYPE.equals(credentialRep.getType()))
+                .findFirst()
+                .get();
+
+        // Test that when admin operates on user "user2", who is saved in user-storage, he can't update, move or remove credentials of different user "user1"
+        UserResource user2 = ApiUtil.findUserByUsernameId(testRealmResource(), "tbrady");
+        try {
+            user2.setCredentialUserLabel(otpCredential.getId(), "new-label");
+            Assert.fail("Not expected to successfully update user label");
+        } catch (NotFoundException nfe) {
+            // Expected
+        }
+
+        try {
+            user2.moveCredentialToFirst(otpCredential.getId());
+            Assert.fail("Not expected to successfully move credential");
+        } catch (NotFoundException nfe) {
+            // Expected
+        }
+
+        try {
+            user2.removeCredential(otpCredential.getId());
+            Assert.fail("Not expected to successfully remove credential");
+        } catch (NotFoundException nfe) {
+            // Expected
+        }
+
+        // Assert credential was not removed or updated
+        CredentialRepresentation otpCredentialLoaded = user1.credentials().stream()
+                .filter(credentialRep -> OTPCredentialModel.TYPE.equals(credentialRep.getType()))
+                .findFirst()
+                .get();
+        Assert.assertTrue(ObjectUtil.isEqualOrBothNull(otpCredential.getUserLabel(), otpCredentialLoaded.getUserLabel()));
+        Assert.assertTrue(ObjectUtil.isEqualOrBothNull(otpCredential.getPriority(), otpCredentialLoaded.getPriority()));
+    }
+
+
+    private void assertOrder(List<CredentialModel> creds, String... expectedIds) {
+        org.keycloak.testsuite.Assert.assertEquals(expectedIds.length, creds.size());
+
+        if (creds.size() == 0) return;
+
+        for (int i=0 ; i<expectedIds.length ; i++) {
+            org.keycloak.testsuite.Assert.assertEquals(creds.get(i).getId(), expectedIds[i]);
+        }
     }
 
 }

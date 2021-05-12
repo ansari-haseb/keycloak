@@ -18,7 +18,7 @@
 package org.keycloak.protocol.saml.mappers;
 
 import org.keycloak.dom.saml.v2.assertion.AttributeStatementType;
-import org.keycloak.models.ClientSessionModel;
+import org.keycloak.models.AuthenticatedClientSessionModel;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.ProtocolMapperModel;
 import org.keycloak.models.UserSessionModel;
@@ -76,18 +76,17 @@ public class HardcodedAttributeMapper extends AbstractSAMLProtocolMapper impleme
     }
 
     @Override
-    public void transformAttributeStatement(AttributeStatementType attributeStatement, ProtocolMapperModel mappingModel, KeycloakSession session, UserSessionModel userSession, ClientSessionModel clientSession) {
+    public void transformAttributeStatement(AttributeStatementType attributeStatement, ProtocolMapperModel mappingModel, KeycloakSession session, UserSessionModel userSession, AuthenticatedClientSessionModel clientSession) {
         String attributeValue = mappingModel.getConfig().get(ATTRIBUTE_VALUE);
         AttributeStatementHelper.addAttribute(attributeStatement, mappingModel, attributeValue);
 
     }
 
     public static ProtocolMapperModel create(String name,
-                                             String samlAttributeName, String nameFormat, String friendlyName, String value,
-                                             boolean consentRequired, String consentText) {
+                                             String samlAttributeName, String nameFormat, String friendlyName, String value) {
         String mapperId = PROVIDER_ID;
         ProtocolMapperModel model = AttributeStatementHelper.createAttributeMapper(name, null, samlAttributeName, nameFormat, friendlyName,
-                consentRequired, consentText, mapperId);
+                mapperId);
         model.getConfig().put(ATTRIBUTE_VALUE, value);
         return model;
 

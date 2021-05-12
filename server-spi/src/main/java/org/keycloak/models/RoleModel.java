@@ -17,13 +17,30 @@
 
 package org.keycloak.models;
 
+import org.keycloak.storage.SearchableModelField;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * @author <a href="mailto:bill@burkecentral.com">Bill Burke</a>
  * @version $Revision: 1 $
  */
 public interface RoleModel {
+
+    public static class SearchableFields {
+        public static final SearchableModelField<RoleModel> ID                  = new SearchableModelField<>("id", String.class);
+        public static final SearchableModelField<RoleModel> REALM_ID            = new SearchableModelField<>("realmId", String.class);
+        /** If client role, ID of the client (not the clientId) */
+        public static final SearchableModelField<RoleModel> CLIENT_ID           = new SearchableModelField<>("clientId", String.class);
+        public static final SearchableModelField<RoleModel> NAME                = new SearchableModelField<>("name", String.class);
+        public static final SearchableModelField<RoleModel> DESCRIPTION         = new SearchableModelField<>("description", String.class);
+        public static final SearchableModelField<RoleModel> IS_CLIENT_ROLE      = new SearchableModelField<>("isClientRole", Boolean.class);
+        public static final SearchableModelField<RoleModel> IS_COMPOSITE_ROLE   = new SearchableModelField<>("isCompositeRole", Boolean.class);
+    }
+
     String getName();
 
     String getDescription();
@@ -34,17 +51,25 @@ public interface RoleModel {
 
     void setName(String name);
 
-    boolean isScopeParamRequired();
-
-    void setScopeParamRequired(boolean scopeParamRequired);
-
     boolean isComposite();
 
     void addCompositeRole(RoleModel role);
 
     void removeCompositeRole(RoleModel role);
 
-    Set<RoleModel> getComposites();
+    /**
+     * @deprecated Use {@link #getCompositesStream() getCompositesStream} instead.
+     */
+    @Deprecated
+    default Set<RoleModel> getComposites() {
+        return getCompositesStream().collect(Collectors.toSet());
+    }
+
+    /**
+     * Returns all composite roles as a stream.
+     * @return Stream of {@link RoleModel}. Never returns {@code null}.
+     */
+    Stream<RoleModel> getCompositesStream();
 
     boolean isClientRole();
 
@@ -54,4 +79,30 @@ public interface RoleModel {
 
     boolean hasRole(RoleModel role);
 
+    void setSingleAttribute(String name, String value);
+
+    void setAttribute(String name, List<String> values);
+
+    void removeAttribute(String name);
+
+    default String getFirstAttribute(String name) {
+        return getAttributeStream(name).findFirst().orElse(null);
+    }
+
+    /**
+     * @deprecated Use {@link #getAttributeStream(String) getAttributeStream} instead.
+     */
+    @Deprecated
+    default List<String> getAttribute(String name) {
+        return getAttributeStream(name).collect(Collectors.toList());
+    }
+
+    /**
+     * Returns all role's attributes that match the given name as a stream.
+     * @param name {@code String} Name of an attribute to be used as a filter.
+     * @return Stream of {@code String}. Never returns {@code null}.
+     */
+    Stream<String> getAttributeStream(String name);
+
+    Map<String, List<String>> getAttributes();
 }

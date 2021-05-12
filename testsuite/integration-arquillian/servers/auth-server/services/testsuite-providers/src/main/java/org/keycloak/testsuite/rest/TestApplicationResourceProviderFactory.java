@@ -17,18 +17,26 @@
 
 package org.keycloak.testsuite.rest;
 
+import org.jboss.resteasy.spi.ResteasyProviderFactory;
 import org.keycloak.Config.Scope;
+import org.keycloak.crypto.Algorithm;
+import org.keycloak.crypto.KeyType;
+import org.keycloak.crypto.KeyUse;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.KeycloakSessionFactory;
+import org.keycloak.representations.LogoutToken;
 import org.keycloak.representations.adapters.action.LogoutAction;
 import org.keycloak.representations.adapters.action.PushNotBeforeAction;
 import org.keycloak.representations.adapters.action.TestAvailabilityAction;
 import org.keycloak.services.resource.RealmResourceProvider;
 import org.keycloak.services.resource.RealmResourceProviderFactory;
+import org.keycloak.testsuite.rest.representation.TestAuthenticationChannelRequest;
 
 import java.security.KeyPair;
 import java.util.List;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.LinkedBlockingDeque;
 
 /**
@@ -37,14 +45,21 @@ import java.util.concurrent.LinkedBlockingDeque;
 public class TestApplicationResourceProviderFactory implements RealmResourceProviderFactory {
 
     private BlockingQueue<LogoutAction> adminLogoutActions = new LinkedBlockingDeque<>();
+    private BlockingQueue<LogoutToken> backChannelLogoutTokens = new LinkedBlockingDeque<>();
     private BlockingQueue<PushNotBeforeAction> pushNotBeforeActions = new LinkedBlockingDeque<>();
     private BlockingQueue<TestAvailabilityAction> testAvailabilityActions = new LinkedBlockingDeque<>();
 
     private final OIDCClientData oidcClientData = new OIDCClientData();
+    private ConcurrentMap<String, TestAuthenticationChannelRequest> authenticationChannelRequests = new ConcurrentHashMap<String, TestAuthenticationChannelRequest>();
 
     @Override
     public RealmResourceProvider create(KeycloakSession session) {
-        return new TestApplicationResourceProvider(session, adminLogoutActions, pushNotBeforeActions, testAvailabilityActions, oidcClientData);
+        TestApplicationResourceProvider provider = new TestApplicationResourceProvider(session, adminLogoutActions,
+                backChannelLogoutTokens, pushNotBeforeActions, testAvailabilityActions, oidcClientData, authenticationChannelRequests);
+
+        ResteasyProviderFactory.getInstance().injectProperties(provider);
+
+        return provider;
     }
 
     @Override
@@ -67,16 +82,19 @@ public class TestApplicationResourceProviderFactory implements RealmResourceProv
 
     public static class OIDCClientData {
 
-        private KeyPair signingKeyPair;
+        private KeyPair keyPair;
         private String oidcRequest;
         private List<String> sectorIdentifierRedirectUris;
+        private String keyType = KeyType.RSA;
+        private String keyAlgorithm = Algorithm.RS256;
+        private KeyUse keyUse = KeyUse.SIG;
 
         public KeyPair getSigningKeyPair() {
-            return signingKeyPair;
+            return keyPair;
         }
 
         public void setSigningKeyPair(KeyPair signingKeyPair) {
-            this.signingKeyPair = signingKeyPair;
+            this.keyPair = signingKeyPair;
         }
 
         public String getOidcRequest() {
@@ -93,6 +111,54 @@ public class TestApplicationResourceProviderFactory implements RealmResourceProv
 
         public void setSectorIdentifierRedirectUris(List<String> sectorIdentifierRedirectUris) {
             this.sectorIdentifierRedirectUris = sectorIdentifierRedirectUris;
+        }
+
+        public String getSigningKeyType() {
+            return keyType;
+        }
+
+        public void setSigningKeyType(String signingKeyType) {
+            this.keyType = signingKeyType;
+        }
+
+        public String getSigningKeyAlgorithm() {
+            return keyAlgorithm;
+        }
+
+        public void setSigningKeyAlgorithm(String signingKeyAlgorithm) {
+            this.keyAlgorithm = signingKeyAlgorithm;
+        }
+
+        public KeyPair getKeyPair() {
+            return keyPair;
+        }
+
+        public void setKeyPair(KeyPair keyPair) {
+            this.keyPair = keyPair;
+        }
+
+        public String getKeyType() {
+            return keyType;
+        }
+
+        public void setKeyType(String keyType) {
+            this.keyType = keyType;
+        }
+
+        public String getKeyAlgorithm() {
+            return keyAlgorithm;
+        }
+
+        public void setKeyAlgorithm(String keyAlgorithm) {
+            this.keyAlgorithm = keyAlgorithm;
+        }
+
+        public KeyUse getKeyUse() {
+            return keyUse;
+        }
+
+        public void setKeyUse(KeyUse keyUse) {
+            this.keyUse = keyUse;
         }
     }
 }

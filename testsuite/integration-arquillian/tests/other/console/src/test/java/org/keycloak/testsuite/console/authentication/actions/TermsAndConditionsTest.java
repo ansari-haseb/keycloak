@@ -21,9 +21,12 @@ import org.jboss.arquillian.graphene.page.Page;
 import org.junit.Assert;
 import org.junit.Test;
 import org.keycloak.admin.client.resource.RealmResource;
+import org.keycloak.common.Profile;
 import org.keycloak.representations.idm.CredentialRepresentation;
 import org.keycloak.representations.idm.RealmRepresentation;
 import org.keycloak.representations.idm.UserRepresentation;
+import org.keycloak.testsuite.arquillian.annotation.DisableFeature;
+import org.keycloak.testsuite.auth.page.login.LoginError;
 import org.keycloak.testsuite.auth.page.login.Registration;
 import org.keycloak.testsuite.auth.page.login.TermsAndConditions;
 import org.keycloak.testsuite.console.AbstractConsoleTest;
@@ -31,6 +34,8 @@ import org.keycloak.testsuite.console.page.authentication.RequiredActions;
 
 import java.util.ArrayList;
 import java.util.List;
+
+import static org.junit.Assert.assertEquals;
 
 /**
  * 
@@ -48,12 +53,19 @@ public class TermsAndConditionsTest extends AbstractConsoleTest {
     private static final String HOMER = "Homer";
     
     private static final String HOMER_PASS = "Mmm donuts.";
+
+    private static final String FLANDERS = "Flanders";
+
+    private static final String FLANDERS_PASS = "Okily Dokily";
             
     @Page
     private TermsAndConditions termsAndConditionsPage;
     
     @Page
     private Registration registrationPage;
+
+    @Page
+    protected LoginError errorPage;
     
     @Override
     public void beforeConsoleTest() {
@@ -65,6 +77,7 @@ public class TermsAndConditionsTest extends AbstractConsoleTest {
         super.setDefaultPageUriParameters();
         testRealmPage.setAuthRealm(REALM);
         testRealmAdminConsolePage.setAdminRealm(REALM);
+        termsAndConditionsPage.setAuthRealm(testRealmPage);
     }
     
     @Override
@@ -75,7 +88,7 @@ public class TermsAndConditionsTest extends AbstractConsoleTest {
         testRealms.add(testRealmRep);
     }
     
-    @Test 
+    @Test
     public void testExistingUser() {
         // create user
         String userId = createUser(REALM, HOMER, HOMER_PASS);
@@ -107,7 +120,7 @@ public class TermsAndConditionsTest extends AbstractConsoleTest {
         setRequiredActionEnabled(REALM, RequiredActions.TERMS_AND_CONDITIONS, false, false);
     }
     
-    @Test 
+    @Test
     public void testAdminCreatedUser() {
         // enable terms
         setRequiredActionEnabled(REALM, RequiredActions.TERMS_AND_CONDITIONS, true, false);
@@ -125,7 +138,7 @@ public class TermsAndConditionsTest extends AbstractConsoleTest {
         setRequiredActionEnabled(REALM, RequiredActions.TERMS_AND_CONDITIONS, false, false);
     }
     
-    @Test 
+    @Test
     public void testSelfRegisteredUser() {
         // enable self-registration
         RealmResource realmResource = adminClient.realm(REALM);
@@ -162,5 +175,36 @@ public class TermsAndConditionsTest extends AbstractConsoleTest {
         // disable terms
         setRequiredActionEnabled(REALM, RequiredActions.TERMS_AND_CONDITIONS, false, false);
     }
-    
+
+    @Test
+    @DisableFeature(value = Profile.Feature.ACCOUNT2, skipRestart = true) // TODO remove this (KEYCLOAK-16228)
+    public void testTermsAndConditionsOnAccountPage() {
+        String userId = createUser(REALM, FLANDERS, FLANDERS_PASS);
+
+        setRequiredActionEnabled(REALM, RequiredActions.TERMS_AND_CONDITIONS, true, false);
+        setRequiredActionEnabled(REALM, userId, RequiredActions.TERMS_AND_CONDITIONS, true);
+
+        // login and decline the terms -- an error page should be shown
+        testRealmAccountPage.navigateTo();
+        loginPage.form().login(FLANDERS, FLANDERS_PASS);
+        termsAndConditionsPage.assertCurrent();
+        termsAndConditionsPage.declineTerms();
+
+        // check an error page after declining the terms
+        errorPage.assertCurrent();
+        assertEquals("No access", errorPage.getErrorMessage());
+
+        // follow the link "back to application"
+        errorPage.backToApplication();
+
+        // login again and accept the terms for now
+        loginPage.form().login(FLANDERS, FLANDERS_PASS);
+        termsAndConditionsPage.assertCurrent();
+        termsAndConditionsPage.acceptTerms();
+        testRealmAccountPage.assertCurrent();
+        testRealmAccountPage.logOut();
+
+        // disable terms
+        setRequiredActionEnabled(REALM, RequiredActions.TERMS_AND_CONDITIONS, false, false);
+    }
 }

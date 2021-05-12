@@ -96,6 +96,12 @@ public class OIDCClientRepresentation {
 
     private List<String> request_uris;
 
+    // KEYCLOAK-6771 Certificate Bound Token
+    // https://tools.ietf.org/html/draft-ietf-oauth-mtls-08#section-6.5
+    private Boolean tls_client_certificate_bound_access_tokens;
+
+    private String tls_client_auth_subject_dn;
+
     // OIDC Session Management
     private List<String> post_logout_redirect_uris;
 
@@ -112,6 +118,15 @@ public class OIDCClientRepresentation {
     private String registration_client_uri;
 
     private String registration_access_token;
+
+    private String backchannel_logout_uri;
+
+    private Boolean backchannel_logout_session_required;
+    
+    private Boolean backchannel_logout_revoke_offline_tokens;
+
+    // OIDC CIBA
+    private String backchannel_token_delivery_mode;
 
     public List<String> getRedirectUris() {
         return redirect_uris;
@@ -433,4 +448,53 @@ public class OIDCClientRepresentation {
         this.registration_access_token = registrationAccessToken;
     }
 
+    // KEYCLOAK-6771 Certificate Bound Token
+    // https://tools.ietf.org/html/draft-ietf-oauth-mtls-08#section-6.5
+    public Boolean getTlsClientCertificateBoundAccessTokens() {
+        return tls_client_certificate_bound_access_tokens;
+    }
+
+    public void setTlsClientCertificateBoundAccessTokens(Boolean tls_client_certificate_bound_access_tokens) {
+        this.tls_client_certificate_bound_access_tokens = tls_client_certificate_bound_access_tokens;
+    }
+
+    public String getBackchannelLogoutUri() {
+        return backchannel_logout_uri;
+    }
+
+    public void setBackchannelLogoutUri(String backchannel_logout_uri) {
+        this.backchannel_logout_uri = backchannel_logout_uri;
+    }
+
+    public Boolean getBackchannelLogoutSessionRequired() {
+        return backchannel_logout_session_required;
+    }
+
+    public void setBackchannelLogoutSessionRequired(Boolean backchannel_logout_session_required) {
+        this.backchannel_logout_session_required = backchannel_logout_session_required;
+    }
+
+    public Boolean getBackchannelLogoutRevokeOfflineTokens() {
+        return backchannel_logout_revoke_offline_tokens;
+    }
+
+    public void setBackchannelLogoutRevokeOfflineTokens(Boolean backchannel_logout_revoke_offline_tokens) {
+        this.backchannel_logout_revoke_offline_tokens = backchannel_logout_revoke_offline_tokens;
+    }
+
+    public String getTlsClientAuthSubjectDn() {
+            return tls_client_auth_subject_dn;
+        }
+
+    public void setTlsClientAuthSubjectDn(String tls_client_auth_subject_dn) {
+        this.tls_client_auth_subject_dn = tls_client_auth_subject_dn;
+    }
+
+    public String getBackchannelTokenDeliveryMode() {
+        return backchannel_token_delivery_mode;
+    }
+
+    public void setBackchannelTokenDeliveryMode(String backchannel_token_delivery_mode) {
+        this.backchannel_token_delivery_mode = backchannel_token_delivery_mode;
+    }
 }

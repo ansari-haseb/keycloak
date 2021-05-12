@@ -9,7 +9,7 @@ import org.infinispan.configuration.global.GlobalConfigurationBuilder;
 import org.infinispan.manager.DefaultCacheManager;
 import org.infinispan.manager.EmbeddedCacheManager;
 import org.infinispan.transaction.TransactionMode;
-import org.infinispan.transaction.lookup.DummyTransactionManagerLookup;
+import org.infinispan.transaction.lookup.EmbeddedTransactionManagerLookup;
 import org.infinispan.util.concurrent.IsolationLevel;
 import org.junit.Assert;
 import org.junit.Ignore;
@@ -235,33 +235,24 @@ public class ConcurrencyVersioningTest {
 
     protected DefaultCacheManager getVersionedCacheManager() {
         GlobalConfigurationBuilder gcb = new GlobalConfigurationBuilder();
-
-
-        boolean clustered = false;
-        boolean async = false;
-        boolean allowDuplicateJMXDomains = true;
-
-        if (clustered) {
-            gcb.transport().defaultTransport();
-        }
-        gcb.globalJmxStatistics().allowDuplicateDomains(allowDuplicateJMXDomains);
-
+        gcb.jmx().domain(InfinispanConnectionProvider.JMX_DOMAIN).enable();
         final DefaultCacheManager cacheManager = new DefaultCacheManager(gcb.build());
+
         ConfigurationBuilder invalidationConfigBuilder = new ConfigurationBuilder();
         invalidationConfigBuilder
                 //.invocationBatching().enable()
                 .transaction().transactionMode(TransactionMode.TRANSACTIONAL)
-                .transaction().transactionManagerLookup(new DummyTransactionManagerLookup())
-                .locking().isolationLevel(IsolationLevel.REPEATABLE_READ).writeSkewCheck(true).versioning().enable().scheme(VersioningScheme.SIMPLE);
+                .transaction().transactionManagerLookup(new EmbeddedTransactionManagerLookup())
+                .locking().isolationLevel(IsolationLevel.REPEATABLE_READ);
+                // KEYCLOAK-13692 - Per ISPN-7613 Infinispan:
+                // * Automatically enables versioning when needed,
+                // * writeSkewCheck automatically enabled for OPTIMISTIC and REPEATABLE_READ transactions
+                //.writeSkewCheck(true).versioning()
+                //.enable().scheme(VersioningScheme.SIMPLE);
 
-
-        //invalidationConfigBuilder.locking().isolationLevel(IsolationLevel.REPEATABLE_READ).writeSkewCheck(true).versioning().enable().scheme(VersioningScheme.SIMPLE);
-
-        if (clustered) {
-            invalidationConfigBuilder.clustering().cacheMode(async ? CacheMode.INVALIDATION_ASYNC : CacheMode.INVALIDATION_SYNC);
-        }
         Configuration invalidationCacheConfiguration = invalidationConfigBuilder.build();
         cacheManager.defineConfiguration(InfinispanConnectionProvider.REALM_CACHE_NAME, invalidationCacheConfiguration);
+
         return cacheManager;
     }
 }
